@@ -1,5 +1,6 @@
 using System.Text;
 using CodeAlta.Catalog.Worktrees;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Catalog.Reviews;
 
@@ -168,89 +169,205 @@ public sealed class GitReviewTextSource : IReviewTextSource
 /// <summary>Writes the work tree of a checkout as a git tree, through an index of its own.</summary>
 public static class GitSnapshot
 {
+    private const int MaximumDiagnosticLength = 512;
+    private const string UnwritableIndexError = "unable to write new index file";
     private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Writes every file of the work tree that git does not ignore as a tree of the repository. The index of the
-    /// checkout is copied to a temporary file first, so that only the files changed since are hashed; the real
-    /// index, the files and the references are not changed. Git writes the objects of new contents in the
-    /// repository, where its garbage collection removes them later. When git cannot replace that copy (a file system
-    /// filter holds it), the tree is written again through an index git creates, which hashes every file.
+    /// Writes tracked files and unignored new files as a tree of the repository, through a copy of the index.
+    /// The real index, files and references are not changed. Git writes new content objects in the repository,
+    /// where its garbage collection removes them later. If git cannot replace the copy, it creates another
+    /// temporary index from the same tracked entries and writes the tree through that index.
     /// </summary>
     /// <param name="checkoutRoot">The root folder of the checkout.</param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <returns>The id of the tree, or null when git could not write it.</returns>
     /// <exception cref="ArgumentException"><paramref name="checkoutRoot"/> is blank.</exception>
-    public static Task<string?> WriteTreeAsync(string checkoutRoot, CancellationToken cancellationToken)
-        => WriteTreeAsync(checkoutRoot, static () => Path.Combine(Path.GetTempPath(), "alta-review-" + Guid.NewGuid().ToString("N") + ".index"), cancellationToken);
+    public static async Task<string?> WriteTreeAsync(string checkoutRoot, CancellationToken cancellationToken)
+        => (await WriteTreeWithDiagnosticAsync(checkoutRoot, cancellationToken).ConfigureAwait(false)).Tree;
 
     // indexPath: gives the path of each temporary index; a test gives one that git cannot replace.
-    internal static async Task<string?> WriteTreeAsync(string checkoutRoot, Func<string> indexPath, CancellationToken cancellationToken)
+    internal static async Task<(string? Tree, string? Diagnostic)> WriteTreeWithDiagnosticAsync(
+        string checkoutRoot, CancellationToken cancellationToken, Func<string>? indexPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(checkoutRoot);
-        var location = await GitWorktreeService.RunGitAsync(checkoutRoot, ["rev-parse", "--git-path", "index"], Timeout, (IReadOnlyDictionary<string, string>?)null, cancellationToken).ConfigureAwait(false);
-        var real = location.Succeeded && location.Output.Trim() is { Length: > 0 } relative ? Path.GetFullPath(relative, checkoutRoot) : null;
-        var (tree, unwritable) = await WriteTreeAsync(checkoutRoot, indexPath(), real, cancellationToken).ConfigureAwait(false);
-        // Git replaces the copy of the index with the one it writes. A file system filter (an antivirus scanning what
-        // this process wrote) can hold the copy so that no rename replaces it: the tree is then written through an
-        // index that git creates itself, which hashes every file.
-        if (tree is null && unwritable)
+        indexPath ??= static () => Path.Combine(Path.GetTempPath(), "alta-review-" + Guid.NewGuid().ToString("N") + ".index");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        var stage = "git rev-parse";
+        string? index = null;
+        string? fallbackIndex = null;
+        SnapshotFailure? firstFailure = null;
+
+        Task<GitRun> Git(string[] arguments)
         {
-            (tree, _) = await WriteTreeAsync(checkoutRoot, indexPath(), null, cancellationToken).ConfigureAwait(false);
+            stage = $"git {arguments[0]}";
+            return GitWorktreeService.RunGitAsync(checkoutRoot, arguments, Timeout, environment, cancellationToken);
         }
 
-        return tree;
-    }
-
-    // Writes the tree through a temporary index, the copy of `seed` when there is one. Says whether git failed because
-    // it could not replace that index.
-    private static async Task<(string? Tree, bool IndexUnwritable)> WriteTreeAsync(string checkoutRoot, string index, string? seed, CancellationToken cancellationToken)
-    {
-        try
+        async Task<(string? Tree, SnapshotFailure? Failure)> WriteTreeAsync()
         {
-            var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["GIT_INDEX_FILE"] = index };
-            Task<GitRun> Git(IReadOnlyList<string> arguments)
-                => GitWorktreeService.RunGitAsync(checkoutRoot, arguments, Timeout, environment, cancellationToken);
-
-            if (seed is not null && File.Exists(seed))
-            {
-                File.Copy(seed, index, overwrite: true);
-            }
-
             var added = await Git(["add", "-A", "--", "."]).ConfigureAwait(false);
             if (!added.Succeeded)
             {
-                return (null, IsUnwritableIndex(added));
+                return (null, GitFailure(stage, added));
             }
 
             var tree = await Git(["write-tree"]).ConfigureAwait(false);
             if (!tree.Succeeded)
             {
-                return (null, IsUnwritableIndex(tree));
+                return (null, GitFailure(stage, tree));
             }
 
-            return (tree.Output.Trim() is { Length: >= 40 } id && id.All(Uri.IsHexDigit) ? id : null, false);
+            return ObjectId(tree.Output) is { } id ? (id, null) : (null, new(stage, "git did not return a tree id"));
+        }
+
+        try
+        {
+            var location = await Git(["rev-parse", "--git-path", "index"]).ConfigureAwait(false);
+            if (!location.Succeeded)
+            {
+                return Finish(null, GitFailure(stage, location));
+            }
+            if (location.Output.Trim() is not { Length: > 0 } relative)
+            {
+                return Finish(null, new SnapshotFailure(stage, "git did not return an index path"));
+            }
+
+            stage = "copy index";
+            var real = Path.GetFullPath(relative, checkoutRoot);
+            index = indexPath();
+            if (File.Exists(real))
+            {
+                File.Copy(real, index, overwrite: true);
+            }
+
+            environment["GIT_INDEX_FILE"] = index;
+            var (tree, failure) = await WriteTreeAsync().ConfigureAwait(false);
+            if (failure is not { IndexUnwritable: true })
+            {
+                return Finish(tree, failure);
+            }
+
+            firstFailure = failure;
+            stage = "prepare fallback index";
+            fallbackIndex = indexPath();
+            var emptyTree = await Git(["mktree"]).ConfigureAwait(false);
+            if (!emptyTree.Succeeded)
+            {
+                return Finish(null, firstFailure, GitFailure(stage, emptyTree));
+            }
+            if (ObjectId(emptyTree.Output) is not { } emptyId)
+            {
+                return Finish(null, firstFailure, new SnapshotFailure(stage, "git did not return an empty tree id"));
+            }
+
+            // A two-tree merge with identical trees carries the copied index forward without checking the work tree.
+            // Git renames its lock to the fresh output, not over the file a filter is holding. Starting from HEAD
+            // instead would lose staged additions (and restore staged removals) under an ignore rule.
+            var seed = await Git(["read-tree", "-m", "-i", "--no-sparse-checkout", $"--index-output={fallbackIndex}", emptyId, emptyId]).ConfigureAwait(false);
+            if (!seed.Succeeded)
+            {
+                return Finish(null, firstFailure, GitFailure(stage, seed));
+            }
+
+            environment["GIT_INDEX_FILE"] = fallbackIndex;
+            var (retried, fallbackFailure) = await WriteTreeAsync().ConfigureAwait(false);
+            return Finish(retried, firstFailure, fallbackFailure);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return (null, false);
+            var failure = new SnapshotFailure(stage, $"{exception.GetType().Name} (0x{exception.HResult:X8})", BoundDiagnostic(exception.Message));
+            return firstFailure is null ? Finish(null, failure) : Finish(null, firstFailure, failure);
         }
         finally
         {
-            try
+            if (index is not null)
             {
-                File.Delete(index);
-                File.Delete(index + ".lock");
+                DeleteTemporaryIndex(index);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            if (fallbackIndex is not null)
             {
-                // A temporary file left behind is removed with the other temporary files.
+                DeleteTemporaryIndex(fallbackIndex);
             }
         }
+    }
+
+    private static string? ObjectId(string output)
+        => output.Trim() is { Length: 40 or 64 } id && id.All(Uri.IsHexDigit) ? id : null;
+
+    private static void DeleteTemporaryIndex(string index)
+    {
+        try
+        {
+            File.Delete(index);
+            File.Delete(index + ".lock");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A temporary file left behind is removed with the other temporary files.
+        }
+    }
+
+    private static SnapshotFailure GitFailure(string stage, GitRun run)
+    {
+        var unwritable = IsUnwritableIndex(run);
+        var reason = run.ExitCode switch
+        {
+            GitRun.NotStarted => "git could not start",
+            GitRun.TimedOut => "git timed out",
+            _ when unwritable => UnwritableIndexError,
+            _ when run.Error.Contains("Permission denied", StringComparison.OrdinalIgnoreCase) => "permission denied",
+            _ when run.Error.Contains("File exists", StringComparison.OrdinalIgnoreCase) => "file already exists",
+            _ => $"git exited with code {run.ExitCode}",
+        };
+        return new SnapshotFailure(stage, reason, BoundDiagnostic(run.Error), unwritable);
+    }
+
+    private static string? BoundDiagnostic(string text)
+    {
+        var trimmed = text.AsSpan().Trim();
+        return trimmed.Length switch
+        {
+            0 => null,
+            > MaximumDiagnosticLength => string.Concat(trimmed[..(MaximumDiagnosticLength - 1)], "…"),
+            _ => trimmed.ToString(),
+        };
+    }
+
+    private static (string? Tree, string? Diagnostic) Finish(string? tree, SnapshotFailure? failure, SnapshotFailure? fallback = null)
+    {
+        if (failure is null)
+        {
+            return (tree, null);
+        }
+
+        // Git's stderr and exception messages can name private paths or include output from a configured filter.
+        // Keep them for test assertions only; even the application log gets only the stage and a safe reason.
+        if (LogManager.IsInitialized)
+        {
+            var logger = LogManager.GetLogger("CodeAlta.Reviews");
+            if (tree is null)
+            {
+                var summary = fallback is null ? failure.Summary : $"{failure.Summary}; fallback: {fallback.Summary}";
+                logger.Warn($"Could not write a review snapshot: {summary}.");
+            }
+            else
+            {
+                logger.Debug($"Wrote a review snapshot through a fresh index after {failure.Summary}.");
+            }
+        }
+
+        return (tree, fallback is null ? failure.Diagnostic : $"{failure.Diagnostic}; fallback: {fallback.Diagnostic}");
+    }
+
+    private sealed record SnapshotFailure(string Stage, string Reason, string? Error = null, bool IndexUnwritable = false)
+    {
+        public string Summary => $"{Stage}: {Reason}";
+        public string Diagnostic => Error is null ? Summary : $"{Summary}: {Error}";
     }
 
     // What git (run with LC_ALL=C) says when it cannot put the index it wrote in place of the one it read: "Unable" up to
     // git 2.39, "unable" after.
     internal static bool IsUnwritableIndex(GitRun run)
-        => run.Error.Contains("unable to write new index file", StringComparison.OrdinalIgnoreCase);
+        => run.Error.Contains(UnwritableIndexError, StringComparison.OrdinalIgnoreCase);
 }
