@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Data;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -14,6 +15,27 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     private const string TablePrefix = "session_projection_cache";
     private const int SchemaVersion = 11;
     private const int ProjectionVersion = 1;
+
+    // Additive columns are declared here for both a new table and upgrades of an existing one.
+    // Invalidate rows when journals written before the column could already hold the value.
+    private static readonly ImmutableArray<AdditiveColumn> AdditiveListColumns =
+    [
+        new("local_permission_mode", "TEXT", InvalidatesRows: true),
+        new("local_title_mode", "TEXT"),
+        new("local_sandbox", "TEXT"),
+        new("local_options", "TEXT"),
+        new("space_id", "TEXT", InvalidatesRows: true),
+        new("local_archived_at_utc_ticks", "INTEGER"),
+        new("journal_header_json", "TEXT"),
+        new("journal_header_read", "INTEGER NOT NULL DEFAULT 0"),
+        new("local_queued_prompt_count", "INTEGER"),
+        new("local_cloud", "TEXT"),
+    ];
+
+    private readonly record struct AdditiveColumn(string Name, string Type, bool InvalidatesRows = false)
+    {
+        public string Definition => $"{Name} {Type}";
+    }
 
     // The longest preview of the last answer of a session a row keeps: the answer itself is in the history of the journal.
     internal const int MaximumSummaryPreviewLength = 500;
@@ -1521,7 +1543,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = """
+            command.CommandText = $"""
                 CREATE TABLE IF NOT EXISTS session_projection_cache (
                     session_id TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
                     journal_path TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -1551,21 +1573,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_model_id TEXT,
                     local_reasoning_effort TEXT,
                     local_agent_prompt_id TEXT,
-                    local_permission_mode TEXT,
-                    local_title_mode TEXT,
-                    local_sandbox TEXT,
-                    local_options TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
-                    local_archived_at_utc_ticks INTEGER,
-                    local_queued_prompt_count INTEGER,
-                    local_cloud TEXT,
                     message_count INTEGER,
                     local_parent_session_id TEXT,
                     created_by_json TEXT,
                     local_state_cached INTEGER NOT NULL DEFAULT 0,
-                    space_id TEXT,
-                    journal_header_json TEXT,
-                    journal_header_read INTEGER NOT NULL DEFAULT 0
+                    {string.Join(",\n    ", AdditiveListColumns.Select(static column => column.Definition))}
                 );
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -1596,188 +1609,47 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddSandboxColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddOptionsColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddSpaceColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddArchivedAtColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddJournalHeaderColumnsAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddQueuedPromptCountColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await AddCloudColumnAsync(connection, cancellationToken).ConfigureAwait(false);
-        await MoveLargeValuesAsync(connection, cancellationToken).ConfigureAwait(false);
+        var columns = await ReadListColumnNamesAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddMissingListColumnsAsync(connection, columns, cancellationToken).ConfigureAwait(false);
+        await MoveLargeValuesAsync(connection, columns, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS ux_session_projection_cache_journal_path ON session_projection_cache(journal_path COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
     }
 
-    // A cache written before the permission mode of a session was kept has no column for it, and rows that do not
-    // say it: the column is added and the rows are read again from the journals. It runs in the write transaction
-    // of the migration, which holds the write lock: no other connection adds the column at the same time.
-    private static async Task AddPermissionModeColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static async ValueTask<HashSet<string>> ReadListColumnNamesAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        await using (var command = connection.CreateCommand())
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('session_projection_cache');";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_permission_mode';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
+            columns.Add(reader.GetString(0));
         }
 
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                ALTER TABLE session_projection_cache ADD COLUMN local_permission_mode TEXT;
-                DELETE FROM session_projection_cache;
-                """;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
+        return columns;
     }
 
-    // A cache written before a session could choose how it is titled has no column for it. Its rows stay, without
-    // a choice: the sessions of such a build made none, and a row is read again when its journal changes.
-    private static async Task AddTitleModeColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    // The write transaction prevents two connections from adding the same column.
+    private static async Task AddMissingListColumnsAsync(SqliteConnection connection, HashSet<string> columns, CancellationToken cancellationToken)
     {
-        await using (var command = connection.CreateCommand())
+        var invalidateRows = false;
+        foreach (var column in AdditiveListColumns)
         {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_title_mode';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            if (!columns.Contains(column.Name))
             {
-                return;
+                await ExecuteSchemaCommandAsync(connection, $"ALTER TABLE session_projection_cache ADD COLUMN {column.Definition};", cancellationToken).ConfigureAwait(false);
+                invalidateRows |= column.InvalidatesRows;
             }
         }
 
-        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_title_mode TEXT;", cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before sessions could choose a sandbox has no column for it. Its rows stay, without a choice:
-    // the sessions of such a build made none, and a row is read again when its journal changes.
-    private static async Task AddSandboxColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
+        if (invalidateRows)
         {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_sandbox';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
+            await ExecuteSchemaCommandAsync(connection, "DELETE FROM session_projection_cache;", cancellationToken).ConfigureAwait(false);
+            await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
         }
-
-        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_sandbox TEXT;", cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before sessions had options has no column for them. Its rows stay, with the defaults: the sessions
-    // of such a build had every option on, and a row is read again when its journal changes.
-    private static async Task AddOptionsColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_options';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
-        }
-
-        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_options TEXT;", cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before sessions had a space has no column for it. Its rows are read again from the journals:
-    // a build without the column may have cached a session whose header records a space, and the row of such a
-    // session would say none until its journal changes. It runs in the write transaction of the migration.
-    private static async Task AddSpaceColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'space_id';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
-        }
-
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                ALTER TABLE session_projection_cache ADD COLUMN space_id TEXT;
-                DELETE FROM session_projection_cache;
-                """;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before the time a session was archived was kept has no column for it. Its rows stay, without
-    // a time: a session archived by such a build has none, and a row is read again when its journal changes.
-    private static async Task AddArchivedAtColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_archived_at_utc_ticks';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
-        }
-
-        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_archived_at_utc_ticks INTEGER;", cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before the list kept the header of each journal has no column for it. Its rows stay, with a header
-    // not read: the next listing reads the first line of each of their journals once, and writes what it read.
-    private static async Task AddJournalHeaderColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'journal_header_read';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
-        }
-
-        await ExecuteSchemaCommandAsync(connection, """
-            ALTER TABLE session_projection_cache ADD COLUMN journal_header_json TEXT;
-            ALTER TABLE session_projection_cache ADD COLUMN journal_header_read INTEGER NOT NULL DEFAULT 0;
-            """, cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before the count of the pending queued prompts of a session was kept has no column for it. Its rows
-    // stay, with a count that is not known: the list reads no journal for it, and the first read of the last state of a
-    // journal writes it (FillLocalStateAsync), as a row is written again when its journal changes.
-    private static async Task AddQueuedPromptCountColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_queued_prompt_count';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
-        }
-
-        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_queued_prompt_count INTEGER;", cancellationToken).ConfigureAwait(false);
-    }
-
-    // A cache written before the cloud sessions has no column for them. Its rows stay: none of their sessions ran in the
-    // cloud, which a session can only do once a binary that writes the column runs.
-    private static async Task AddCloudColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_cloud';";
-            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
-            {
-                return;
-            }
-        }
-
-        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_cloud TEXT;", cancellationToken).ConfigureAwait(false);
     }
 
     // Tables written before version 8 kept the state of the provider (state_json) and, from version 7, the last state record
@@ -1786,19 +1658,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // answer is cut to its preview and left out of summary_json; the columns are dropped. Rows without a last state (before
     // version 7) stay without it: the first read of the state of such a session reads its journal once and fills it
     // (FillLocalStateAsync). It runs in the write transaction of the migration.
-    private static async Task MoveLargeValuesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static async Task MoveLargeValuesAsync(SqliteConnection connection, HashSet<string> columns, CancellationToken cancellationToken)
     {
-        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT name FROM pragma_table_info('session_projection_cache');";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                columns.Add(reader.GetString(0));
-            }
-        }
-
         var hasState = columns.Contains("state_json");
         var hasLocalState = columns.Contains("local_state_json");
         if (!hasState && !hasLocalState)
