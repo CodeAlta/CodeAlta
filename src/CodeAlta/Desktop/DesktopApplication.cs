@@ -906,15 +906,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 modelServers.SaveLocalProvider = async (key, name, server, token) =>
                 {
                     var store = new CodeAltaConfigStore(host.CatalogOptions);
-                    var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
-                    var definition = definitions.FirstOrDefault(existing => string.Equals(existing.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
-                    if (definition is null) definitions.Add(definition = new CodeAltaProviderDocument { ProviderKey = key, ProviderType = "llama-cpp" });
-                    definition.ProviderType = "llama-cpp";
-                    definition.DisplayName = name;
-                    definition.Server = server;
-                    definition.ApiUrl = null;
-                    definition.Enabled = true;
-                    store.SaveGlobalProviderDefinitions(definitions);
+                    ModelServers.DesktopModelServers.SaveLocalProviderDefinition(store, key, name, server);
                     GlobalConfigService.ApplyProviders(store, host.ModelProviderRegistry, options.CatalogRoot!, pluginProviderTypes, modelsDev);
                     await host.ModelProviderInitializationService.RefreshProviderAfterChangeAsync(new CodeAlta.Agent.ModelProviderId(key), token).ConfigureAwait(false);
                 };
