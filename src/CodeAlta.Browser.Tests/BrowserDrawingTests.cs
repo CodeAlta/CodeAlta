@@ -257,7 +257,7 @@ public sealed class BrowserDrawingTests
         await Task.Delay(200, timeout.Token);
         await state.Page.InsertTextAsync("Move this up", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
-        for (var wait = DateTime.UtcNow.AddSeconds(20); (annotations.Pending.Count == 0 || annotations.Pending[0].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(20); (annotations.Pending.Count == 0 || annotations.Pending[0].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
 
         var drawing = annotations.Pending.Single();
         Assert.IsTrue(drawing.IsDrawing);
@@ -272,7 +272,7 @@ public sealed class BrowserDrawingTests
 
         // Once its picture is taken, the drawing leaves the page.
         var gone = false;
-        for (var wait = DateTime.UtcNow.AddSeconds(10); !gone && DateTime.UtcNow < wait; await Task.Delay(100, timeout.Token))
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); !gone && DateTime.UtcNow < wait; await Task.Delay(100, timeout.Token))
         {
             gone = PngTesting.Count((await ((IAnnotatablePage)state.Page).ViewPictureAsync(drawing.Area, timeout.Token))!, Red, 40) == 0;
         }
@@ -310,7 +310,7 @@ public sealed class BrowserDrawingTests
         await Task.Delay(200, timeout.Token);
         await state.Page.InsertTextAsync("Bolder", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
-        for (var wait = DateTime.UtcNow.AddSeconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
         await session.OkAsync("press_key", """{"key":"Escape"}""");
 
         // A rectangle around the list and an arrow that points at the third card in it.
@@ -323,7 +323,7 @@ public sealed class BrowserDrawingTests
         await Task.Delay(200, timeout.Token);
         await state.Page.InsertTextAsync("Swap these", timeout.Token);
         await session.OkAsync("press_key", """{"key":"Control+Enter"}""");
-        for (var wait = DateTime.UtcNow.AddSeconds(20); (annotations.Pending.Count < 2 || annotations.Pending[1].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(20); (annotations.Pending.Count < 2 || annotations.Pending[1].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100, timeout.Token);
 
         var drawing = annotations.Pending[1];
         Assert.IsTrue(drawing.IsDrawing);

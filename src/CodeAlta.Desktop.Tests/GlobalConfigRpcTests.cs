@@ -460,7 +460,7 @@ type = "fake-agent"
         public async Task SignInAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings, string methodId,
             Func<CodeAlta.Plugins.Abstractions.PluginProviderSignInPrompt, CancellationToken, ValueTask> onPrompt, CancellationToken cancellationToken)
         {
-            await onPrompt(new(new Uri("https://auth.example.com/device"), "ABCD-1234", DateTimeOffset.UtcNow.AddMinutes(15)), cancellationToken);
+            await onPrompt(new(new Uri("https://auth.example.com/device"), "ABCD-1234", DateTimeOffset.UtcNow.AddMinutes(15)), cancellationToken); // not a limit
             if (Failure is { } failure) throw new InvalidOperationException(failure);
         }
     }

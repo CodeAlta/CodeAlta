@@ -429,7 +429,7 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
         var link = BrowserToolTesting.Uid(await session.OkAsync("take_snapshot"), "link \"Open in a new tab\"");
         await session.OkAsync("click", $$"""{"uid":"{{link}}"}""");
-        for (var wait = DateTime.UtcNow.AddSeconds(10); session.Pages.Count < 2 && DateTime.UtcNow < wait;) await Task.Delay(100);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); session.Pages.Count < 2 && DateTime.UtcNow < wait;) await Task.Delay(100);
         var first = session.Pages[0];
         var second = session.Pages[1];
         static string TargetOf(BrowserPageState state) => ((CodeAlta.Browser.Drivers.Cdp.CdpPage)state.Page).TargetId;

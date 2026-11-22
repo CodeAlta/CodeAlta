@@ -22,7 +22,7 @@ public sealed class StatisticsCanvasPluginTests
 
     private static async Task WaitAsync(Func<bool> condition, string what)
     {
-        var end = DateTime.UtcNow.AddSeconds(15);
+        var end = DateTime.UtcNow + TestTime.Seconds(15);
         while (!condition())
         {
             Assert.IsTrue(DateTime.UtcNow < end, "Waited for " + what);

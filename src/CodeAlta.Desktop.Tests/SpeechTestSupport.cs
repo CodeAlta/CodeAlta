@@ -211,7 +211,7 @@ internal static class SpeechTestSupport
     /// <summary>Waits for something another thread does.</summary>
     public static async Task Until(Func<bool> condition, string what)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail("Timed out waiting for: " + what);

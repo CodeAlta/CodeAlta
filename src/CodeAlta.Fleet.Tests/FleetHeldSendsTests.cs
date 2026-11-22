@@ -101,7 +101,7 @@ public sealed class FleetHeldSendsTests
         // The store is back: the same reader opens it at its next reading, and a send held after it keeps it.
         protector.Available = true;
         Assert.AreEqual("send-blocked", sends.List().Single().RunId);
-        sends.Add(Held("send-other", DateTimeOffset.UtcNow.AddSeconds(1)));
+        sends.Add(Held("send-other", DateTimeOffset.UtcNow.AddSeconds(1))); // not a limit
         CollectionAssert.AreEquivalent(new[] { "send-blocked", "send-other" }, new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(global, protector))
             .List().Select(static send => send.RunId).ToArray());
         Assert.AreEqual(0, sends.Blocked);

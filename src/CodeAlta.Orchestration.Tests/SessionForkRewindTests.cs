@@ -870,7 +870,7 @@ public sealed class SessionForkRewindTests
 
     private static async Task WaitIdleAsync(CodeAltaHost host, SessionViewDescriptor session)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
         while (await host.RuntimeService.HasActiveRunAsync(session, CancellationToken.None))
         {
             Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The run did not end.");

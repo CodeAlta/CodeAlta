@@ -792,7 +792,7 @@ public sealed class StatisticsPluginTests
 
     private static async Task WaitAsync(Func<Task<bool>> condition)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(20);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(20);
         while (!await condition())
         {
             Assert.IsTrue(DateTime.UtcNow < deadline, "The condition did not come true in time.");

@@ -190,7 +190,7 @@ public sealed class SkillCatalogLinkTests
     // Puts the times of a tree a minute back, as a tree that nothing changed for a while; links are not followed.
     private static void Settle(string root)
     {
-        var time = DateTime.UtcNow.AddMinutes(-1);
+        var time = DateTime.UtcNow.AddMinutes(-1); // not a limit
         var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
         foreach (var file in Directory.EnumerateFiles(root, "*", options))
         {

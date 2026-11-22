@@ -124,7 +124,7 @@ public sealed class MistralVibeLoginTests
                     ["process_id"] = "process-1",
                     ["sign_in_url"] = SignInUrl,
                     ["poll_url"] = PollUrl,
-                    ["expires_at"] = DateTimeOffset.UtcNow.AddMinutes(10).ToString("O"),
+                    ["expires_at"] = DateTimeOffset.UtcNow.AddMinutes(10).ToString("O"), // not a limit
                 });
             }
 

@@ -51,7 +51,7 @@ public sealed class OwnCertificateTests
                 Client = new FleetClientInfo("node", "4.0.0", "linux"), MinimumBackoff = TimeSpan.FromMilliseconds(100),
             });
             connector.Start();
-            var deadline = DateTime.UtcNow.AddSeconds(20);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(20);
             while (connector.State != FleetConnectorState.Online && DateTime.UtcNow < deadline) await Task.Delay(50);
             Assert.AreEqual(FleetConnectorState.Online, connector.State, "the control connection checks the pin too");
         }

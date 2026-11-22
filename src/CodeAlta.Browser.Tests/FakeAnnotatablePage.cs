@@ -41,7 +41,7 @@ internal sealed class FakeAnnotatablePage(string url) : IBrowserPage, IAnnotatab
     /// <summary>Waits until the toolbar was called with a call that starts with a text.</summary>
     public async Task WaitForCallAsync(string start)
     {
-        for (var deadline = DateTime.UtcNow.AddSeconds(10); !Calls.Any(call => call.StartsWith(start, StringComparison.Ordinal)); await Task.Delay(20).ConfigureAwait(false))
+        for (var deadline = DateTime.UtcNow + TestTime.Seconds(10); !Calls.Any(call => call.StartsWith(start, StringComparison.Ordinal)); await Task.Delay(20).ConfigureAwait(false))
         {
             if (DateTime.UtcNow > deadline) throw new TimeoutException($"The toolbar was never called with {start}: {string.Join(", ", Calls)}");
         }

@@ -2192,7 +2192,7 @@ public sealed class ClaudeCodeSessionTests
         await events.WaitForAsync(static e => e is AgentBackgroundTasksEvent { Tasks: [{ ToolCallId: "toolu_bg" }] }, Timeout);
         var task = tasks.BackgroundTasks.Single();
         Assert.AreEqual(("b1", "command", "Run the tests", "toolu_bg", (string?)null), (task.TaskId, task.Kind, task.Description, task.ToolCallId, task.ParentTaskId));
-        Assert.IsTrue(task.StartedAt > DateTimeOffset.UtcNow.AddMinutes(-1));
+        Assert.IsTrue(task.StartedAt > DateTimeOffset.UtcNow.AddMinutes(-1)); // not a limit
         var told = events.Snapshot().OfType<AgentBackgroundTasksEvent>().ToArray();
         // The tasks go on outside the runs: their event names no run, which would show the session as running.
         Assert.IsTrue(told.All(static e => e.RunId is null && e.Ended.Count == 0 && e.Tasks.All(static item => item.TaskId == "b1")));

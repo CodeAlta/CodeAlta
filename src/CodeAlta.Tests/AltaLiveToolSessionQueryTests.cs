@@ -100,7 +100,7 @@ public sealed partial class AltaLiveToolTests
             Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(archived.SessionId).ConfigureAwait(false));
             var store = catalog.JournalStore.CreateSessionStore();
             var stored = Guid.CreateVersion7().ToString();
-            await WriteBenchmarkSessionAsync(catalog, store, providerId, root.Path, stored, DateTimeOffset.UtcNow.AddMinutes(-5), parent.SessionId,
+            await WriteBenchmarkSessionAsync(catalog, store, providerId, root.Path, stored, DateTimeOffset.UtcNow.AddMinutes(-5), parent.SessionId, // not a limit
                 runs: 6, toolCalls: 3, toolOutputBytes: 2048).ConfigureAwait(false);
             await runtime.SendAsync(running, execution, new AgentSendOptions { Input = AgentInput.Text("keep running") }).ConfigureAwait(false);
 
@@ -416,7 +416,7 @@ public sealed partial class AltaLiveToolTests
         {
             var sessionId = Guid.CreateVersion7().ToString();
             ids.Add(sessionId);
-            await WriteBenchmarkSessionAsync(catalog, store, providerId, root.Path, sessionId, DateTimeOffset.UtcNow.AddMinutes(index), null,
+            await WriteBenchmarkSessionAsync(catalog, store, providerId, root.Path, sessionId, DateTimeOffset.UtcNow.AddMinutes(index), null, // not a limit
                 runs: 1, toolCalls: 1, toolOutputBytes: 64).ConfigureAwait(false);
         }
 

@@ -21,7 +21,7 @@ public sealed class SearchSourcesTests
         Assert.IsNull(await source.ReadAsync((await fixture.Store.GetSourceAsync("plans:p1"))!.Stamp, default));
 
         // Touched without a change (a checkout, a copy): read again, and nothing is written.
-        File.SetLastWriteTimeUtc(Path.Combine(folder, "a.md"), DateTime.UtcNow.AddMinutes(1));
+        File.SetLastWriteTimeUtc(Path.Combine(folder, "a.md"), DateTime.UtcNow.AddMinutes(1)); // not a limit
         Assert.AreEqual(0, await ApplyAsync(fixture.Store, source));
 
         // One file changed: only it is written.

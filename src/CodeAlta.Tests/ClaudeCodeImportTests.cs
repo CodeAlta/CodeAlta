@@ -178,7 +178,7 @@ public sealed class ClaudeCodeImportTests
         // A turn added in VS Code: the preview reads it.
         var appended = new Transcript(transcript, Conversation, projectRoot);
         appended.Append(appended.User("u3", "a3", "And the docs."), appended.Assistant("a4", "u3", "m4", ClaudeCodeExternalTurnsTests.Text("Docs updated.")));
-        File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddSeconds(5));
+        File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddSeconds(5)); // not a limit
         var grown = (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WithinAsync(Timeout)).Preview!;
         Assert.AreNotSame(preview, grown);
         Assert.IsTrue(grown.Length > preview.Length);

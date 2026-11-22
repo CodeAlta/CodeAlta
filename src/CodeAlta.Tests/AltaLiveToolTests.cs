@@ -5509,7 +5509,7 @@ public sealed partial class AltaLiveToolTests
         public async Task WaitIdleAsync(string sessionId)
         {
             var session = await ListedAsync(sessionId).ConfigureAwait(false);
-            var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
             while (await Host.RuntimeService.HasActiveRunAsync(session, CancellationToken.None).ConfigureAwait(false))
             {
                 Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The run did not end.");
@@ -7426,7 +7426,7 @@ public sealed partial class AltaLiveToolTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(2);
         while (!condition())
         {
             if (DateTimeOffset.UtcNow >= deadline)
@@ -7442,7 +7442,7 @@ public sealed partial class AltaLiveToolTests
     // the prompt is not there at once, and a journal being written can be read again.
     private static async Task<SessionViewLocalState> WaitForJournalStateAsync(SessionViewCatalog catalog, string sessionId, Func<SessionViewLocalState, bool> expected)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
         while (true)
         {
             SessionViewLocalState? state = null;
@@ -7462,7 +7462,7 @@ public sealed partial class AltaLiveToolTests
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(2);
         while (!await condition().ConfigureAwait(false))
         {
             if (DateTimeOffset.UtcNow >= deadline)

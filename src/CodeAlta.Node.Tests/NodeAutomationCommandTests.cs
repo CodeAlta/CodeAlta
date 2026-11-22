@@ -120,8 +120,8 @@ public sealed class NodeAutomationCommandTests
         // A run in progress is listed as the node wrote it, never taken for interrupted by the reading.
         var state = Path.Combine(root.Profile().StateRoot, "automations.json");
         var store = new AutomationStateStore(state, pausedByDefault: false);
-        store.Add(new AutomationRun("run-1", Id, DateTimeOffset.UtcNow.AddMinutes(-5), "daily")
-            { Name = "Nightly report", Status = AutomationRun.Completed, EndedAt = DateTimeOffset.UtcNow.AddMinutes(-4), SessionId = "s-1", InputTokens = 120, OutputTokens = 30 });
+        store.Add(new AutomationRun("run-1", Id, DateTimeOffset.UtcNow.AddMinutes(-5), "daily") // not a limit
+            { Name = "Nightly report", Status = AutomationRun.Completed, EndedAt = DateTimeOffset.UtcNow.AddMinutes(-4), SessionId = "s-1", InputTokens = 120, OutputTokens = 30 }); // not a limit
         store.Add(new AutomationRun("run-2", Id, DateTimeOffset.UtcNow, "manual") { Name = "Nightly report", SessionId = "s-2" });
         store.Add(new AutomationRun("run-own", "of-the-profile", DateTimeOffset.UtcNow, "manual") { Name = "Mine" });
         (code, output, _) = await RunAsync(root, "automations", "runs");

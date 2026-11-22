@@ -121,7 +121,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         var hiddenEvent = new AgentContentCompletedEvent(
             ModelProviderIds.Codex,
             "session-1",
-            DateTimeOffset.UtcNow.AddMinutes(-10),
+            DateTimeOffset.UtcNow.AddMinutes(-10), // not a limit
             null,
             AgentContentKind.Assistant,
             "hidden-assistant",
@@ -156,7 +156,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         var hiddenEvent = new AgentContentCompletedEvent(
             ModelProviderIds.Codex,
             "session-1",
-            DateTimeOffset.UtcNow.AddMinutes(-10),
+            DateTimeOffset.UtcNow.AddMinutes(-10), // not a limit
             null,
             AgentContentKind.Assistant,
             "hidden-assistant",
@@ -165,7 +165,7 @@ public sealed class SessionRuntimeEventCoordinatorTests
         var displayedEvent = new AgentContentCompletedEvent(
             ModelProviderIds.Codex,
             "session-1",
-            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.UtcNow.AddMinutes(-1), // not a limit
             null,
             AgentContentKind.Assistant,
             "displayed-assistant",

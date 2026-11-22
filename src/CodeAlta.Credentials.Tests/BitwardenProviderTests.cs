@@ -64,7 +64,7 @@ public sealed class BitwardenProviderTests
         var totp = await provider.ReadAsync($"{ItemId}/totp", false, CancellationToken.None);
         Assert.AreEqual("123456", totp.Value);
         Assert.IsNotNull(totp.ExpiresAt);
-        Assert.IsTrue(totp.ExpiresAt > DateTimeOffset.UtcNow && totp.ExpiresAt <= DateTimeOffset.UtcNow.AddSeconds(31));
+        Assert.IsTrue(totp.ExpiresAt > DateTimeOffset.UtcNow && totp.ExpiresAt <= DateTimeOffset.UtcNow.AddSeconds(31)); // not a limit
         Assert.IsNull((await provider.ReadAsync($"{ItemId}/password", false, CancellationToken.None)).ExpiresAt);
 
         Assert.AreEqual(CredentialFailure.NotFound, (await ProviderHarness.ReadFailsAsync(provider, "00000000-0000-0000-0000-000000000000/password")).Failure);

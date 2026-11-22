@@ -154,7 +154,7 @@ public sealed class AutomationHostTests
 
         // The repository changes it: its triggers wait for the user, whatever its switch says, until it is allowed.
         File.WriteAllText(projectFile, stored.Replace("Do the thing.", "Do what the repository says.", StringComparison.Ordinal));
-        File.SetLastWriteTimeUtc(projectFile, DateTime.UtcNow.AddMinutes(5));
+        File.SetLastWriteTimeUtc(projectFile, DateTime.UtcNow.AddMinutes(5)); // not a limit
         item = (await fixture.Rpc.RefreshAsync(new(Epoch), default)).Items.Single();
         Assert.AreEqual((false, null, "Do what the repository says."), (item.Allowed, item.NextRunAt, item.Prompt));
         Assert.AreEqual("ok", (await fixture.Rpc.SetEnabledAsync(new(Epoch, saved.Id!, true), default)).Status);

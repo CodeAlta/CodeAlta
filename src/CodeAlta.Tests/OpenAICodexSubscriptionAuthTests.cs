@@ -402,7 +402,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         using var temp = TempDirectory.Create();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         var credential = CreateCredential();
-        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1); // not a limit
         credential.IdToken = "retained-id-token";
         await store.SaveAsync("codex", credential);
         using var handler = new QueueHttpMessageHandler(JsonResponse("""{"keys":[]}"""), JsonResponse("""{"access_token":"new-token","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}"""));
@@ -434,7 +434,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         using var signer = new IdTokenSigner();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         var credential = CreateCredential();
-        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1); // not a limit
         await store.SaveAsync("codex", credential);
         using var handler = new QueueHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
         using var http = new HttpClient(handler);
@@ -477,7 +477,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         using var signer = new IdTokenSigner();
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         var credential = CreateCredential();
-        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1); // not a limit
         await store.SaveAsync("codex", credential);
         using var handler = new QueueHttpMessageHandler(JsonResponse(signer.Jwks), TokenResponse(signer.Sign("refresh-nonce", claim, value)));
         using var http = new HttpClient(handler);
@@ -503,7 +503,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         var credential = CreateCredential();
         credential.IdToken = "previous-id-token";
-        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1); // not a limit
         await store.SaveAsync("codex", credential);
         // The keys rotated between the fetch of the key set and the refresh, or the clock of this computer is off.
         var jwks = reason == "rotated-key" ? signer.Jwks.Replace("\"test-key\"", "\"older-key\"", StringComparison.Ordinal) : signer.Jwks;
