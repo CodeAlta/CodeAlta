@@ -83,12 +83,10 @@ public sealed class DesktopStartupTests
     }
 
     [TestMethod]
-    public void MalformedAndUnsafeExplicitRoots_AreRejectedBeforeNativeStartup()
+    public void MalformedArguments_AreRejectedBeforeNativeStartup()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-test-" + Guid.NewGuid().ToString("N"));
-        string[][] cases = [["--unknown"], ["--smoke"], ["--data-root", "relative"],
-            ["--data-root", Path.GetTempPath()], ["--data-root", Path.Combine(root, ".alta", "child")],
-            ["--data-root", Path.Combine(root, ".ALTA", "child")], ["--help", "--data-root", root]];
+        string[][] cases = [["--unknown"], ["--smoke"], ["--data-root", "relative"], ["--help", "--data-root", root]];
         foreach (var args in cases)
         {
             using var error = new StringWriter();
@@ -97,6 +95,25 @@ public sealed class DesktopStartupTests
             Assert.IsFalse(string.IsNullOrWhiteSpace(error.ToString()));
         }
         Assert.IsFalse(Directory.Exists(root));
+    }
+
+    [TestMethod]
+    [DataRow("existing", true)]
+    [DataRow(".alta/child", false)]
+    [DataRow(".ALTA/child", false)]
+    public void UnsafeExplicitDataRoots_AreRejectedBeforeNativeStartup(string relativePath, bool existing)
+    {
+        var fixture = Directory.CreateTempSubdirectory("codealta-desktop-test-");
+        try
+        {
+            var data = Path.Combine(fixture.FullName, relativePath);
+            if (existing) Directory.CreateDirectory(data);
+            using var error = new StringWriter();
+            var exit = DesktopCommandLine.Run(OwnedArguments(fixture.FullName, data), TextWriter.Null, error,
+                _ => throw new AssertFailedException("Native startup was entered."));
+            Assert.AreEqual(2, exit, error.ToString());
+        }
+        finally { fixture.Delete(recursive: true); }
     }
 
     [TestMethod]
