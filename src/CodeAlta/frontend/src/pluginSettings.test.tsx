@@ -25,7 +25,7 @@ const card = (html: string, name: string) => cards(html).find(value => value.inc
 
 test("the plugins that ship with CodeAlta come first and are on until configuration says otherwise", () => {
   const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes." }), entry("bare", { name: "" }),
-    entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
+    entry("git", { kind: "Config", enabled: false, enabledGlobal: false, folder: null, path: null, loadable: false })], english);
   assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
     [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["landing", "Landing page", true, true], ["ui", "UI tools", true, true],
       ["acp", "ACP agents", true, true], ["mobile", "Mobile", false, true], ["pseudonymizer", "Pseudonymizer", false, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
@@ -42,6 +42,20 @@ test("an inherited plugin is visible as a read-only project plugin", () => {
   assert.match(html, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable notes")/);
   assert.doesNotMatch(html, /Reload notes|Edit notes|Remove notes/);
   assert.ok(pluginFacts(pluginRows([inherited], english).find(row => row.id === inherited.id)!).project);
+});
+
+test("a built-in card uses the global setting, never the repository's setting", () => {
+  const repository = { kind: "Config", scope: "Inherited", enabled: false, disabledByRepository: true, folder: null, path: null };
+  const listed = [entry("jira", repository), entry("git", { ...repository, id: "GIT", enabledGlobal: false })];
+  const html = render(listed);
+  const jira = card(html, "Jira");
+  assert.match(jira, />Built-in</);
+  assert.doesNotMatch(jira, /Inherited|Disabled by repository/);
+  const jiraSwitch = jira.match(/<input[^>]*aria-label="Enable Jira"[^>]*>/)?.[0] ?? assert.fail("no Jira switch");
+  assert.match(jiraSwitch, /checked=""/);
+  assert.doesNotMatch(jiraSwitch, /disabled=""/);
+  assert.equal(pluginRows(listed, english).find(row => row.id === "git")?.enabled, false, "Global configuration is matched without regard to case.");
+  assert.equal(pluginRows(listed, english).filter(row => row.id.toLowerCase() === "git").length, 1, "There is no duplicate config card.");
 });
 
 test("the repository's off locks the switch even for a local plugin", () => {

@@ -172,6 +172,14 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${enabledCalls} === 3`, "turned off at once");
     assert.equal(await evaluate(question), null);
 
+    await t.test("a built-in plugin's switch writes Global even with Project selected", async () => {
+      const projectScope = "[...document.querySelectorAll('.settings-scope button')].find(value => value.textContent === 'Project: a-project')";
+      await act(`${projectScope}.click()`);
+      await act(`${card("Jira")}.querySelector('.bp6-switch input').click()`);
+      await until(`${calls("setEnabled")}.length === 4`);
+      assert.deepEqual(await evaluate(`${calls("setEnabled")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", scope: "Global", id: "jira", enabled: false });
+    });
+
     // The Skills page, when the configuration file of the user does not parse: the skills are listed all the same,
     // and the file is named in red above the list, where it is opened in the code editor.
     await command("Page.navigate", { url: pathToFileURL(page).href + "?skills" });

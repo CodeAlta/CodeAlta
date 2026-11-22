@@ -77,13 +77,13 @@ export const pluginRowKey = (row: PluginRow) => `${row.entry?.scope ?? ""}:${row
 export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey) => string): PluginRow[] {
   const source = (entry: PluginsEntry) => entry.kind === "Source";
   return [
-    ...builtIn.map(plugin => { const entry = listed.find(value => value.id === plugin.id && !source(value)) ?? null;
-      // Configuration has one switch per id: the package of that id says what it holds for the built-in one. One that is off
-      // until it is turned on follows the global switch alone, which is the one its host reads.
-      const global = listed.find(value => value.id === plugin.id)?.enabledGlobal;
-      const configured = plugin.off ? global ?? false : entry?.enabled ?? global ?? true;
-      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true, icon: plugin.icon, color: plugin.color, cover: builtInCover(plugin.id) }; }),
-    ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id))
+    ...builtIn.map(plugin => {
+      // The runtime reads only the global override for a built-in, even if this id also names a source plugin.
+      const configured = listed.find(value => value.id.toLowerCase() === plugin.id && value.enabledGlobal !== null);
+      const entry = configured?.scope === "Global" && !source(configured) ? configured : null;
+      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured?.enabledGlobal ?? !plugin.off,
+        entry, builtIn: true, icon: plugin.icon, color: plugin.color, cover: builtInCover(plugin.id) }; }),
+    ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id.toLowerCase()))
       .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false, color: pluginAccent(entry.id, entry.color) })),
   ];
 }
@@ -343,10 +343,13 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
     if (sessions > 0) setStopping({ key: pluginRowKey(row), name: row.name, sessions, reload, go });
     else go();
   }
-  const setEnabled = (id: string, enabled: boolean) => void change(
-    () => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, id, enabled }, { timeoutMilliseconds: 120000 }),
+  const setEnabled = (id: string, enabled: boolean, scope: SettingsScope) => void change(
+    () => api.setEnabled({ expectedEpoch: epoch, projectId, scope, id, enabled }, { timeoutMilliseconds: 120000 }),
     result => result.applied ? "Saved." : "Saved. Plugin changes apply the next time CodeAlta starts.");
-  const toggle = (id: string, enabled: boolean, row?: PluginRow) => enabled || !row ? setEnabled(id, enabled) : void guard(row, false, () => setEnabled(id, enabled));
+  const toggle = (id: string, enabled: boolean, row: PluginRow) => {
+    const apply = () => setEnabled(id, enabled, row.builtIn ? "Global" : writeScope);
+    if (enabled) apply(); else void guard(row, false, apply);
+  };
   const reloadEntry = (entry: PluginsEntry) => void change(
     () => api.reload({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { timeoutMilliseconds: 180000 }),
     () => "Plugin reloaded.");
