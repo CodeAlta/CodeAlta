@@ -385,7 +385,12 @@ public sealed class AutomationServiceTests
         CollectionAssert.AreEqual(before, File.ReadAllBytes(path));
         var ended = store.Update("active", run => run with { Status = AutomationRun.Completed });
         Assert.AreEqual(AutomationRun.Completed, ended?.Status);
-        Assert.IsNull(new AutomationStateStore(path, pausedByDefault: true).Run("active")?.Calls);
+        var reopened = new AutomationStateStore(path, pausedByDefault: true);
+        Assert.IsFalse(reopened.Paused);
+        var savedRun = reopened.Run("active");
+        Assert.IsNotNull(savedRun);
+        Assert.AreEqual(AutomationRun.Completed, savedRun.Status);
+        Assert.IsNull(savedRun.Calls);
     }
 
     [TestMethod]
