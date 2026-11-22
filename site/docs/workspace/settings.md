@@ -163,7 +163,7 @@ Code Mode, on by default, lets agents write scripts that call their tools; each 
 
 A request appears on top of the prompt of its session, with the command and its folder, or the folder a change writes under.
 
-- `Enter` allows once; `2` or `Esc` denies. Or write what the agent should do instead and press `Enter`: the request is denied and your text is sent. A denial does not stop the agent: use Stop.
+- `Enter` allows once; `2` or `Esc` denies. Or write what the agent should do instead and press `Enter`, or **Deny**: the agent reads your text with the denial. A denial does not stop the agent: use Stop.
 - A command longer than 4,096 characters is shown cut, with a red warning: deny it unless you know what it does.
 - A session that waits is marked in the Explorer and on its tab, and a message with **Show** goes to it. A sub-session's request also shows on the sessions above it, where **Allow once** and **Deny** answer it.
 

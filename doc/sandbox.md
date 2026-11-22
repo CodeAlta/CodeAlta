@@ -57,7 +57,10 @@ Bubblewrap on Linux. Invariants:
   sandboxed session, never commands without a sandbox.
 - **The parents of a grant.** Tools resolve a path one folder at a time from the volume root. A read-only grant
   cascades to everything below it, so each parent folder of a read-write grant is granted read-only with its other
-  entries denied. The volume root is granted only to be listed (`enumeratePaths`) where Windows reports that capability:
+  entries denied. Those entries are the ones that exist when the container starts: on Windows, a container that runs
+  reads what is created later in one of those folders, until it starts again. This is accepted: what was there at its
+  start stays denied, and the worker of a session stops after ten minutes without a call. The volume root is granted
+  only to be listed (`enumeratePaths`) where Windows reports that capability:
   read-only it opens the whole disk, and read-write it lets the sandbox create folders there and write in them, which a
   default Windows lets every user do at the root of a disk. A link to a folder the sandbox needs is not denied, since
   mxc denies what a denied link names and a Windows profile has such links (`Local Settings` names `AppData\Local`):

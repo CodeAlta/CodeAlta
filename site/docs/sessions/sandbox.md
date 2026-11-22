@@ -21,6 +21,8 @@ In a sandboxed session:
 
 It does not protect against what you allow: a command you let run outside the sandbox runs with your rights. The model provider still receives what the session sends it.
 
+On Windows, a sandbox that is running can read a file or a folder created after it started beside the folders it reads, such as a new file in the folder above your project or a note another session writes in its scratchpad. What was there when it started stays out of reach.
+
 ## Turn it on
 
 In CodeAlta Desktop, **Settings > Sandbox** has:
