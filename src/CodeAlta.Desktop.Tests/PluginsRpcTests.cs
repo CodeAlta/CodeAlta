@@ -66,6 +66,58 @@ public sealed class PluginsRpcTests
     }
 
     [TestMethod]
+    public async Task ASubProjectListsInheritedPluginsReadOnly_AndKeepsRepositoryDisablementOutOfLocalConfig()
+    {
+        using var fixture = await Fixture.CreateAsync(null);
+        var childPath = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, "app")).FullName;
+        File.WriteAllText(ProjectManifest.PathOf(fixture.ProjectPath), "[projects.app]\npath = \"app\"\n");
+        var child = (await fixture.Projects.LoadAsync()).Single(project => project.DeclaredKey == "app");
+        var repoSource = Path.Combine(fixture.ProjectPath, ".alta", "plugins", "local-plugin");
+        var picture = new byte[] { 0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4 };
+        File.WriteAllBytes(Path.Combine(repoSource, "plugin.webp"), picture);
+        const string repositoryConfig = "[plugins.local-plugin]\nenabled = false\n";
+        File.WriteAllText(fixture.ProjectConfig, repositoryConfig);
+        var childConfig = Path.Combine(childPath, ".alta", "config.toml");
+
+        var listing = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", listing.Status);
+        var inherited = listing.Plugins.SingleOrDefault(plugin => plugin.Id == "local-plugin");
+        Assert.IsNotNull(inherited, "Settings must show the repository's package.");
+        Assert.IsTrue(inherited is { Scope: "Inherited", Kind: "Source", Enabled: false, EnabledProject: null, Folder: null, DisabledByRepository: true });
+        Assert.AreEqual(repoSource, inherited.Path);
+        var packageRequest = new PluginsPackageRequest(Epoch, child.Id, inherited.Scope, inherited.Id);
+        var image = await fixture.Service.ImageAsync(packageRequest, default);
+        Assert.AreEqual("ok", image.Status);
+        Assert.AreEqual(Convert.ToBase64String(picture), image.Data);
+        Assert.AreEqual("read_only", (await fixture.Service.DeleteAsync(packageRequest, default)).Status);
+        Assert.AreEqual("read_only", (await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, inherited.Scope, inherited.Id, true), default)).Status);
+        Assert.AreEqual("read_only", (await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", inherited.Id, true), default)).Status);
+        Assert.IsFalse(File.Exists(childConfig), "Inheritance is not saved as an override.");
+        Assert.AreEqual(repositoryConfig, File.ReadAllText(fixture.ProjectConfig));
+        Assert.IsTrue(File.Exists(Path.Combine(repoSource, "plugin.cs")));
+
+        // A package of the child shadows the repository's package, but the repository's off still applies.
+        Assert.AreEqual("ok", (await fixture.Service.CreateAsync(new(Epoch, child.Id, "Project", "local-plugin", null), default)).Status);
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        config.SaveProjectPluginEnabled(childPath, "local-plugin", true);
+        var childSource = Path.Combine(childPath, ".alta", "plugins", "local-plugin");
+        var local = (await fixture.Service.ListAsync(new(Epoch, child.Id), default)).Plugins.Single(plugin => plugin.Id == "local-plugin");
+        Assert.IsTrue(local is { Scope: "Project", EnabledProject: true, Enabled: false, DisabledByRepository: true });
+        Assert.AreEqual(childSource, local.Path);
+        var childBefore = File.ReadAllText(childConfig);
+        Assert.AreEqual("read_only", (await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "local-plugin", false), default)).Status);
+        Assert.AreEqual(childBefore, File.ReadAllText(childConfig));
+        Assert.AreEqual(repositoryConfig, File.ReadAllText(fixture.ProjectConfig));
+
+        File.WriteAllText(fixture.ProjectConfig, "[plugins.local-plugin\nenabled = false\n");
+        var withProblem = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", withProblem.Status);
+        Assert.IsTrue(withProblem.Plugins.Single(plugin => plugin.Id == "local-plugin").Enabled, "The valid child override is still read.");
+        var problem = withProblem.Problems!.Single();
+        Assert.AreEqual(("config", "Inherited", fixture.ProjectConfig), (problem.Kind, problem.Scope, problem.Path));
+    }
+
+    [TestMethod]
     public async Task List_SaysHowTheCardOfASourcePackageLooks_FromItsSourceAndItsPicture()
     {
         using var fixture = await Fixture.CreateAsync(GlobalConfiguration);

@@ -101,6 +101,8 @@ A session of a sub-project works in its folder, and gets the setup of the reposi
 | Issue views | Its own, else those of the repository |
 | Spaces, sandbox, added folders of skills | Those of the repository, unless you chose others for the sub-project |
 
+In a sub-project's Settings, inherited skills, prompts and plugins are marked **Inherited** and are read-only. Select the project that owns an entry to change it. A skill or plugin disabled by the repository stays off for the sub-project.
+
 A sub-project is in the [spaces](spaces.md) of its repository. Its sessions write the whole repository unless the map says **write = "folder"**, and never the `.alta`, `.claude` and `.git` folders of any project in it. A session in a worktree writes the repository in that worktree; a sub-project that is a git submodule has worktrees of its own repository. A [worktree](worktrees.md) of a sub-project is a checkout of its repository, and the session works in the same folder of it; a sub-project that is a git submodule gets worktrees of the submodule.
 
 ## Agents and the map

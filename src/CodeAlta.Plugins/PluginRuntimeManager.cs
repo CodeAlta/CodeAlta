@@ -461,27 +461,36 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         };
 
     internal static IReadOnlyList<PluginRoot> BuildRoots(PluginRuntimeManagerOptions options)
+        => GetDiscoveryRoots(options.GlobalRoot, options.ProjectContext);
+
+    /// <summary>Gets the global, local and inherited plugin roots in discovery order, whether or not they exist.</summary>
+    /// <param name="globalRoot">The global CodeAlta directory.</param>
+    /// <param name="projectContext">The selected project and its inherited folders, or null for no project.</param>
+    /// <returns>The roots, with each folder represented at most once.</returns>
+    /// <exception cref="ArgumentException">The global root is blank.</exception>
+    public static IReadOnlyList<PluginRoot> GetDiscoveryRoots(string globalRoot, PluginProjectContext? projectContext)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
         var roots = new List<PluginRoot>
         {
-            new() { RootPath = Path.Combine(options.GlobalRoot, "plugins"), Scope = PluginScope.Global },
+            new() { RootPath = Path.Combine(globalRoot, "plugins"), Scope = PluginScope.Global },
         };
         // A host started in the folder that holds the global root (the home folder) has one plugin folder: its
         // packages are the global ones, and are not found a second time as those of the project.
-        if (options.ProjectContext is not null && !SameDirectory(Path.Combine(options.ProjectContext.ProjectPath, ".alta", "plugins"), roots[0].RootPath))
+        if (projectContext is not null && !SameDirectory(Path.Combine(projectContext.ProjectPath, ".alta", "plugins"), roots[0].RootPath))
         {
             roots.Add(new PluginRoot
             {
-                RootPath = Path.Combine(options.ProjectContext.ProjectPath, ".alta", "plugins"),
+                RootPath = Path.Combine(projectContext.ProjectPath, ".alta", "plugins"),
                 Scope = PluginScope.Project,
-                ProjectId = options.ProjectContext.ProjectId,
-                ProjectPath = options.ProjectContext.ProjectPath,
+                ProjectId = projectContext.ProjectId,
+                ProjectPath = projectContext.ProjectPath,
             });
         }
 
         // A sub-project started in its own folder: the plugins of the folders it inherits from (its repository) apply
         // to it, each scoped to its folder, the nearest first.
-        foreach (var inherited in options.ProjectContext?.InheritedRoots ?? [])
+        foreach (var inherited in projectContext?.InheritedRoots ?? [])
         {
             if (string.IsNullOrWhiteSpace(inherited)) continue;
             var root = Path.Combine(inherited, ".alta", "plugins");
@@ -492,9 +501,14 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         return roots;
     }
 
-    // Drops a package of a folder the project inherits from when a package of the same id comes before it.
-    internal static SourcePluginPackage[] WithoutInheritedShadows(IEnumerable<SourcePluginPackage> packages)
+    /// <summary>
+    /// Keeps packages in discovery order, dropping an inherited package if a nearer project package uses its id.
+    /// A global package does not hide a project package.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">The packages are null.</exception>
+    public static SourcePluginPackage[] WithoutInheritedShadows(IEnumerable<SourcePluginPackage> packages)
     {
+        ArgumentNullException.ThrowIfNull(packages);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var kept = new List<SourcePluginPackage>();
         foreach (var package in packages)

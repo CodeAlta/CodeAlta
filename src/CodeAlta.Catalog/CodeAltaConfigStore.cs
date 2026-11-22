@@ -571,20 +571,71 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
     /// <exception cref="IOException">A configuration file cannot be read.</exception>
     public CodeAltaConfigDocument LoadProject(string? projectRoot, IReadOnlyList<string> inheritedRoots)
+        => LoadProjectCore(projectRoot, inheritedRoots, onReadError: null).Effective;
+
+    /// <summary>
+    /// Loads the project configuration for inspection, keeping its own and inherited values separate as well as
+    /// computing the effective configuration with the usual inheritance rules. An unreadable file is reported by
+    /// path and contributes no values; the result must not be used as runtime policy.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory, or null for no project.</param>
+    /// <param name="inheritedRoots">The inherited folders, nearest first.</param>
+    /// <param name="onReadError">Receives the path and cause of each unreadable or malformed file.</param>
+    /// <returns>The effective configuration and the separate local and inherited configurations, when present.</returns>
+    /// <exception cref="ArgumentNullException">The inherited folders or diagnostic callback are null.</exception>
+    /// <exception cref="InvalidDataException">The combined configuration cannot be parsed.</exception>
+    public (CodeAltaConfigDocument Effective, CodeAltaConfigDocument? Local, CodeAltaConfigDocument? Inherited) LoadProject(
+        string? projectRoot, IReadOnlyList<string> inheritedRoots, Action<string, Exception> onReadError)
+    {
+        ArgumentNullException.ThrowIfNull(onReadError);
+        return LoadProjectCore(projectRoot, inheritedRoots, onReadError);
+    }
+
+    private (CodeAltaConfigDocument Effective, CodeAltaConfigDocument? Local, CodeAltaConfigDocument? Inherited) LoadProjectCore(
+        string? projectRoot, IReadOnlyList<string> inheritedRoots, Action<string, Exception>? onReadError)
     {
         ArgumentNullException.ThrowIfNull(inheritedRoots);
-        if (string.IsNullOrWhiteSpace(projectRoot)) return new CodeAltaConfigDocument();
+        if (string.IsNullOrWhiteSpace(projectRoot)) return (new CodeAltaConfigDocument(), null, null);
         var inherited = inheritedRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(GetProjectConfigPath).Where(File.Exists).ToList();
-        if (inherited.Count == 0) return LoadProject(projectRoot);
         var own = GetProjectConfigPath(projectRoot);
-        var merged = new TomlTable();
-        foreach (var path in Enumerable.Reverse(inherited).Append(own).Where(File.Exists))
+        if (inherited.Count == 0)
         {
-            var text = _inheritedTexts.Read(path, static (_, content) => content);
-            if (!string.IsNullOrWhiteSpace(text)) MergeInherited(merged, new ConfigLayer($"'{path}'", path, text, IsFile: true).Parse());
+            try
+            {
+                var local = LoadProject(projectRoot);
+                return (local, local, null);
+            }
+            catch (Exception exception) when (onReadError is not null && exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                onReadError(own, exception);
+                return (new CodeAltaConfigDocument(), null, null);
+            }
         }
 
-        return merged.Count == 0 ? new CodeAltaConfigDocument() : ParseLoadedContent(own, TomlSerializer.Serialize(merged));
+        var merged = new TomlTable();
+        foreach (var path in Enumerable.Reverse(inherited).Where(File.Exists)) _ = ReadAndMerge(path);
+        var inheritedDocument = onReadError is not null && merged.Count > 0 ? ParseLoadedContent(own, TomlSerializer.Serialize(merged)) : null;
+        var localDocument = File.Exists(own) ? ReadAndMerge(own) : null;
+        var effective = merged.Count == 0 ? new CodeAltaConfigDocument() : ParseLoadedContent(own, TomlSerializer.Serialize(merged));
+        return (effective, localDocument, inheritedDocument);
+
+        CodeAltaConfigDocument? ReadAndMerge(string path)
+        {
+            try
+            {
+                var text = _inheritedTexts.Read(path, static (_, content) => content);
+                if (string.IsNullOrWhiteSpace(text)) return null;
+                // Inspection skips a file with invalid typed values, not just one with broken TOML syntax.
+                var document = onReadError is not null ? ParseLoadedContent(path, text) : null;
+                MergeInherited(merged, new ConfigLayer($"'{path}'", path, text, IsFile: true).Parse());
+                return document;
+            }
+            catch (Exception exception) when (onReadError is not null && exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                onReadError(path, exception);
+                return null;
+            }
+        }
     }
 
     // Merges the configuration of a nearer folder over the one of a farther folder, as an overlay does, except for what the

@@ -32,6 +32,7 @@ internal sealed class PluginsService
 
     private const int MaximumIdLength = 128;
     private const int MaximumDescriptionLength = 512;
+    private const string InheritedScope = "Inherited";
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     private readonly ProjectCatalog? _projects;
     private readonly CodeAltaConfigStore? _store;
@@ -104,33 +105,36 @@ internal sealed class PluginsService
             // What cannot be read is named and the rest is listed: one file or one folder hides nothing else.
             var problems = new List<PluginsProblem>();
             CodeAltaConfigDocument global;
-            CodeAltaConfigDocument? local;
+            CodeAltaConfigDocument? local = null, effective = null, inherited = null;
             lock (_gate)
             {
                 global = Configuration(_store.LoadGlobal, _projects.Options.ConfigPath, PluginScope.Global, problems);
-                local = project.Root is not { } projectRoot ? null
-                    : Configuration(() => _store.LoadProject(projectRoot), Path.Combine(projectRoot, ".alta", "config.toml"), PluginScope.Project, problems);
+                if (project.Root is { } projectRoot)
+                {
+                    var ownFile = Path.Combine(projectRoot, ".alta", "config.toml");
+                    (effective, local, inherited) = _store.LoadProject(projectRoot, ProjectResourceRoots.Inherited(project.Project), (path, exception) =>
+                        problems.Add(new("config", path, Clean(exception.GetBaseException().Message), SameDirectory(path, ownFile) ? "Project" : InheritedScope)));
+                }
             }
 
             var packages = new List<SourcePluginPackage>();
-            var roots = Roots(request.ProjectId, project.Root);
-            for (var index = 0; index < roots.Count; index++)
+            foreach (var root in ReadRoots(project.Project))
             {
-                // A project that is the folder of the global root (the home folder) has the global plugin folder.
-                if (index > 0 && SameDirectory(roots[index].RootPath, roots[0].RootPath)) continue;
                 try
                 {
-                    packages.AddRange(_discovery.Discover(roots[index]));
+                    packages.AddRange(_discovery.Discover(root));
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                     // The folder changes while it is read (an agent writes a plugin), or it cannot be opened.
-                    problems.Add(new("folder", roots[index].RootPath, Clean(exception.Message), roots[index].Scope.ToString()));
+                    problems.Add(new("folder", root.RootPath, Clean(exception.Message), root.Inherited ? InheritedScope : root.Scope.ToString()));
                 }
             }
 
             // No built-in definitions: the page has their rows, whichever host runs them.
-            var entries = _builder.Build([], packages, global, local);
+            var visible = PluginRuntimeManager.WithoutInheritedShadows(packages);
+            var inheritedFiles = visible.Where(static package => package.Root.Inherited).Select(static package => package.EntryFilePath).ToHashSet(PathComparer);
+            var entries = _builder.Build([], visible, global, effective);
             // What the running host did with the packages of its own folders, by the file of each.
             var hosted = new Dictionary<string, PluginPackageStatus>(PathComparer);
             var runtimeKnown = _runtime is not null;
@@ -152,10 +156,13 @@ internal sealed class PluginsService
             foreach (var entry in entries)
             {
                 var discovered = entry.State != PluginManagementState.UnknownConfig;
+                var fromAncestor = discovered ? inheritedFiles.Contains(entry.SourcePath!)
+                    : entry.PluginId is { } configuredId && inherited?.Plugins?.ContainsKey(configuredId) == true
+                        && local?.Plugins?.ContainsKey(configuredId) != true && global.Plugins?.ContainsKey(configuredId) != true;
                 if (!ValidId(entry.PluginId))
                 {
                     // A package whose folder name is no plugin id is named with its folder; an id of configuration is counted.
-                    if (discovered && Path.GetDirectoryName(entry.SourcePath) is { } skipped) problems.Add(new("name", skipped, null, entry.Scope.ToString()));
+                    if (discovered && Path.GetDirectoryName(entry.SourcePath) is { } skipped) problems.Add(new("name", skipped, null, fromAncestor ? InheritedScope : entry.Scope.ToString()));
                     else omitted++;
                     continue;
                 }
@@ -169,11 +176,11 @@ internal sealed class PluginsService
                 var id = entry.PluginId!;
                 var enabledGlobal = Configured(global, id);
                 var enabledProject = Configured(local, id);
-                var enabled = discovered ? entry.Enabled : enabledGlobal ?? enabledProject ?? true;
+                var enabled = discovered ? entry.Enabled : enabledGlobal ?? Configured(effective, id) ?? true;
                 var status = discovered && entry.SourcePath is { } source ? hosted.GetValueOrDefault(source) : null;
                 // A package the host does not load (the one of another project) is not started.
                 var (runtime, message) = !runtimeKnown || !discovered || !enabled ? (null, null) : status is null ? ("stopped", null) : RuntimeState(status);
-                var folder = discovered ? new PluginFolder(entry.Scope == PluginScope.Project ? request.ProjectId : null, id) : (PluginFolder?)null;
+                var folder = discovered && !fromAncestor ? new PluginFolder(entry.Scope == PluginScope.Project ? request.ProjectId : null, id) : (PluginFolder?)null;
                 // A plugin that runs says its own name and what it does; the README of its package otherwise.
                 var running = status?.Plugins.Count == 1 ? status.Plugins[0] : null;
                 var description = Text(running?.Description) ?? (discovered ? Describe(entry.ReadmePath) : null);
@@ -181,10 +188,11 @@ internal sealed class PluginsService
                 // How its card looks: what the plugin says while it runs, what its source says otherwise.
                 var written = running is null && discovered ? PluginPresentation.ReadSource(entry.SourcePath) : default;
                 plugins.Add(new(id, Text(running?.DisplayName) ?? entry.DisplayName, description, discovered ? "Source" : "Config",
-                    entry.Scope.ToString(), enabledGlobal, enabledProject, enabled,
+                    fromAncestor ? InheritedScope : entry.Scope.ToString(), enabledGlobal, enabledProject, enabled,
                     discovered ? entry.State.ToString() : enabled ? "Configured" : nameof(PluginManagementState.Disabled), runtime, message,
                     folder?.Id, directory, status is not null, status?.SourceChanged ?? false, Errors(status))
                 {
+                    DisabledByRepository = (entry.Scope == PluginScope.Project || fromAncestor) && Configured(inherited, id) == false,
                     Icon = running is null ? written.Icon : PluginPresentation.Icon(running.Icon),
                     Color = running is null ? written.Color : PluginPresentation.Color(running.Color),
                     Version = running is null ? written.Version : Text(running.Version),
@@ -235,6 +243,7 @@ internal sealed class PluginsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null || _store is null) return new("unavailable", null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
+        if (IsInheritedScope(request.Scope)) return new("read_only", null);
         var projectScope = string.Equals(request.Scope, "Project", StringComparison.OrdinalIgnoreCase);
         if (!projectScope && !string.Equals(request.Scope, "Global", StringComparison.OrdinalIgnoreCase)) return new("invalid", "The scope must be Global or Project.");
         if (!ValidId(request.Id)) return new("invalid", "A plugin id starts with a letter or digit and uses letters, digits, '.', '_' or '-' (at most 128).");
@@ -247,6 +256,10 @@ internal sealed class PluginsService
             {
                 if (projectScope)
                 {
+                    var inherited = ProjectResourceRoots.Inherited(project.Project);
+                    if (inherited.Count > 0 && (FindProjectPackage(project.Project, request.Id!)?.Root.Inherited == true
+                        || Configured(_store.LoadProject(inherited[0], [.. inherited.Skip(1)]), request.Id!) == false))
+                        return new("read_only", null);
                     _store.SaveProjectPluginEnabled(project.Root!, request.Id!, request.Enabled);
                 }
                 else
@@ -268,7 +281,8 @@ internal sealed class PluginsService
 
         // The source plugins of the running host follow at once: started, or stopped.
         var applied = false;
-        foreach (var package in Hosted().Where(package => string.Equals(package.Package.PackageId, request.Id, StringComparison.OrdinalIgnoreCase)))
+        foreach (var package in Hosted().Where(package => string.Equals(package.Package.PackageId, request.Id, StringComparison.OrdinalIgnoreCase)
+            && (!projectScope || package.Package.Root is { Scope: PluginScope.Project, Inherited: false, ProjectPath: { } path } && SameDirectory(path, project.Root!))))
         {
             try
             {
@@ -460,12 +474,26 @@ internal sealed class PluginsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null || _store is null) return new("unavailable");
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch");
-        var (status, root) = await RootAsync(request.ProjectId, request.Scope, cancellationToken).ConfigureAwait(false);
-        if (root is null) return new(status);
-        if (!ValidId(request.Id)) return new("invalid");
-        if (PluginPresentation.FindImage(Path.Combine(root.RootPath, request.Id!)) is not { } image) return new("unknown");
         try
         {
+            string directory;
+            if (IsInheritedScope(request.Scope))
+            {
+                var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+                if (project.Status != "ok") return new(project.Status);
+                if (!ValidId(request.Id)) return new("invalid");
+                if (FindProjectPackage(project.Project, request.Id!) is not { Root.Inherited: true } package) return new("unknown");
+                directory = package.PackageDirectory;
+            }
+            else
+            {
+                var (status, root) = await RootAsync(request.ProjectId, request.Scope, cancellationToken).ConfigureAwait(false);
+                if (root is null) return new(status);
+                if (!ValidId(request.Id)) return new("invalid");
+                directory = Path.Combine(root.RootPath, request.Id!);
+            }
+
+            if (PluginPresentation.FindImage(directory) is not { } image) return new("unknown");
             var bytes = await File.ReadAllBytesAsync(image.Path, cancellationToken).ConfigureAwait(false);
             // The file may have grown since it was looked at.
             return bytes.Length is 0 or > PluginPresentation.MaximumImageLength ? new("unknown") : new("ok", image.Mime, Convert.ToBase64String(bytes), image.Token);
@@ -515,27 +543,33 @@ internal sealed class PluginsService
 
     private IReadOnlyList<PluginPackageStatus> Hosted() => _runtime?.GetPackages() ?? [];
 
-    private List<PluginRoot> Roots(string? projectId, string? projectRoot)
-    {
-        var roots = new List<PluginRoot> { new() { RootPath = Path.Combine(_projects!.Options.GlobalRoot, "plugins"), Scope = PluginScope.Global } };
-        if (projectRoot is not null)
+    private IReadOnlyList<PluginRoot> ReadRoots(ProjectDescriptor? project)
+        => PluginRuntimeManager.GetDiscoveryRoots(_projects!.Options.GlobalRoot, project is null ? null : new PluginProjectContext
         {
-            roots.Add(new() { RootPath = Path.Combine(projectRoot, ".alta", "plugins"), Scope = PluginScope.Project, ProjectId = projectId, ProjectPath = projectRoot });
-        }
+            ProjectPath = project.ProjectPath,
+            ProjectId = project.Id,
+            InheritedRoots = ProjectResourceRoots.Inherited(project),
+        });
 
-        return roots;
-    }
+    private SourcePluginPackage? FindProjectPackage(ProjectDescriptor? project, string id)
+        => ReadRoots(project).Where(static root => root.Scope == PluginScope.Project).SelectMany(_discovery.Discover)
+            .FirstOrDefault(package => string.Equals(package.PackageId, id, StringComparison.OrdinalIgnoreCase));
 
-    // The plugin folder a request names by its scope, or why it names none.
+    // The local plugin folder a request names by its scope, or why it cannot be changed.
     private async Task<(string Status, PluginRoot? Root)> RootAsync(string? projectId, string? scope, CancellationToken cancellationToken)
     {
+        if (IsInheritedScope(scope)) return ("read_only", null);
         var projectScope = string.Equals(scope, "Project", StringComparison.OrdinalIgnoreCase);
         if (!projectScope && !string.Equals(scope, "Global", StringComparison.OrdinalIgnoreCase)) return ("invalid", null);
         var project = await SettingsProjectScope.ResolveAsync(_projects!, projectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return (project.Status, null);
-        if (projectScope && project.Root is null) return ("invalid", null);
-        return ("ok", Roots(projectId, project.Root)[projectScope ? 1 : 0]);
+        if (!projectScope) return ("ok", new PluginRoot { Scope = PluginScope.Global, RootPath = Path.Combine(_projects!.Options.GlobalRoot, "plugins") });
+        return project.Root is { } root
+            ? ("ok", new PluginRoot { Scope = PluginScope.Project, RootPath = Path.Combine(root, ".alta", "plugins"), ProjectId = projectId, ProjectPath = root })
+            : ("invalid", null);
     }
+
+    private static bool IsInheritedScope(string? scope) => string.Equals(scope, InheritedScope, StringComparison.OrdinalIgnoreCase);
 
     private static bool? Configured(CodeAltaConfigDocument? document, string id)
         => document?.Plugins?.FirstOrDefault(plugin => string.Equals(plugin.Key, id, StringComparison.OrdinalIgnoreCase)).Value?.Enabled;
@@ -589,7 +623,7 @@ internal sealed record PluginsListResponse(string Status, string? ProjectId, IRe
 /// </summary>
 /// <param name="Path">The file or the folder, when the problem is about one.</param>
 /// <param name="Message">What the parser or the system said.</param>
-/// <param name="Scope"><c>Global</c> or <c>Project</c>, when the file or the folder is of one of them.</param>
+/// <param name="Scope"><c>Global</c>, <c>Project</c> or <c>Inherited</c>, when the file or the folder is of one of them.</param>
 internal sealed record PluginsProblem(string Kind, string? Path, string? Message, string? Scope = null);
 
 /// <summary>
@@ -608,6 +642,9 @@ internal sealed record PluginsEntry(string Id, string Name, string? Description,
     bool? EnabledProject, bool Enabled, string State, string? Runtime = null, string? RuntimeMessage = null,
     string? Folder = null, string? Path = null, bool Loadable = false, bool Changed = false, IReadOnlyList<string>? Errors = null)
 {
+    /// <summary>Gets whether the repository supplied the effective off for this project plugin.</summary>
+    public bool DisabledByRepository { get; init; }
+
     /// <summary>The name of the icon of a source package, as its plugin gives it (a Lucide icon); null for the icon of plugins.</summary>
     public string? Icon { get; init; }
 

@@ -27,7 +27,7 @@ const entry = (id: string, scope: "Global" | "Project", change: Partial<PluginsE
   id, name: id, description: `What ${id} does.`, kind: "Source", scope, enabledGlobal: null, enabledProject: null, enabled: true, state: "Enabled", runtime: "running",
   runtimeMessage: null, folder: scope === "Project" ? `plugin:project:p:${id}` : `plugin:global:${id}`, path: `${scope === "Project" ? work : home}\\${id}`,
   loadable: true, changed: false, errors: null,
-  icon: null, color: null, version: null, author: null, tags: null, image: null, ...change });
+  icon: null, color: null, version: null, author: null, tags: null, image: null, disabledByRepository: false, ...change });
 const skill = (id: string, name: string, source: string, change: Partial<SkillsEntry> = {}): SkillsEntry => ({ id, name, title: name, description: `What ${name} is for.`, source,
   scope: source.startsWith("Project") ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true, disabledByRepository: false,
   folder: `skill:global:${source}:${name}`, path: `C:\\skills\\${id}`, ...change });
