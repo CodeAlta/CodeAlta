@@ -98,23 +98,46 @@ public sealed class SessionStateRowTests
     }
 
     [TestMethod]
-    public async Task ACacheOfVersion9_WithoutTheColumnOfTheOptions_IsMigrated_AndListsItsSessions()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ACacheWithoutTheOptionsColumn_ListsItsSessions(bool currentVersion)
     {
         using var root = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = root.Path };
-        var session = await CreateSessionAsync(options, "session-v9");
+        var session = await CreateSessionAsync(options, "session-options");
+        await using var database = ApplicationDatabase.Create(options);
+        var version = await database.GetVersionAsync("session_cache");
 
-        // A cache written by a build that had no options: version 9, and no column for them.
-        await ExecuteAsync(options, """
-            ALTER TABLE session_projection_cache DROP COLUMN local_options;
-            UPDATE app_meta SET version = 9 WHERE owner = 'session_cache';
-            """);
+        // Test both a build at version 9 and one that shipped without the column but at the current version.
+        await ExecuteAsync(options, "ALTER TABLE session_projection_cache DROP COLUMN local_options;");
+        if (!currentVersion)
+        {
+            await ExecuteAsync(options, "UPDATE app_meta SET version = 9 WHERE owner = 'session_cache';");
+        }
 
+        // Adding this column must keep the row, even when there is no readable journal to rebuild it from.
+        BlankJournal(JournalPath(options, session));
         var listed = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync();
 
         Assert.AreEqual(session.SessionId, listed.Single().SessionId);
-        await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
+        Assert.AreEqual(version, await database.GetVersionAsync("session_cache"));
+    }
+
+    [TestMethod]
+    [DataRow("local_permission_mode")]
+    [DataRow("space_id")]
+    public async Task ACurrentCacheWithoutAColumnNeededForExistingRows_ReprojectsItsSessions(string column)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var session = await CreateSessionAsync(options, "session-reprojected", spaceId: "space-1");
+        await ExecuteAsync(options, $"ALTER TABLE session_projection_cache DROP COLUMN {column};");
+
+        var listed = (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync()).Single();
+
+        Assert.AreEqual(session.SessionId, listed.SessionId);
+        Assert.AreEqual("acceptEdits", listed.ViewState!.PermissionMode);
+        Assert.AreEqual("space-1", listed.SpaceId);
     }
 
     [TestMethod]
@@ -299,10 +322,11 @@ public sealed class SessionStateRowTests
         Assert.AreEqual("outside-model", JsonNode.Parse(ReadRowState(options, session.SessionId))!["model_id"]!.GetValue<string>());
     }
 
-    private static async Task<SessionViewDescriptor> CreateSessionAsync(CatalogOptions options, string sessionId)
+    private static async Task<SessionViewDescriptor> CreateSessionAsync(CatalogOptions options, string sessionId, string? spaceId = null)
     {
         var catalog = new SessionViewCatalog(options);
         var session = CreateDescriptor(sessionId);
+        session.SpaceId = spaceId;
         await catalog.JournalStore.EnsureHeaderAsync(session);
         var store = catalog.JournalStore.CreateSessionStore();
         await store.UpsertSessionAsync(CreateSummary(sessionId));

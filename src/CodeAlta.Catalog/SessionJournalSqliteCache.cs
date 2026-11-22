@@ -879,6 +879,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     private async Task MigrateSchemaAsync(CancellationToken cancellationToken)
     {
+        HashSet<string> columns;
         try
         {
             await _database.MigrateAsync(
@@ -889,6 +890,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     recoverDamagedFile: false,
                     cancellationToken)
                 .ConfigureAwait(false);
+
+            // Additive columns do not need a version bump. A complete schema still only takes read connections.
+            columns = await _database.ReadAsync(Owner, ReadListColumnNamesAsync, recoverDamagedFile: false, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
         {
@@ -897,6 +902,20 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         catch (Exception exception) when (IsFileError(exception))
         {
             throw CreateFileException(exception);
+        }
+
+        if (AdditiveListColumns.Any(column => !columns.Contains(column.Name)))
+        {
+            await WriteCoreAsync(
+                    async (connection, token) =>
+                    {
+                        // Another connection may have added the columns while this one waited for the write lock.
+                        var current = await ReadListColumnNamesAsync(connection, token).ConfigureAwait(false);
+                        await AddMissingListColumnsAsync(connection, current, token).ConfigureAwait(false);
+                    },
+                    schemaOwned: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
