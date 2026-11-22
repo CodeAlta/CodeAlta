@@ -351,7 +351,7 @@ import { SpaceActivityBar, SpaceIcon, SpaceSwitch } from "./spaces/SpaceViews";
 import { readSpacePageLink, spacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
-import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
+import { useMoveToSpaceDialog, type SpaceMoveSource } from "./spaces/MoveToSpaceDialog";
 import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
 import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
@@ -1119,10 +1119,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
     conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview,
     conversations: workspace.claudeCodeConversations }));
-  // The session the window that gives it another space is open for, with the space it is in now.
   // The session Move to machine… moves, while its window is open.
   const [machineMove, setMachineMove] = useState<WorkspaceSession | null>(null);
-  const [movingToSpace, setMovingToSpace] = useState<Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }> | null>(null);
   // The window of the sessions below a session; `deleting` when Delete led to it.
   const [childrenView, setChildrenView] = useState<Readonly<{ id: string; title: string; deleting: boolean }> | null>(null);
   // The row of a session dragged onto the row of another project, and that project; a Claude Code conversation dragged
@@ -1133,6 +1131,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   });
   const [movingBusy, setMovingBusy] = useState(false);
   const movingPending = useRef(false);
+  const spaceMoveDialog = useMoveToSpaceDialog(spacesState.spaces, movingBusy, (moving, space) => void moveSessionToSpaceNow(moving, space));
   const [deletingBusy, setDeletingBusy] = useState(false);
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
@@ -5004,9 +5003,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setRenamingId(null);
     sessionDeleteQuestion.close();
     const home = sessionHome(spacesHub.getSnapshot().spaces, { spaceId: row.spaceId, projectId: row.scopeKind === "project" ? row.projectId : null });
-    setMovingToSpace({ id: row.id, title: plainTitle(row.title), projectId: row.scopeKind === "project" ? row.projectId : null, spaceId: home.id });
+    spaceMoveDialog.open({ id: row.id, title: plainTitle(row.title), projectId: row.scopeKind === "project" ? row.projectId : null, spaceId: home.id });
   }
-  async function moveSessionToSpaceNow(moving: NonNullable<typeof movingToSpace>, target: Space) {
+  async function moveSessionToSpaceNow(moving: SpaceMoveSource, target: Space) {
     const capability = mutation?.capability;
     if (movingPending.current || !owned || !capability?.canMutate() || target.id === moving.spaceId) return;
     movingPending.current = true;
@@ -5023,7 +5022,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }
       readAgain = result.kind === "moved" && !fresh?.configured;
       if (fresh?.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
-      setMovingToSpace(null);
+      spaceMoveDialog.close();
       if (result.kind === "moved") {
         // The session is in the other space now: a click there shows it.
         showToast({ message: t("Moved to {space}.", { space: target.name }), intent: "success", icon: "tick", timeout: 6000,
@@ -7094,8 +7093,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           if (moved) revealSession(moved);
         });
       }} />}
-    {movingToSpace && <MoveToSpaceDialog title={movingToSpace.title} spaces={spacesState.spaces} currentId={movingToSpace.spaceId} busy={movingBusy}
-      onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => setMovingToSpace(null)} />}
+    {spaceMoveDialog.dialog}
     {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}
       read={() => readSessionChildren(workspace.sessionChildren, status?.hostEpoch, childrenView.id)}
       projects={catalog.current?.projects ?? []} sessions={catalog.current?.sessions ?? []} spaces={spacesState.spaces} canDelete={owned && !!mutation?.capability.canMutate()}

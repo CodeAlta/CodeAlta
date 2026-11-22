@@ -97,6 +97,29 @@ test("the window shows one space at a time: its projects, its sessions and its o
     assert.equal(await wait("[...document.querySelectorAll('.flexlayout__tab_button')].some(tab=>tab.textContent.includes('one'))"), true);
     const defaultTabs = await tabs() as string[];
 
+    await t.test("the session move offers other spaces and waits for one host answer", async () => {
+      const trigger = "document.querySelector('.session-row[data-session-id=\"one\"] .session-actions-trigger')";
+      const line = "[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].find(item=>item.textContent.trim()==='Move to space…')";
+      const dialog = "document.querySelector('dialog.move-to-space-dialog[open]')";
+      const option = `${dialog}?.querySelector('[role=option]')`;
+      const moves = "spacesFixture.moves";
+      await evaluate(`${trigger}.click()`);
+      assert.equal(await wait(`!!${line}`), true);
+      await evaluate(`${line}.click()`);
+      assert.equal(await wait(`!!${option}`), true);
+      assert.match(await evaluate(`${dialog}.querySelector('h2').textContent`), /Move one to another space/);
+      assert.deepEqual(await evaluate(`[...${dialog}.querySelectorAll('[role=option] .reference-name')].map(row=>row.textContent)`), ["Work"]);
+      assert.equal(await evaluate(`${moves}.length`), 0, "opening the dialog does not move the session");
+      await evaluate(`${option}.click()`);
+      assert.equal(await wait(`${moves}.length===1 && ${option}?.getAttribute('aria-disabled')==='true'`), true);
+      await evaluate(`${option}.click()`);
+      assert.equal(await evaluate(`${moves}.length`), 1, "while busy a second choice cannot start a second move");
+      assert.deepEqual(await evaluate(`(({sessionId,spaceId})=>({sessionId,spaceId}))(${moves}[0].request)`), { sessionId: "one", spaceId: "work" });
+      await evaluate(`(()=>{const {request,resolve}=${moves}[0];resolve({...request,hostEpoch:request.expectedHostEpoch,status:'space_missing',moved:[],warnings:[]})})()`);
+      assert.equal(await wait(`!${dialog} && document.body.textContent.includes('The space is gone. Choose another one.')`), true);
+      assert.equal(await shown(), "Default");
+    });
+
     // Work has the other project alone: its Explorer and its tabs are its own, and the session of the first project is no longer in the page.
     await chip("Work");
     assert.equal(await wait("document.querySelector('.space-switch-name')?.textContent==='Work'"), true);

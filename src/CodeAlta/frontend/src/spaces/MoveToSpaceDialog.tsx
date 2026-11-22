@@ -6,6 +6,18 @@ import { useShellLanguage } from "../shellLanguage";
 import { SpaceIcon } from "./SpaceViews";
 import type { Space } from "./spaces";
 
+/** The session and its home when the space picker was opened. */
+export type SpaceMoveSource = Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }>;
+
+/** Keeps the request of the space picker; the window performs the move and reports its result. */
+export function useMoveToSpaceDialog(spaces: readonly Space[], busy: boolean, onMove: (request: SpaceMoveSource, target: Space) => void) {
+  const [request, setRequest] = useState<SpaceMoveSource | null>(null);
+  const close = () => setRequest(null);
+  const dialog = request ? <MoveToSpaceDialog title={request.title} spaces={spaces} currentId={request.spaceId} busy={busy}
+    onMove={space => onMove(request, space)} onClose={close} /> : null;
+  return { open: (move: SpaceMoveSource) => setRequest(move), close, dialog };
+}
+
 /** The spaces a session can be given: every space but the one it is in. */
 export function spaceMoveTargets(spaces: readonly Space[], currentId: string): readonly Space[] {
   return spaces.filter(space => space.id !== currentId);
