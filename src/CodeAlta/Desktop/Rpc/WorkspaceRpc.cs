@@ -20,7 +20,7 @@ internal sealed partial class WorkspaceService
     /// <summary>The most projects a snapshot lists: room for the sub-projects of monorepos.</summary>
     internal const int MaximumProjects = 1000;
 
-    private readonly Func<WorkspaceRequest, CancellationToken, Task<WorkspaceSnapshot>>? _read;
+    private readonly Func<WorkspaceRequest, CancellationToken, Task<WorkspaceSnapshot>> _read;
 
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads)
     {
@@ -71,9 +71,8 @@ internal sealed partial class WorkspaceService
             : [.. unreadable.Select(static file => file.SourcePath).Where(static path => path.Length <= 4096 && !path.Any(char.IsControl))
                 .Order(StringComparer.Ordinal).Take(20)];
 
-    internal WorkspaceService(string? catalogRoot)
+    internal WorkspaceService(string catalogRoot)
     {
-        if (catalogRoot is null) return;
         ArgumentException.ThrowIfNullOrWhiteSpace(catalogRoot);
         var options = new CatalogOptions { GlobalRoot = catalogRoot };
         var projects = new ProjectCatalog(options);
@@ -92,9 +91,7 @@ internal sealed partial class WorkspaceService
     public Task<WorkspaceSnapshot> SnapshotAsync(WorkspaceRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return _read is null
-            ? Task.FromResult(new WorkspaceSnapshot(false, [], [], false, false, false))
-            : ServeAsync(_read(request, cancellationToken));
+        return ServeAsync(_read(request, cancellationToken));
 
         async Task<WorkspaceSnapshot> ServeAsync(Task<WorkspaceSnapshot> read)
         {

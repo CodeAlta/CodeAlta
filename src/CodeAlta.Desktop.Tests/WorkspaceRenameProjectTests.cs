@@ -71,7 +71,7 @@ public sealed class WorkspaceRenameProjectTests
         var read = new WorkspaceReadProjectNameRequest(Epoch, fixture.Id, fixture.Path);
         Assert.AreEqual("scope_missing", (await service.ReadProjectNameAsync(read with { ProjectPath = fixture.Root }, CancellationToken.None)).Status);
         Assert.AreEqual("scope_missing", (await service.ReadProjectNameAsync(read with { ProjectId = ProjectId.NewVersion7().ToString() }, CancellationToken.None)).Status);
-        Assert.AreEqual("unconfigured", (await new WorkspaceService((string?)null).ReadProjectNameAsync(read, CancellationToken.None)).Status);
+        Assert.AreEqual("unconfigured", (await new WorkspaceService(fixture.Catalog.Options.GlobalRoot).ReadProjectNameAsync(read, CancellationToken.None)).Status);
         var observed = await service.ReadProjectNameAsync(read, CancellationToken.None);
         var request = new WorkspaceRenameProjectRequest(Epoch, fixture.Id, fixture.Path, observed.SourcePath!, observed.Revision!, "New");
         var contents = await File.ReadAllTextAsync(fixture.Source);
