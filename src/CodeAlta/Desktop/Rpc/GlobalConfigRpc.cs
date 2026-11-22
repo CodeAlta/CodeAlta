@@ -1,6 +1,4 @@
 using System.Collections.Immutable;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Agent.ModelCatalog;
@@ -82,7 +80,7 @@ internal sealed partial class GlobalConfigService
         {
             string content;
             lock (_gate) content = _store.LoadGlobalConfigContent();
-            return content.Length > MaximumContentLength ? new("too_large", null, null) : new("ok", content, Revision(content));
+            return content.Length > MaximumContentLength ? new("too_large", null, null) : new("ok", content, CodeAltaConfigStore.GetGlobalConfigRevision(content));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -122,7 +120,7 @@ internal sealed partial class GlobalConfigService
                 // Another editor (the TUI, a text editor) may have changed the file since it was read; the other
                 // writers of the application wait until the check and the write are done.
                 using var writing = _store.LockGlobalConfig();
-                if (!string.Equals(Revision(_store.LoadGlobalConfigContent()), request.ExpectedRevision, StringComparison.Ordinal))
+                if (!string.Equals(CodeAltaConfigStore.GetGlobalConfigRevision(_store.LoadGlobalConfigContent()), request.ExpectedRevision, StringComparison.Ordinal))
                     return Failure("conflict");
                 _store.SaveGlobalConfigContent(request.Content);
             }
@@ -133,7 +131,7 @@ internal sealed partial class GlobalConfigService
 
             Saved?.Invoke();
 
-            var revision = Revision(request.Content);
+            var revision = CodeAltaConfigStore.GetGlobalConfigRevision(request.Content);
             if (!request.ApplyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
@@ -509,9 +507,9 @@ internal sealed partial class GlobalConfigService
         {
             lock (_gate)
             {
-                var revision = Revision(_store.LoadGlobalConfigContent());
+                var revision = CodeAltaConfigStore.GetGlobalConfigRevision(_store.LoadGlobalConfigContent());
                 var document = _store.LoadGlobal();
-                var raw = RawDefinitions(document).ToDictionary(static value => value.ProviderKey, StringComparer.OrdinalIgnoreCase);
+                var raw = document.Providers ?? [];
                 var defaults = _defaults ??= ProviderDefaults.Load();
                 var providers = _store.LoadGlobalProviderDefinitions(includeDisabled: true).Take(MaximumProviders)
                     .Select(effective =>
@@ -573,16 +571,14 @@ internal sealed partial class GlobalConfigService
     /// <returns>The save result: <c>ok</c>, <c>invalid</c> (unknown provider), <c>write_failed</c>, <c>apply_failed</c> or <c>unavailable</c>.</returns>
     internal GlobalConfigSaveResponse EnableProvider(string? key)
     {
-        if (_store is null || _registry is null) return Failure("unavailable");
-        return Mutate(_store, _registry, null, checkRevision: false, applyProviders: true, (store, definitions) =>
+        return Mutate(_epoch, null, applyProviders: true, (_, definitions) =>
         {
             var definition = definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key?.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (definition is null) return "The provider no longer exists in the configuration.";
-            if (definition.Enabled != false) return null;
+            if (definition is null) return (false, "The provider no longer exists in the configuration.");
+            if (definition.Enabled != false) return (false, null);
             definition.Enabled = true;
-            store.SaveGlobalProviderDefinitions(definitions);
-            return null;
-        });
+            return (true, null);
+        }, checkRevision: false);
     }
 
     /// <summary>
@@ -635,14 +631,16 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, environmentProblem, null, null, 0);
         if (!TryReadModelRules(edit.ModelsHide, edit.ModelsShow, out var modelsHide, out var modelsShow, out var rulesProblem))
             return new("invalid", null, rulesProblem, null, null, 0);
+        var original = Optional(request.OriginalKey);
+        var renamedFrom = string.Equals(original, key, StringComparison.OrdinalIgnoreCase) ? null : original;
+        IReadOnlyList<string> renamedSpaces = [];
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
-            var original = request.OriginalKey?.Trim();
-            var definition = string.IsNullOrEmpty(original) ? null
+            var definition = original is null ? null
                 : definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, original, StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(original) && definition is null) return "The provider no longer exists in the configuration.";
+            if (original is not null && definition is null) return (false, "The provider no longer exists in the configuration.");
             if (definitions.Any(value => value != definition && string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)))
-                return "Another provider already uses this key.";
+                return (false, "Another provider already uses this key.");
             if (definition is null) definitions.Add(definition = new CodeAltaProviderDocument());
             definition.ProviderKey = key;
             definition.ProviderType = Optional(edit.Type) ?? definition.ProviderType;
@@ -679,17 +677,20 @@ internal sealed partial class GlobalConfigService
             if (edit.ClearApiKey) definition.ApiKey = null;
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
             // The spaces of a provider are written beside it: a provider given another key keeps them.
-            var renamedSpaces = !string.IsNullOrEmpty(original) && !string.Equals(original, key, StringComparison.OrdinalIgnoreCase)
-                ? store.LoadGlobalSpaceAssignments().Of(SpaceResourceKind.Provider, original) : [];
-            store.SaveGlobalProviderDefinitions(definitions);
-            if (renamedSpaces.Count > 0) store.SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, key, renamedSpaces);
-            if (!string.IsNullOrEmpty(original) && !string.Equals(original, key, StringComparison.OrdinalIgnoreCase)) ReplaceProviderInTiers(store, original, key);
+            if (renamedFrom is not null) renamedSpaces = store.LoadGlobalSpaceAssignments().Of(SpaceResourceKind.Provider, renamedFrom);
+            return (true, null);
+        }, afterEdit: store =>
+        {
+            if (renamedFrom is not null)
+            {
+                if (renamedSpaces.Count > 0) store.SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, key, renamedSpaces);
+                ReplaceProviderInTiers(store, renamedFrom, key);
+            }
             if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
             // A provider that is no longer the default, or no longer enabled, is not left named as the default.
             else if (store.GetEffectiveDefaultProvider() is { } current
                 && (string.Equals(current, key, StringComparison.OrdinalIgnoreCase) || string.Equals(current, original, StringComparison.OrdinalIgnoreCase)))
                 store.SaveGlobalDefaultProvider(null);
-            return null;
         });
     }
 
@@ -711,14 +712,13 @@ internal sealed partial class GlobalConfigService
         if (string.IsNullOrEmpty(key) || key.Length > 64) return new("invalid", null, "A provider key is required.", null, null, 0);
         if (!CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(name)) return new("invalid", null, "A name is letters, digits and _, not starting with a digit.", null, null, 0);
         if (!IsSecretSet(name)) return new("invalid", null, $"The secret {name} is not set on this machine.", null, null, 0);
-        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (_, definitions) =>
         {
             if (definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } definition)
-                return "The provider no longer exists in the configuration.";
+                return (false, "The provider no longer exists in the configuration.");
             definition.ApiKeySecret = name;
             definition.ApiKey = null;
-            store.SaveGlobalProviderDefinitions(definitions);
-            return null;
+            return (true, null);
         });
     }
 
@@ -730,28 +730,31 @@ internal sealed partial class GlobalConfigService
         var name = request.SecretName?.Trim();
         if (string.IsNullOrEmpty(key) || key.Length > 64) return new("invalid", null, "A provider key is required.", null, null, 0);
         if (!CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(name)) return new("invalid", null, "A name is letters, digits and _, not starting with a digit.", null, null, 0);
+        var secretSaved = false;
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
         {
             if (definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } definition)
-                return "The provider no longer exists in the configuration.";
+                return (false, "The provider no longer exists in the configuration.");
             // The key the provider uses now: the one the file holds, else the one of its variable.
             var value = definition.ApiKey is { Length: > 0 } literal && !CodeAlta.Catalog.Secrets.SecretReferences.TryParseLone(literal.Trim(), out _) ? literal.Trim()
                 : definition.ApiKeyEnv is { } variable ? System.Environment.GetEnvironmentVariable(variable.Trim()) : null;
-            if (string.IsNullOrEmpty(value)) return "The provider has no key to keep: it holds none, and its variable is not set.";
+            if (string.IsNullOrEmpty(value)) return (false, "The provider has no key to keep: it holds none, and its variable is not set.");
             try
             {
                 Secrets.SetSecret(name, value, $"{System.Environment.UserName} (CodeAlta Desktop)");
             }
             catch (CodeAlta.Catalog.Secrets.SecretStoreUnavailableException exception)
             {
-                return exception.Message;
+                return (false, exception.Message);
             }
 
-            SecretChanged?.Invoke();
+            secretSaved = true;
             definition.ApiKeySecret = name;
             definition.ApiKey = null;
-            store.SaveGlobalProviderDefinitions(definitions);
-            return null;
+            return (true, null);
+        }, afterUnlock: () =>
+        {
+            if (secretSaved) SecretChanged?.Invoke();
         });
     }
 
@@ -779,16 +782,15 @@ internal sealed partial class GlobalConfigService
         ArgumentNullException.ThrowIfNull(request);
         var key = request.Key?.Trim();
         if (string.IsNullOrEmpty(key) || key.Length > 64) return new("invalid", null, "A provider key is required.", null, null, 0);
-        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (_, definitions) =>
         {
-            if (definitions.Any(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase))) return "This provider is already in the configuration.";
+            if (definitions.Any(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase))) return (false, "This provider is already in the configuration.");
             // Read again: the definition that is added is not one another caller could have changed.
             if (CodeAltaConfigStore.LoadDefaultProviderDefinitions().FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } template)
-                return "CodeAlta has no built-in provider with this key.";
+                return (false, "CodeAlta has no built-in provider with this key.");
             template.Enabled = false;
             definitions.Add(template);
-            store.SaveGlobalProviderDefinitions(definitions);
-            return null;
+            return (true, null);
         });
     }
 
@@ -802,10 +804,10 @@ internal sealed partial class GlobalConfigService
     {
         ArgumentNullException.ThrowIfNull(request);
         string? created = null;
-        var response = Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        var response = Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (_, definitions) =>
         {
             var source = definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, request.Key?.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (source is null) return "The provider no longer exists in the configuration.";
+            if (source is null) return (false, "The provider no longer exists in the configuration.");
             var (key, number) = NextKey(source.ProviderKey, definitions);
             var copy = CodeAltaConfigStore.CloneProviderDefinition(source);
             copy.ProviderKey = key;
@@ -819,9 +821,8 @@ internal sealed partial class GlobalConfigService
             copy.Env = null;
             copy.CodexHome = null;
             definitions.Add(copy);
-            store.SaveGlobalProviderDefinitions(definitions);
             created = key;
-            return null;
+            return (true, null);
         });
         return response with { Key = response.Status is "ok" or "apply_failed" ? created : null };
     }
@@ -867,18 +868,18 @@ internal sealed partial class GlobalConfigService
     internal GlobalConfigSaveResponse DeleteProvider(GlobalConfigDeleteProviderRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var key = request.Key?.Trim() ?? string.Empty;
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
-            var key = request.Key?.Trim();
-            if (string.IsNullOrEmpty(key)) return "The provider no longer exists in the configuration.";
+            if (key.Length == 0) return (false, "The provider no longer exists in the configuration.");
             if (definitions.RemoveAll(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) > 0)
-                store.SaveGlobalProviderDefinitions(definitions);
+                return (true, null);
             // A provider of a plugin is a section of its own type.
-            else if (!store.RemoveGlobalExternalProvider(key))
-                return "The provider no longer exists in the configuration.";
+            return (false, store.RemoveGlobalExternalProvider(key) ? null : "The provider no longer exists in the configuration.");
+        }, afterEdit: store =>
+        {
             if (string.Equals(store.GetEffectiveDefaultProvider(), key, StringComparison.OrdinalIgnoreCase)) store.SaveGlobalDefaultProvider(null);
             ReplaceProviderInTiers(store, key, null);
-            return null;
         });
     }
 
@@ -926,23 +927,29 @@ internal sealed partial class GlobalConfigService
 
     // Runs one structured provider edit under the same epoch, revision and apply rules as a text save.
     private GlobalConfigSaveResponse Mutate(string? expectedEpoch, string? expectedRevision, bool applyProviders,
-        Func<CodeAltaConfigStore, List<CodeAltaProviderDocument>, string?> edit)
+        Func<CodeAltaConfigStore, List<CodeAltaProviderDocument>, (bool Save, string? Refusal)> edit,
+        Action<CodeAltaConfigStore>? afterEdit = null, Action? afterUnlock = null, bool checkRevision = true)
     {
-        if (_store is null || _registry is null) return Failure("unavailable");
+        if (_store is not { } store || _registry is not { } registry) return Failure("unavailable");
         if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return Failure("stale_epoch");
-        return Mutate(_store, _registry, expectedRevision, checkRevision: true, applyProviders, edit);
-    }
-
-    private GlobalConfigSaveResponse Mutate(CodeAltaConfigStore store, ModelProviderRegistry registry, string? expectedRevision,
-        bool checkRevision, bool applyProviders, Func<CodeAltaConfigStore, List<CodeAltaProviderDocument>, string?> edit)
-    {
         lock (_gate)
         {
+            string revision;
             try
             {
-                if (checkRevision && !string.Equals(Revision(store.LoadGlobalConfigContent()), expectedRevision, StringComparison.Ordinal)) return Failure("conflict");
-                var refusal = edit(store, RawDefinitions(store.LoadGlobal()).ToList());
+                // Also order the related writes of default provider, space assignments and tiers before the next edit.
+                using var writing = store.LockGlobalConfig();
+                string? refusal = null;
+                var matched = store.UpdateGlobalProviderDefinitions(definitions =>
+                {
+                    var (save, problem) = edit(store, definitions);
+                    refusal = problem;
+                    return save;
+                }, checkRevision ? expectedRevision ?? string.Empty : null);
+                if (!matched) return Failure("conflict");
                 if (refusal is not null) return new("invalid", null, refusal, null, null, 0);
+                afterEdit?.Invoke(store);
+                revision = CodeAltaConfigStore.GetGlobalConfigRevision(store.LoadGlobalConfigContent());
             }
             catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -953,10 +960,11 @@ internal sealed partial class GlobalConfigService
             {
                 return Failure("write_failed");
             }
+            finally
+            {
+                afterUnlock?.Invoke();
+            }
 
-            string revision;
-            try { revision = Revision(store.LoadGlobalConfigContent()); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { return Failure("write_failed"); }
             if (!applyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
@@ -970,16 +978,6 @@ internal sealed partial class GlobalConfigService
             {
                 ProvidersChanged?.Invoke();
             }
-        }
-    }
-
-    // The definitions exactly as written in the file: no defaults are filled in, so saving them back adds none.
-    private static IEnumerable<CodeAltaProviderDocument> RawDefinitions(CodeAltaConfigDocument document)
-    {
-        foreach (var (key, definition) in document.Providers ?? [])
-        {
-            definition.ProviderKey = key;
-            yield return definition;
         }
     }
 
@@ -1124,10 +1122,6 @@ internal sealed partial class GlobalConfigService
 
         return applied.Count;
     }
-
-    /// <summary>Returns a stable revision token for configuration text.</summary>
-    internal static string Revision(string content)
-        => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)).AsSpan(0, 16));
 
     private static GlobalConfigSaveResponse Failure(string status) => new(status, null, null, null, null, 0);
 

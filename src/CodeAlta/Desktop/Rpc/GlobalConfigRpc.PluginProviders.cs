@@ -575,11 +575,7 @@ internal sealed partial class GlobalConfigService
 
     // Runs one edit of the sections of the providers of plugins under the epoch, revision and apply rules of the others.
     private GlobalConfigSaveResponse MutateExternal(string? expectedEpoch, string? expectedRevision, bool applyProviders, Func<CodeAltaConfigStore, string?> edit, bool checkRevision = true)
-    {
-        if (_store is null || _registry is null) return Failure("unavailable");
-        if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return Failure("stale_epoch");
-        return Mutate(_store, _registry, expectedRevision, checkRevision, applyProviders, (store, _) => edit(store));
-    }
+        => Mutate(expectedEpoch, expectedRevision, applyProviders, (store, _) => (false, edit(store)), checkRevision: checkRevision);
 
     // Whether a provider of the configuration, built-in or of a plugin, has a key.
     private static bool Exists(CodeAltaConfigStore store, string key)
