@@ -4,7 +4,7 @@ CodeAlta · at 2a3fd8388 · 2026-11-22 · whole repository at `feature50`: .NET 
 
 The core rules hold: one writer per session, clean low layers, guardrail tests that catch regressions. The cost is in how state is saved and decisions repeated: stores whose saves their readers refuse, provider edits that bypass the store's lock, decisions kept in two places, and one 6,700-line component every feature edits. Most cures delete or merge code.
 
-- **11 of 16** strong findings (found or confirmed by two analysts, checked in the code)
+- **13 of 16** strong findings (found or confirmed by two analysts, checked in the code)
 - **14** writers of the provider list that skip the store's locked update (in the desktop, the node and the TUI; 2 of them write defaults into `config.toml`)
 - **134** `useState` in the `App` component (6,741 lines; `main.tsx` changed in 144 of 1,702 commits in four weeks)
 - **3 in 6 days** session lists broken by a column without a version bump (2026-10-26 to 2026-10-31, each an existing database)
@@ -24,13 +24,13 @@ The core rules hold: one writer per session, clean low layers, guardrail tests t
 2. F06 Give Settings the inherited project scope that sessions use
 3. F12 Give every test deadline the CI factor and replace the fixed sleeps of the browser tool tests (Before the frontend moves: they are judged by the suite.)
 4. F15 Cut the plugin-runtime skill to a workflow and an index
-5. F13 Say why a review snapshot failed instead of returning null
+5. F13 Keep the tracked files in the fallback snapshot of a review, and say why the first attempt failed
 
 **Then: the structural moves, in steps**
 1. F11 Move the state of features out of the `App` component (One surface per commit, renders measured.)
 2. F10 Delete the desktop start without a host (List its users first.)
 3. F07 Let a desktop RPC service declare its JSON types and fixtures in its own file (After F10: one registration left to move.)
-4. F08 Check each service of the built-in `alta` commands once, for its commands and its policies
+4. F08 Remove the early return that drops the credential policies of the `alta` commands
 5. F16 Move the desktop-window guide out of `AGENTS.md`
 
 **When this code is next changed**
@@ -160,7 +160,7 @@ Each was fixed in one place and missed in the other; the cure makes it exist onc
 
 #### F05 Add the missing columns of the session list at each open, from one list
 
-`simplify` · strong · impact high · effort S · risk low · `session list` · opus found, gemini confirmed, astra unreviewed
+`simplify` · strong · impact high · effort S · risk low · `session list` · opus found, gemini confirmed, astra disputed
 
 Three times in six days a column added to the session list broke listing sessions on every existing database ("no such column"), because its migration only runs when `SchemaVersion` changes and the version was not raised.
 
@@ -183,6 +183,8 @@ Verify: That test passes, also for a column added to the list without changing t
 Risks: The permission-mode and space columns also clear the rows: keep that flag per column.; An up-to-date database must stay a read at open (`ApplicationDatabase.cs:337`).
 
 If we leave it: The next column of a session breaks the session list of every user who already has a database.
+
+Disagreement: One analyst would keep the version gate and add a test that opens a fixture of the last shipped schema at its real version, refreshed with each release. It catches a missed bump; the column list removes the bump itself and the nine methods, for one read of `pragma_table_info` at open. Kept: the column list.
 
 #### F06 Give Settings the inherited project scope that sessions use
 
@@ -216,7 +218,7 @@ If we leave it: In a monorepo, Settings keeps showing a list the sessions do not
 
 #### F07 Let a desktop RPC service declare its JSON types and fixtures in its own file
 
-`simplify` · worth-exploring · impact medium · effort M · risk low · `desktop RPC` · opus found, gemini found, astra unreviewed
+`simplify` · worth-exploring · impact medium · effort M · risk low · `desktop RPC` · opus found, gemini found, astra refined
 
 A new RPC service edits its own file and five shared ones; `BootRpc.cs` changed in 109 commits in four weeks, all in its list of 1,021 `[JsonSerializable]` lines, and `demo-api.ts` in 45, 38 of them with `BootRpc.cs`.
 
@@ -225,45 +227,47 @@ Evidence:
 - `src/CodeAlta/Desktop/Rpc/BootRpc.cs:151-1173` One context for every RPC type of the desktop.
 - `src/CodeAlta/Desktop/Rpc/BootRpc.cs:5` NeoAstra is given that one context type.
 - `src/CodeAlta/frontend/src/demo-api.ts:281` A stub of `unavailable` methods per service.
-- `src/CodeAlta/frontend/src/projectFocus.neoastra.mount.ts:7` A fixture that names 60 services one by one; a missing name broke the test bundles once (`e66f2a618`).
+- `src/CodeAlta/frontend/src/projectFocus.neoastra.mount.ts:7` A fixture that names 60 services one by one, and chooses some on purpose (the demo `reminder`, not the shell fixture's).
 
-Change: Each `*Rpc.cs` declares `partial class DesktopJsonContext` with the attributes of its own types, if the JSON source generator accepts them spread over partial declarations: the first step tells. The fixtures re-export `demo-api` with `export *` and override what they fake; `demo-api` builds its `unavailable` stubs through one helper. With F10, the second registration in `DesktopApplication.cs` goes too.
+Change: Each `*Rpc.cs` declares `partial class DesktopJsonContext` with the attributes of its own types, if the JSON source generator accepts them spread over partial declarations: the first step tells. In `demo-api.ts`, a service whose every method answers `unavailable` is built by one helper; the fixtures keep their explicit choices. With F10, the second registration in `DesktopApplication.cs` goes too.
 
-Removes: the central list of 1,021 attributes; the 60-name export list of the fixture; most stub methods of `demo-api.ts`  
+Removes: the central list of 1,021 attributes; the stub methods of the services the demo does not fake  
 Adds: one partial declaration per RPC file; one stub helper
 
 First step: Move the attributes of one RPC file (`ReleaseNotesRpc.cs`) to a partial declaration in that file; build and run its RPC tests.
 
 Verify: `BootRpc.cs` holds the boot types only.; A new service edits its own file, `DesktopApplication.cs` and `main.tsx`, nothing else.
 
-Risks: A type shared by two services is declared once.; Two star re-exports of one name are dropped silently in ES modules: an ambiguous name stays explicit.
+Risks: A type shared by two services is declared once.; The demo answers some reads with empty data on purpose (`labels.list`): those stay explicit.
 
-Disagreement: One analyst proposed one JSON context per RPC file, combined at start: `[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]` names a single context for NeoAstra, so the partial declarations are the cure kept.
+Disagreement: One analyst proposed one JSON context per RPC file, combined at start: `[assembly: NeoRpcJsonContext(typeof(DesktopJsonContext))]` names a single context for NeoAstra, so the partial declarations are the cure kept. Another showed that `export *` in the fixtures would lose the choices they make on purpose: they stay explicit.
 
-#### F08 Check each service of the built-in `alta` commands once, for its commands and its policies
+#### F08 Remove the early return that drops the credential policies of the `alta` commands
 
-`simplify` · worth-exploring · impact low · effort M · risk low · `alta live tool` · opus confirmed, gemini found, astra unreviewed
+`fix` · strong · impact low · effort S · risk low · `alta live tool` · opus confirmed, gemini found, astra refined
 
-The built-in commands test about 20 optional services twice, once to build the commands and once to list their policies, and the two lists have drifted: the early return of the policies does not test the credential broker.
+The built-in commands test about 20 optional services twice, once to build the commands and once to list their policies, and the two lists have drifted: a credential broker alone enables the `credential` commands, but the early return of the policies does not test it and skips their policies.
 
 Evidence:
-- `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:157-316` The commands, built service by service.
-- `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:324-379` The policies, the same services tested again.
-- `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:346` The early return lists 20 services but not the credential broker, whose policies come later.
-- `src/CodeAlta.LiveTool/AltaCommandRegistry.cs:13-20` The registry already takes several contributors.
+- `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:180` A broker alone adds the `credential` commands.
+- `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:346` The early return lists 20 services but not the broker.
+- `src/CodeAlta.LiveTool/BuiltInAltaCommandContributor.cs:375` The credential policies come after it.
+- `src/CodeAlta.LiveTool/AltaCommandRegistry.cs:49` The registry treats the built-in contributor as one type for its allowlists: splitting it is not free.
 
-Change: Each self-contained partial (credentials first) becomes its own `IAltaCommandContributor` that tests its service once and returns its commands and its policies together; the router of 22 flags goes.
+Change: Delete the early return, so the policies follow the same tests as the commands; the cost is one list copy when no service is there.
 
-Removes: the second test of every service; the drift between commands and policies  
-Adds: small contributor classes on the existing interface
+Removes: a shortcut that lists 20 services and misses one  
+Adds: one test of a host with the broker alone
 
 First step: A test with only the credential broker registered asserts that the `credential` policies are listed: it fails today. Then the credentials contributor.
 
-Verify: That test passes; the help and policy tests of `AltaLiveToolTests` pass with the same order.
+Verify: The test passes; the help and policy tests of `AltaLiveToolTests` pass.
 
-Risks: The order of help and policies follows the order of registration: keep it.
+Risks: None found beyond the list copy.
 
-If we leave it: No host found today registers the broker alone: the drift stays latent until one does.
+If we leave it: No host found today registers the broker alone: the drift stays latent until one does, and the next service added to one list and not the other repeats it.
+
+Disagreement: The analyst who found it proposed one contributor per domain; the registry recognizes the built-in contributor by its type (`AltaCommandRegistry.cs:49`, `:141`), so the split was left for when that code changes. Kept: the one-line fix.
 
 ### Code that only its tests reach
 
@@ -295,9 +299,9 @@ If we leave it: A maintainer who finds these files gets a second, wrong answer t
 
 #### F10 Delete the desktop start without a host
 
-`delete` · worth-exploring · impact medium · effort S · risk medium · `desktop host` · opus confirmed, gemini found, astra unreviewed
+`delete` · worth-exploring · impact medium · effort S · risk medium · `desktop host` · opus confirmed, gemini found, astra disputed
 
-Every desktop RPC service is registered a second time for a start without a host that only test-harness flags reach (`--data-root` without `--allow-owned-host`), and the two lists have drifted to 81 and 55 registrations.
+Every desktop RPC service the browse mode offers is registered a second time for a start without a host (`--data-root` with a catalog copy, without `--allow-owned-host`), with constructors of its own, for a mode `alta --help` lists under the isolated roots for tests and development.
 
 Evidence:
 - `src/CodeAlta/Desktop/DesktopApplication.cs:129` The start without a host is taken only when `Owned` is null.
@@ -305,24 +309,26 @@ Evidence:
 - `src/CodeAlta/Desktop/DesktopCommandLine.cs:306-334` It is null only for explicit roots without `--allow-owned-host`.
 - `src/CodeAlta/Desktop/DesktopApplication.cs:1858-1913` Its 55 registrations.
 - `src/CodeAlta.Desktop.Tests/DesktopWorkspaceTests.cs:121` Tests that start it.
-- `src/CodeAlta/README.md:101` The explicit roots are documented for tests and for running on a copy of a profile.
+- `src/CodeAlta/Desktop/DesktopCommandLine.cs:186-187` "Browse a copy of a catalog. The cache of that copy can be written.", under "Isolated roots, for tests and development".
 
-Change: Remove `RunAsync`, the boot state of a start without a host, its parsing branch and the stub constructors only it uses; move its tests and every procedure that uses it to `--profile` or `--allow-owned-host`.
+Change: Decide whether browsing a copy of a catalog without sessions is still needed. If not: remove `RunAsync`, the boot state of a start without a host, its parsing branch and the constructors only it uses, and move its tests to `--allow-owned-host`. If it is: leave it, and F07 still removes most of what a new service costs.
 
 Removes: about 135 lines and a second way to start; the second registration of each RPC service  
 Adds: nothing
 
-First step: List the procedures that start the window without `--allow-owned-host` (the screenshot recipe, the release skill, the tests) and move them to `--profile`.
+First step: Decide whether the browse mode stays; list who uses it (tests, the screenshot recipe, the release skill).
 
 Verify: No `"in-development"` boot state is left under `src/CodeAlta`.; The desktop tests pass.
 
-Risks: The README offers the explicit roots to run on a copy of a profile: check that `--profile` covers that use.
+Risks: The mode is documented in `alta --help`: removing it retires a capability, not dead code.
+
+Disagreement: One analyst rejects the deletion: the mode is a documented capability for tests and development, it registers fewer services on purpose, and different counts do not prove drift. Open: it is the owner's choice whether the capability stays.
 
 ### The state of the desktop window in one component
 
 #### F11 Move the state of features out of the `App` component
 
-`move` · strong · impact high · effort L · risk medium · `desktop frontend` · opus found, gemini found, astra unreviewed
+`move` · strong · impact high · effort L · risk medium · `desktop frontend` · opus found, gemini found, astra refined
 
 `App` in `main.tsx` is one component of 6,741 lines with 134 `useState`, 95 `useEffect` and 94 `useRef`; 144 commits changed `main.tsx` in four weeks (22.7 files each on average), and four text fields re-render the whole window at each keystroke, against the development guide.
 
@@ -337,14 +343,14 @@ Evidence:
 - `.alta/tasks/2026-11-19-render-the-session-panes-once-for-a-tab-switch-wtvm.md` A tab switch renders all of `App`: "a gain needs the whole of `App` not to render for a switch".
 - 144 commits in four weeks. (`git log --since='4 weeks ago' --no-merges --oneline -- src/CodeAlta/frontend/src/main.tsx`)
 
-Change: Each surface owns its state in its feature folder: the rename popover keeps its draft, the sidebar filter its text, the delete, archive and move dialogs their busy and message state, then a `SettingsHost` the Settings overlay with its search. `App` keeps what the window shares: the workspace, the tabs, the selection.
+Change: Each field keeps its own draft: the rename popover the title it edits, the project rename its name, the sidebar filter its text, the Settings overlay its search; they pass the value on submit. The busy and conflict state stays with the mutation, which the sidebar also reads. Then move, one per commit, the dialogs whose state no other surface reads. `App` keeps what the window shares: the workspace, the tabs, the selection.
 
 Removes: about 40 `useState` and their effects from `App` in the first steps; whole-window renders while typing  
 Adds: a component or a hook per surface, in folders that exist
 
 First step: `RenamePopover` keeps the title it edits and calls back on submit; `renamingTitle` leaves `App`. A browser test counts the renders of `App` while typing a title.
 
-Then: The sidebar filter, then the project rename.; The delete, archive and move dialogs, one per commit.; `SettingsHost`, with the Settings search.; Measure the tab switch again (task `wtvm`) before choosing an external store.
+Then: The project rename, then the sidebar filter and the Settings search.; The dialogs whose state no other surface reads, one per commit.; Measure the tab switch again (task `wtvm`) before choosing an external store.
 
 Verify: No render of `App` per keystroke in the rename popover, the sidebar filter and the Settings search.; `npm test` passes; the count of `useState` in `App` falls at each step.
 
@@ -352,7 +358,7 @@ Risks: State two surfaces read (selection, workspace) stays shared.; Moved effec
 
 Not part of this: No state library.
 
-Disagreement: Two analysts differ on the order: the smallest surfaces first, or Settings first. Settled: the rename popover first (one field, one test), Settings once the pattern holds; the analyst who proposed Settings first agreed in review.
+Disagreement: The analysts differ on the order: the smallest surfaces first, Settings first, or the drafts only. Settled: the drafts first (one field, one test each); the busy state stays where the sidebar reads it; larger moves only once the drafts are out.
 
 ### Tests and CI that say what failed
 
@@ -360,9 +366,9 @@ Every other change of this review is judged by the suite.
 
 #### F12 Give every test deadline the CI factor and replace the fixed sleeps of the browser tool tests
 
-`fix` · strong · impact medium · effort S · risk low · `tests` · opus found, gemini found, astra unreviewed
+`fix` · strong · impact medium · effort S · risk low · `tests` · opus found, gemini found, astra refined
 
-33 test deadlines written `UtcNow.AddSeconds(…)` escape `TestTime` and its four-fold CI factor, some of 2 s, and three browser test files sleep 61 times, 14.2 s per run, each time acting, sleeping and asserting once.
+33 test deadlines written `UtcNow.AddSeconds(…)` escape `TestTime` and its four-fold CI factor, some of 2 s, and three browser test files wait 39 fixed delays, 11.4 s per run, each time acting, sleeping and asserting once.
 
 Evidence:
 - `src/CodeAlta.Tests/TestTimeGuardTests.cs:118` The guard catches `UtcNow + TimeSpan.From…` but not `UtcNow.AddSeconds(…)`.
@@ -372,40 +378,45 @@ Evidence:
 - `src/CodeAlta.Browser.Tests/BrowserAnnotationsTests.cs:615` Sleep 2 s, then assert that nothing came.
 - `doc/development-guide.md:39-40` Every limit of a test comes from `TestTime`.
 
-Change: Write the 33 deadlines with `TestTime`. Replace the sleeps by one helper that polls the page state until it holds, under `TestTime`; a check of absence waits for the next message the page sends.
+Change: Write the 33 deadlines with `TestTime`. Replace the fixed delays by waits for the state or the completion of the operation the test asserts, through one helper under `TestTime`; the pauses inside polling loops stay.
 
-Removes: 33 limits without the CI factor; 61 sleeps, 14 s of every run  
+Removes: 33 limits without the CI factor; 39 fixed delays, 11.4 s of every run  
 Adds: one polling helper
 
 First step: Convert the two 2-second deadlines of `AltaLiveToolTests.cs`, and add the polling helper to `BrowserDrawingTests.cs`.
 
-Verify: The search of `UtcNow.AddSeconds(`, `AddMilliseconds(` and `AddMinutes(` in the tests lists only times marked `// not a limit`.; The three browser files run about 14 s faster and pass ten times with two test processes.
+Verify: The search of `UtcNow.AddSeconds(`, `AddMilliseconds(` and `AddMinutes(` in the tests lists only times marked `// not a limit`.; The three browser files run about 11 s faster and pass ten times with two test processes.
 
-Risks: Some `UtcNow.Add…` of the tests are data, not limits: they stay, marked `// not a limit`.
+Risks: Some `UtcNow.Add…` of the tests are data, not limits (a wake time): they stay, marked `// not a limit`.; A check that nothing came (a cancelled save) must wait for the end of that operation, not for the next message of the page.
 
-Disagreement: One analyst also wants the guard's pattern extended to `UtcNow.Add…(`, so that the mistake cannot come back. Not decided here: extending a source-text guard is the owner's call.
+Disagreement: Two analysts would also extend the guard's pattern to deadline assignments and loop bounds written `UtcNow.Add…(`, not to data times. Left to the owner: it extends a source-text guard.
 
-#### F13 Say why a review snapshot failed instead of returning null
+#### F13 Keep the tracked files in the fallback snapshot of a review, and say why the first attempt failed
 
-`fix` · worth-exploring · impact low · effort S · risk low · `review snapshots` · opus confirmed, gemini found, astra unreviewed
+`fix` · strong · impact medium · effort S · risk low · `review snapshots` · opus confirmed, gemini found, astra found
 
-`GitSnapshot.WriteTreeAsync` drops git's error and I/O exceptions and returns null; a Windows CI run failed on its first, unconstrained snapshot (run 43251505041), and its log says nothing of why.
+When the first snapshot of a review fails, the fallback starts from an empty index and runs `git add -A`, so a tracked file under an ignore rule drops out of the tree and an approval can miss its edit; and the first failure loses its reason, as on a Windows CI run (43251505041).
 
 Evidence:
-- `src/CodeAlta.Catalog.Tests/ReviewServiceTests.cs:378` The assertion that failed on CI: the snapshot before anything is held.
-- `src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs:207-237` The git error and the I/O exceptions are discarded.
-- `.alta/report/2026-11-22-health/signals/ci-runs.md` The first attempts of the runs of `main` that passed later.
+- `src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs:199` The fallback writes the tree without the copy of the real index.
+- `src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs:215-220` The real index is copied only when a seed is given; then `git add -A` adds what is not ignored.
+- `src/CodeAlta.Catalog.Tests/CheckoutUsageTests.cs:345-347` A tracked file under an ignore rule, in the repository's own fixture.
+- `src/CodeAlta.Catalog/Reviews/Reviews.cs:245` An approval holds while the tree of the work tree equals the approved snapshot.
+- `src/CodeAlta.Catalog/Reviews/ReviewTextSource.cs:220-237` Git's errors and the I/O exceptions are discarded.
+- `src/CodeAlta.Catalog.Tests/ReviewServiceTests.cs:378` The assertion that failed on CI, before anything is held.
 
-Change: Carry git's exit code and error, or the exception, to the caller and into the failure message of the test. Choose a fallback once the reason is known.
+Change: The fallback starts from the tracked set (for example `git read-tree HEAD`) instead of an empty index, so both attempts hash the same files. Each failed stage (`add`, `write-tree`, an exception) keeps its reason for the log and the test; the public result stays nullable.
 
-Removes: a failure without a reason  
-Adds: a reason on the result
+Removes: a fallback that can approve a different tree; a failure without a reason  
+Adds: one step to the fallback; a reason on the internal result
 
-First step: Return the reason with the null result, and print it in the assertion of `ReviewServiceTests.cs:378`.
+First step: Extend the equality check of `ReviewServiceTests` with the fixture of a tracked file under an ignore rule: through the fallback it is missing today.
 
-Verify: The next failure of this test on CI names git's error or the exception.
+Verify: Both attempts give the same tree for that fixture.; A failure of this test on CI names the failed stage and git's error.
 
 Risks: The reason may hold paths: keep it out of what the user sees.
+
+If we leave it: On a machine whose antivirus holds the index copy, a review can approve a tree that lacks the edit of a tracked, ignored file.
 
 #### F14 Run the search kernel test on the macOS and Windows runners
 
@@ -419,12 +430,12 @@ Evidence:
 - `src/CodeAlta.Search/SearchVectorKernels.cs:96` The ARM path uses another instruction.
 - The selection run locally does not list `SearchVectorTests.cs`. (`grep -rlE 'OperatingSystem\.Is(Windows|MacOS|Linux)\(\)' --include='*.cs' src/CodeAlta*.Tests | grep -i search`)
 
-Change: Add `SearchVectorKernelTests` to the filter of the platform jobs by name.
+Change: Add `Dot_EveryKernelOfThisMachine_EqualsTheScalarReference` (of `SearchVectorKernelTests`) to the filter of the platform jobs by name.
 
 Removes: one hole in the CI selection  
 Adds: one name in the filter
 
-First step: Add the class to the filter of `ci.yml` and read its output on the next macOS run.
+First step: Add the method to the filter of `ci.yml` and read its output on the next macOS run.
 
 Verify: The macOS job runs `SearchVectorKernelTests`; its output names `arm64-sdot` when the runner has it.
 
@@ -436,7 +447,7 @@ Disagreement: Another analyst also proposed selecting by `[TestClass]` or a test
 
 #### F15 Cut the plugin-runtime skill to a workflow and an index
 
-`rewrite` · strong · impact medium · effort M · risk low · `agent instructions` · opus found, gemini found, astra unreviewed
+`rewrite` · strong · impact medium · effort M · risk low · `agent instructions` · opus found, gemini found, astra confirmed
 
 Each activation of `codealta-plugin-runtime` loads 8,958 words (about 12,000 tokens), four times the next built-in skill; it defines a canvas twice and restates the plugin developer guide, with which it shares 10 of its 19 commits in four weeks.
 
@@ -462,7 +473,7 @@ Disagreement: Two cures were proposed: move each section to its own reference fi
 
 #### F16 Move the desktop-window guide out of `AGENTS.md`
 
-`move` · worth-exploring · impact medium · effort S · risk medium · `agent instructions` · opus confirmed, gemini found, astra unreviewed
+`move` · worth-exploring · impact medium · effort S · risk medium · `agent instructions` · opus confirmed, gemini found, astra refined
 
 Every session of the project reads `AGENTS.md`; 1,605 of its 3,041 words are on driving the desktop window, which most sessions do not do, and several of its rules repeat `doc/development-guide.md`.
 
@@ -472,25 +483,25 @@ Evidence:
 - `doc/development-guide.md:9` The same rule in the development guide.
 - `doc/architecture.md:38-60` The project table names neither `CodeAlta.Pseudonymization` nor `CodeAlta.CodexAppServer`.
 
-Change: Move the section on the desktop window to `doc/desktop.md`, behind a pointer that keeps its safety rules (always `--dev`, never exit the user's instance); link the rules of the development guide instead of restating them; add the two missing projects to `doc/architecture.md`.
+Change: Move the procedure for the desktop window to the developer-instance section of `src/CodeAlta/README.md`, behind a pointer that keeps its safety rules (always `--dev`, never exit the user's instance) and the warning on live builds; link the rules of the development guide instead of restating them; in `doc/architecture.md`, correct "everything else is shared, headless libraries", link the fleet roles and the Codex entry already written, and name the pseudonymization library at the provider boundary.
 
 Removes: about 1,600 words read by every session; rules told twice  
 Adds: a pointer of a few lines; two rows of the project table
 
-First step: Add `CodeAlta.Pseudonymization` and `CodeAlta.CodexAppServer` to the project table, with a link to `doc/fleet/architecture.md` for the fleet projects.
+First step: In `doc/architecture.md`, link `doc/fleet/architecture.md` and `doc/providers.md` for the projects the table lacks, and name `CodeAlta.Pseudonymization`.
 
 Verify: `AGENTS.md` under 1,600 words.; A session that works on the frontend still starts and exits the developer instance as the guide says (reader test).
 
 Risks: A frontend session that skips the pointer drives the wrong window: the pointer keeps the rules that prevent it.
 
-Disagreement: The fleet projects that one analyst found missing from `doc/architecture.md` are described in `doc/fleet/architecture.md`; only a link and two projects are missing.
+Disagreement: The fleet projects that one analyst found missing from `doc/architecture.md` are described in `doc/fleet/architecture.md`. Another analyst sends the procedure to the developer-instance section of `src/CodeAlta/README.md`, not to an architecture document: taken.
 
 ## Considered and dropped
 
 - Give `CodeModeRunRegistry` the clock of its store: The CI failure it explained was a race with the writes of a stopped run, fixed by `f535964b9` the next day; the clock cannot make the wake time null.
 - Check what an agent does through one path instead of at each command: The checks at each command need what only the parsed command knows: the resolved MCP tool, the plugin's policy, the lineage of the target session. Security is also outside the scope of this review.
 - Select the platform tests by `[TestClass]` or a test category because helper names enter the filter: The helper names match no test: the filter is `FullyQualifiedName~.<Name>.`, and no test name has such a segment.
-- Mask secrets once, at the publish and journal boundary of `AgentSession`: Security is outside the scope of this review; the ten leak fixes came in one burst after the feature landed (2026-11-03 to 11-11), none since. Worth a security review of its own.
+- Mask secrets once, at the publish and journal boundary of `AgentSession`: Rejected in review: the events of a session are already masked before its history, its journal and its publication (`AgentSession.cs:3479`); the other call sites feed a summary or a permission callback, which one sink cannot replace. Security is also outside the scope of this review.
 - Group the 63 host options into records with presets per host: `f411ce863` moved the drifted defaults into the host; grouping adds types without a defect that remains, and the desktop registration part is in F07 and F10.
 - Split `SessionRuntimeService` (16,037 lines in 44 files) into services: The partial files already group by topic, and its fixes are about ordering inside one session, which one owner keeps right; a split would spread that order. Only the sandbox partials own fields of their own, if a later change needs them apart.
 
@@ -498,4 +509,4 @@ Disagreement: The fleet projects that one analyst found missing from `doc/archit
 
 - Claude Opus 5.5 (`claude-code:opus@xhigh`, driver): `analysis/claude-opus-5-5.md`
 - Gemini 4 Neon (`antigravity-acp:gemini-4-neon@high`, analyst): `analysis/gemini-4-neon.md`, `analysis/gemini-4-neon.review.md`
-- GPT 6.2 Astra (`codex:gpt-6.2-astra@max`, analyst): `analysis/gpt-6.2-astra.md`
+- GPT 6.2 Astra (`codex:gpt-6.2-astra@max`, analyst): `analysis/gpt-6.2-astra.md`, `analysis/gpt-6.2-astra.review.md`
