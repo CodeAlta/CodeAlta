@@ -192,7 +192,7 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or PlatformNotSupportedException)
         {
             // Without a watcher the period lists the folder again.
-            Log.Warn($"The folder '{directory}' is not watched: {exception.Message}");
+            if (LogManager.IsInitialized) Log.Warn($"The folder '{directory}' is not watched: {exception.Message}");
         }
     }
 
@@ -206,6 +206,8 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         // place, which the loop takes only when it lists the folders again.
         var signal = Volatile.Read(ref _signal).Task;
         var pending = false;
+        // The passes that failed in a row: the next one lists the folders again, sooner than the period.
+        var failures = 0;
         while (!token.IsCancellationRequested)
         {
             try
@@ -214,7 +216,7 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
                 try
                 {
                     var now = DateTimeOffset.UtcNow;
-                    if (signal.IsCompleted || now - lastRelist >= RelistInterval)
+                    if (failures > 0 || signal.IsCompleted || now - lastRelist >= RelistInterval)
                     {
                         var next = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                         Interlocked.Exchange(ref _signal, next);
@@ -230,6 +232,8 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
                         if (pending) pending = await ProjectMarkersAsync(token).ConfigureAwait(false);
                         await FollowAsync(lookUpJournals: false, token).ConfigureAwait(false);
                     }
+
+                    failures = 0;
                 }
                 finally
                 {
@@ -244,15 +248,20 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
             {
                 return;
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception exception)
             {
-                // A pass that fails is made again on the next sign or period: the follower never stops on one failure.
-                Log.Warn($"The sessions written by another process could not be read: {exception.Message}");
+                // A pass that fails (the listing cache locked while the host starts, a file being replaced) is made again
+                // at the follow pace, then less often while it keeps failing, up to the period: the markers written before
+                // the start do not wait for the period, and the follower never stops on a failure (nor on a log that is
+                // not set up, as in the tests).
+                failures++;
+                if (LogManager.IsInitialized) Log.Warn($"The sessions written by another process could not be read: {exception.Message}");
             }
 
             bool following;
             lock (_gate) following = _followed.Count > 0;
-            var wait = following || pending ? FollowInterval : RelistInterval;
+            var wait = failures > 0 ? TimeSpan.FromTicks(Math.Min(RelistInterval.Ticks, FollowInterval.Ticks << Math.Min(failures - 1, 16)))
+                : following || pending ? FollowInterval : RelistInterval;
             try
             {
                 // A burst of watcher events (the leases of the tabs of this instance) is taken in one pass.
@@ -412,7 +421,7 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            Log.Error(exception, $"A handler of the change of session {change.SessionId} failed.");
+            if (LogManager.IsInitialized) Log.Error(exception, $"A handler of the change of session {change.SessionId} failed.");
         }
     }
 

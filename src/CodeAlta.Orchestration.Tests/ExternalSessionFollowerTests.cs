@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -100,9 +101,30 @@ public sealed class ExternalSessionFollowerTests
         var desktop = await root.CreateHostAsync(provider, sessionLeaseOwner: SessionLeaseOwner.DesktopKind, followExternalSessions: true);
 
         Assert.IsNotNull(desktop.ExternalSessions);
-        using var deadline = new CancellationTokenSource(Hang);
-        while (markers.List().Count > 0) await Task.Delay(10, deadline.Token);
+        await WaitUntilAsync(() => markers.List().Count == 0, "The marker written before the host started is read once it starts.", Hang);
         Assert.IsTrue(await ListsAsync(desktop, session.SessionId));
+    }
+
+    [TestMethod]
+    public async Task APassThatFails_IsMadeAgainAtTheFollowPace_NotAtTheListingPeriod()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var (cli, desktop) = await CreateHostsAsync(root, provider);
+        Assert.IsFalse(await ListsAsync(desktop, "none"));
+        var session = await RunInCliAsync(cli, provider, root, "before");
+        Assert.IsTrue(await cli.RuntimeService.DetachRuntimeSessionAsync(session.SessionId));
+        var markers = new SessionMarkerStore(desktop.CatalogOptions);
+        markers.Write(MarkerOf(cli, session.SessionId));
+        // The first pass fails, as one does on the listing cache that the start of the host still holds.
+        var catalog = new CatalogLockedOnce(desktop.AgentSessionCatalog);
+        await using var follower = new ExternalSessionFollower(desktop.CatalogOptions, desktop.SessionViewCatalog.JournalStore.CreateSessionStore(),
+            catalog, desktop.RuntimeService) { FollowInterval = TimeSpan.FromMilliseconds(200), RelistInterval = TimeSpan.FromHours(1) };
+        follower.Start();
+
+        await WaitUntilAsync(() => markers.List().Count == 0, "The marker is read by the pass made again after the one that failed.", Hang);
+        Assert.IsTrue(catalog.Failed, "The first pass failed.");
+        Assert.IsTrue(await ListsAsync(desktop, session.SessionId), "The session the marker named is listed.");
     }
 
     [TestMethod]
@@ -250,5 +272,33 @@ public sealed class ExternalSessionFollowerTests
         }
 
         return false;
+    }
+
+    // The catalog of a host, whose first invalidation of a session fails as a locked listing cache does.
+    private sealed class CatalogLockedOnce(IAgentSessionCatalog inner) : IAgentSessionCatalog
+    {
+        private int _failed;
+
+        public bool Failed => Volatile.Read(ref _failed) != 0;
+
+        public IAsyncEnumerable<AgentSessionMetadata> ListSessionsAsync(AgentSessionListFilter? filter = null, CancellationToken cancellationToken = default)
+            => inner.ListSessionsAsync(filter, cancellationToken);
+
+        public Task InvalidateAsync(CancellationToken cancellationToken = default) => inner.InvalidateAsync(cancellationToken);
+
+        public Task InvalidateAsync(string sessionId, CancellationToken cancellationToken = default)
+            => Interlocked.Exchange(ref _failed, 1) == 0
+                ? Task.FromException(new AgentSessionCacheLockedException("The listing cache is locked."))
+                : inner.InvalidateAsync(sessionId, cancellationToken);
+
+        public Task NotifySessionCreatedAsync(string sessionId, CancellationToken cancellationToken = default) => inner.NotifySessionCreatedAsync(sessionId, cancellationToken);
+
+        public Task NotifySessionResumedAsync(string sessionId, CancellationToken cancellationToken = default) => inner.NotifySessionResumedAsync(sessionId, cancellationToken);
+
+        public Task NotifySessionDeletedAsync(string sessionId, CancellationToken cancellationToken = default) => inner.NotifySessionDeletedAsync(sessionId, cancellationToken);
+
+        public Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default) => inner.DeleteSessionAsync(sessionId, cancellationToken);
+
+        public Task NotifySessionUpdatedAsync(string sessionId, CancellationToken cancellationToken = default) => inner.NotifySessionUpdatedAsync(sessionId, cancellationToken);
     }
 }
