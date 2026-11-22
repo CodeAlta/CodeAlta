@@ -176,6 +176,33 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task ASubProjectReportsItsBrokenRepositoryConfigAndCanStillSwitchItsOwnSkill()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        Assert.AreEqual("ok", (await fixture.Service.CreateAsync(new(Epoch, child.Id, "Project", "child-skill", "A local skill"), default)).Status);
+        config.SaveProjectDisabledSkillNames(child.ProjectPath, ["keep"]);
+        const string broken = "[skills\nbroken";
+        File.WriteAllText(fixture.ProjectConfig, broken);
+
+        var listing = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", listing.Status);
+        var problem = listing.Problems.Single();
+        Assert.AreEqual(("config", "Inherited", fixture.ProjectConfig), (problem.Kind, problem.Scope, problem.Path));
+        Assert.IsFalse(string.IsNullOrWhiteSpace(problem.Message));
+        Assert.IsTrue(listing.Skills.Single(skill => skill.Name == "child-skill").Enabled);
+        foreach (var enabled in new[] { false, true })
+        {
+            var toggle = await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "child-skill", enabled), default);
+            Assert.AreEqual(("ok", 1), (toggle.Status, toggle.Changed));
+            CollectionAssert.AreEquivalent(enabled ? new[] { "keep" } : ["keep", "child-skill"],
+                config.LoadProjectDisabledSkillNames(child.ProjectPath).ToArray());
+        }
+        Assert.AreEqual(broken, File.ReadAllText(fixture.ProjectConfig));
+    }
+
+    [TestMethod]
     public async Task ASubProjectListsAndOffersRepositorySkillsAndFolders_WithoutEditingTheirFilesOrSettings()
     {
         using var fixture = await Fixture.CreateAsync();

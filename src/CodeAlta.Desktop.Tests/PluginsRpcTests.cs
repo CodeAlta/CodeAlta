@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Plugins;
@@ -115,6 +117,56 @@ public sealed class PluginsRpcTests
         Assert.IsTrue(withProblem.Plugins.Single(plugin => plugin.Id == "local-plugin").Enabled, "The valid child override is still read.");
         var problem = withProblem.Problems!.Single();
         Assert.AreEqual(("config", "Inherited", fixture.ProjectConfig), (problem.Kind, problem.Scope, problem.Path));
+
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "local-plugin", false), default)).Status);
+        Assert.AreEqual(false, config.LoadProject(childPath).Plugins!["local-plugin"].Enabled);
+        Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "local-plugin", true), default)).Status);
+        Assert.AreEqual(true, config.LoadProject(childPath).Plugins!["local-plugin"].Enabled);
+        Assert.AreEqual("[plugins.local-plugin\nenabled = false\n", File.ReadAllText(fixture.ProjectConfig));
+    }
+
+    [TestMethod]
+    public async Task AnUnreadableAncestorPluginFolderDoesNotBlockWritingLocalConfiguration()
+    {
+        using var fixture = await Fixture.CreateAsync(null);
+        var childPath = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, "app")).FullName;
+        File.WriteAllText(ProjectManifest.PathOf(fixture.ProjectPath), "[projects.app]\npath = \"app\"\n");
+        var child = (await fixture.Projects.LoadAsync()).Single(project => project.DeclaredKey == "app");
+        var repositoryPlugins = Path.Combine(fixture.ProjectPath, ".alta", "plugins");
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        config.SaveProjectPluginEnabled(childPath, "configured-here", true);
+        if (OperatingSystem.IsWindows())
+        {
+            var directory = new DirectoryInfo(repositoryPlugins);
+            var acl = directory.GetAccessControl(AccessControlSections.Access);
+            var deny = new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.ListDirectory, AccessControlType.Deny);
+            acl.AddAccessRule(deny);
+            directory.SetAccessControl(acl);
+            try { await VerifyAsync(); }
+            finally
+            {
+                acl.RemoveAccessRuleSpecific(deny);
+                directory.SetAccessControl(acl);
+            }
+        }
+        else
+        {
+            var mode = File.GetUnixFileMode(repositoryPlugins);
+            File.SetUnixFileMode(repositoryPlugins, UnixFileMode.UserExecute);
+            try { await VerifyAsync(); }
+            finally { File.SetUnixFileMode(repositoryPlugins, mode); }
+        }
+
+        async Task VerifyAsync()
+        {
+            var listing = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+            Assert.AreEqual("ok", listing.Status);
+            if (listing.Problems!.Count == 0) Assert.Inconclusive("This user can still list the directory.");
+            var problem = listing.Problems.Single();
+            Assert.AreEqual(("folder", "Inherited", repositoryPlugins), (problem.Kind, problem.Scope, problem.Path));
+            Assert.AreEqual("ok", (await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "configured-here", false), default)).Status);
+            Assert.AreEqual(false, config.LoadProject(childPath).Plugins!["configured-here"].Enabled);
+        }
     }
 
     [TestMethod]

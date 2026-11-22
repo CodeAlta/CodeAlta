@@ -110,11 +110,8 @@ public sealed class SkillManagementService
         cancellationToken.ThrowIfCancellationRequested();
         var problems = new List<SkillConfigurationProblem>();
         var global = ReadDisabled(() => _config.LoadGlobalDisabledSkillNames(), _config.ConfigPath, isProject: false, problems);
-        IReadOnlyCollection<string> ReadProjectDisabled(string root, bool inherited) =>
-            ReadDisabled(() => _config.LoadProjectDisabledSkillNames(root), Path.Combine(root, ".alta", "config.toml"),
-                isProject: true, problems, inherited);
-        var project = projectRoot is null ? [] : ReadProjectDisabled(projectRoot, inherited: false);
-        var inheritedDisabled = SkillCatalogQuery.ReadInheritedDisabledSkillNames(inheritedRoots, root => ReadProjectDisabled(root, inherited: true));
+        var project = projectRoot is null ? [] : ReadProjectDisabled(projectRoot, inherited: false, problems);
+        var inheritedDisabled = ReadInheritedDisabled(inheritedRoots, problems);
         // The file that cannot be read is named once, by the reading of the disabled skills: it adds no folder.
         IReadOnlyList<string> globalFolders;
         try { globalFolders = _config.LoadGlobalSkillFolders(); }
@@ -124,8 +121,15 @@ public sealed class SkillManagementService
         return new SkillListing(skills, problems) { InheritedDisabledSkillNames = inheritedDisabled };
     }
 
+    private IReadOnlySet<string> ReadInheritedDisabled(IReadOnlyList<string> roots, List<SkillConfigurationProblem>? problems = null)
+        => SkillCatalogQuery.ReadInheritedDisabledSkillNames(roots, root => ReadProjectDisabled(root, inherited: true, problems));
+
+    private IReadOnlyCollection<string> ReadProjectDisabled(string root, bool inherited, List<SkillConfigurationProblem>? problems)
+        => ReadDisabled(() => _config.LoadProjectDisabledSkillNames(root), Path.Combine(root, ".alta", "config.toml"),
+            isProject: true, problems, inherited);
+
     private static IReadOnlyCollection<string> ReadDisabled(Func<IReadOnlyCollection<string>> read, string path, bool isProject,
-        List<SkillConfigurationProblem> problems, bool inherited = false)
+        List<SkillConfigurationProblem>? problems, bool inherited = false)
     {
         try
         {
@@ -134,7 +138,7 @@ public sealed class SkillManagementService
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
             // The parser says where; the system says why a file being written cannot be opened.
-            problems.Add(new SkillConfigurationProblem(isProject, path, exception.GetBaseException().Message) { IsInherited = inherited });
+            problems?.Add(new SkillConfigurationProblem(isProject, path, exception.GetBaseException().Message) { IsInherited = inherited });
             return [];
         }
     }
@@ -383,7 +387,8 @@ public sealed class SkillManagementService
         {
             if (enabled == false && inheritedRoots is { Count: > 0 })
             {
-                var inherited = SkillCatalogQuery.ReadInheritedDisabledSkillNames(inheritedRoots, _config.LoadProjectDisabledSkillNames);
+                // This write changes only local configuration. Like the listing, ignore unreadable ancestors.
+                var inherited = ReadInheritedDisabled(inheritedRoots);
                 normalized = [.. normalized.Where(name => !inherited.Contains(name))];
             }
 

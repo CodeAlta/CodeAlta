@@ -120,15 +120,7 @@ internal sealed class PluginsService
             var packages = new List<SourcePluginPackage>();
             foreach (var root in ReadRoots(project.Project))
             {
-                try
-                {
-                    packages.AddRange(_discovery.Discover(root));
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                    // The folder changes while it is read (an agent writes a plugin), or it cannot be opened.
-                    problems.Add(new("folder", root.RootPath, Clean(exception.Message), root.Inherited ? InheritedScope : root.Scope.ToString()));
-                }
+                packages.AddRange(Discover(root, problems));
             }
 
             // No built-in definitions: the page has their rows, whichever host runs them.
@@ -257,8 +249,9 @@ internal sealed class PluginsService
                 if (projectScope)
                 {
                     var inherited = ProjectResourceRoots.Inherited(project.Project);
+                    // The write targets the child alone; unreadable ancestors contribute nothing, as in the listing.
                     if (inherited.Count > 0 && (FindProjectPackage(project.Project, request.Id!)?.Root.Inherited == true
-                        || Configured(_store.LoadProject(inherited[0], [.. inherited.Skip(1)]), request.Id!) == false))
+                        || Configured(_store.LoadProject(inherited[0], [.. inherited.Skip(1)], static (_, _) => { }).Effective, request.Id!) == false))
                         return new("read_only", null);
                     _store.SaveProjectPluginEnabled(project.Root!, request.Id!, request.Enabled);
                 }
@@ -552,8 +545,22 @@ internal sealed class PluginsService
         });
 
     private SourcePluginPackage? FindProjectPackage(ProjectDescriptor? project, string id)
-        => ReadRoots(project).Where(static root => root.Scope == PluginScope.Project).SelectMany(_discovery.Discover)
+        => ReadRoots(project).Where(static root => root.Scope == PluginScope.Project).SelectMany(root => Discover(root))
             .FirstOrDefault(package => string.Equals(package.PackageId, id, StringComparison.OrdinalIgnoreCase));
+
+    private IReadOnlyList<SourcePluginPackage> Discover(PluginRoot root, List<PluginsProblem>? problems = null)
+    {
+        try
+        {
+            return _discovery.Discover(root);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A directory can change during enumeration or refuse to open. Other roots are still usable.
+            problems?.Add(new("folder", root.RootPath, Clean(exception.Message), root.Inherited ? InheritedScope : root.Scope.ToString()));
+            return [];
+        }
+    }
 
     // The local plugin folder a request names by its scope, or why it cannot be changed.
     private async Task<(string Status, PluginRoot? Root)> RootAsync(string? projectId, string? scope, CancellationToken cancellationToken)
