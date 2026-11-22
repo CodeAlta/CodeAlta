@@ -1,6 +1,3 @@
-using System.IO.Compression;
-using System.Net;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Desktop.Speech;
@@ -172,7 +169,7 @@ public sealed class SpeechInstallerTests
         Assert.AreEqual(("failed", "not_found"), ((await fixture.EndAsync(installer)).State, installer.Current.Error));
         await installer.CloseAsync();
 
-        var nowhere = new SpeechInstaller(fixture.Root, fixture.Http, null, fixture.Detector);
+        var nowhere = fixture.Create(engine: null);
         Assert.IsFalse(nowhere.IsSupported);
         Assert.IsTrue(nowhere.TryStart(Address));
         Assert.AreEqual(("failed", "unsupported_platform"), ((await fixture.EndAsync(nowhere)).State, nowhere.Current.Error));
@@ -203,16 +200,7 @@ public sealed class SpeechInstallerTests
         public Fixture()
         {
             Root = NewRoot();
-            using var package = new MemoryStream();
-            using (var archive = new ZipArchive(package, ZipArchiveMode.Create, leaveOpen: true))
-            {
-                Write(archive, "runtimes/test-rid/native/dep.lib", "dependency");
-                Write(archive, "runtimes/test-rid/native/engine.lib", "engine");
-                Write(archive, "runtimes/other-rid/native/engine.lib", "another platform");
-            }
-
-            var nupkg = package.ToArray();
-            _engine = new("test-rid", nupkg.Length, Sha256(nupkg), ["dep.lib", "engine.lib"]);
+            (_engine, var nupkg) = EnginePackage(("dep.lib", "dependency"), ("engine.lib", "engine"));
             Http.Content[_engine.Address.AbsoluteUri] = nupkg;
             var detector = "voice detector"u8.ToArray();
             Detector = new("vad", "Detector", "tests", "", "MIT", "tests/vad", Commit, "", SpeechModelFamily.Transducer, [new("silero_vad.onnx", "", detector.Length, Sha256(detector), null)]);
@@ -243,12 +231,14 @@ public sealed class SpeechInstallerTests
         }
 
         public string Root { get; }
-        public Handler Http { get; } = new();
+        public FakeDownloadServer Http { get; } = new();
         public SpeechModelDefinition Detector { get; }
         public long ModelBytes { get; }
         public long Total { get; }
 
-        public SpeechInstaller Create() => new(Root, Http, _engine, Detector);
+        public SpeechInstaller Create() => Create(_engine);
+
+        public SpeechInstaller Create(SpeechEngineDefinition? engine) => new(Root, new SherpaRuntime(Path.Combine(Root, "runtime"), Root, engine, Http), Http, Detector);
 
         public string Resolve(string name) => $"https://huggingface.co/owner/sherpa-onnx-nemo-parakeet-test/resolve/{Commit}/{name}";
 
@@ -265,48 +255,8 @@ public sealed class SpeechInstallerTests
             if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
         }
 
-        private static void Write(ZipArchive archive, string name, string content)
-        {
-            using var writer = new StreamWriter(archive.CreateEntry(name).Open());
-            writer.Write(content);
-        }
-
         private static string Sha256(byte[] content) => Convert.ToHexStringLower(SHA256.HashData(content));
 
         private static string GitSha1(byte[] content) => Convert.ToHexStringLower(SHA1.HashData([.. Encoding.ASCII.GetBytes($"blob {content.Length}\0"), .. content]));
-    }
-
-    /// <summary>Hugging Face and nuget.org in memory: files by address, with ranges, and connections that break or wait.</summary>
-    private sealed class Handler : HttpMessageHandler
-    {
-        public Dictionary<string, byte[]> Content { get; } = [];
-        public Dictionary<string, int> FailAfter { get; } = [];
-        public Dictionary<string, Task> Hold { get; } = [];
-        public List<(string Url, long? RangeFrom)> Requests { get; } = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var url = request.RequestUri!.AbsoluteUri;
-            var from = request.Headers.Range?.Ranges.Single().From;
-            lock (Requests) Requests.Add((url, from));
-            if (Hold.TryGetValue(url, out var hold)) await hold.WaitAsync(cancellationToken);
-            if (!Content.TryGetValue(url, out var bytes)) return new(HttpStatusCode.NotFound);
-            var body = bytes.AsSpan((int)(from ?? 0)).ToArray();
-            Stream stream = new MemoryStream(body);
-            if (FailAfter.TryGetValue(url, out var limit)) stream = new BrokenStream(body, limit);
-            var response = new HttpResponseMessage(from is null ? HttpStatusCode.OK : HttpStatusCode.PartialContent) { Content = new StreamContent(stream) };
-            response.Content.Headers.ContentLength = body.Length;
-            if (from is not null) response.Content.Headers.ContentRange = new ContentRangeHeaderValue(from.Value, bytes.Length - 1, bytes.Length);
-            return response;
-        }
-    }
-
-    private sealed class BrokenStream(byte[] content, int limit) : MemoryStream(content)
-    {
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            if (Position >= limit) throw new IOException("The connection was closed.");
-            return base.ReadAsync(buffer[..(int)Math.Min(buffer.Length, limit - Position)], cancellationToken);
-        }
     }
 }

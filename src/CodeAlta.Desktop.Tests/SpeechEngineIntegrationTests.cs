@@ -34,7 +34,8 @@ public sealed class SpeechEngineIntegrationTests
         }
 
         var model = Environment.GetEnvironmentVariable("CODEALTA_SPEECH_TEST_MODEL") is { Length: > 0 } chosen ? chosen : SpeechSettings.DefaultModel;
-        var installer = new SpeechInstaller(root, null, SpeechModelCatalog.FindEngine(SpeechModelCatalog.CurrentRuntimeIdentifier()), SpeechModelCatalog.VoiceDetector);
+        var runtime = new SherpaRuntime(Path.Combine(root, "runtime"), root, SpeechModelCatalog.FindEngine(SpeechModelCatalog.CurrentRuntimeIdentifier()), handler: null);
+        var installer = new SpeechInstaller(root, runtime, null, SpeechModelCatalog.VoiceDetector);
         var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "alta.exe" : "alta");
         Assert.IsTrue(File.Exists(executable), "the desktop executable is beside the tests");
         var client = new SpeechWorkerClient(directory => SpeechWorkerProcess.Start(executable, directory), TimeProvider.System, TimeSpan.FromMinutes(5));

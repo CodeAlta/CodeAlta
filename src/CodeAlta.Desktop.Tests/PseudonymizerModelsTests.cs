@@ -101,7 +101,7 @@ public sealed class PseudonymizerModelsTests
     }
 
     [TestMethod]
-    public async Task AModelWithoutItsRuntime_GetsTheRuntimeAlone_ByOneDownloadAllShare()
+    public async Task AModelWithoutItsRuntime_GetsTheRuntimeAlone()
     {
         using var folder = new TemporaryFolder();
         var host = new Host(folder.Path) { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), Downloaded = "onnxruntime" };
@@ -113,21 +113,17 @@ public sealed class PseudonymizerModelsTests
         Assert.IsTrue(models.NeedsRuntime);
         Assert.IsFalse(models.Install(PseudonymizerLanguages.English), "The model is not downloaded again.");
 
-        var first = models.InstallRuntimeAsync();
-        Assert.AreSame(first, models.InstallRuntimeAsync(), "Who asks while it runs waits for the same download.");
-        Assert.IsFalse(first.IsCompleted);
+        var installing = models.InstallRuntimeAsync();
+        Assert.IsFalse(installing.IsCompleted);
         host.Gate.SetResult();
-        Assert.IsNull(await first);
+        Assert.IsNull(await installing);
         Assert.IsFalse(models.NeedsRuntime);
         Assert.AreEqual(PseudonymizerDownloadState.Idle, models.Download.State, "It is not the download of a model.");
-        Assert.IsNull(await models.InstallRuntimeAsync());
-        Assert.AreEqual(1, host.RuntimeDownloads, "A runtime that is there is not downloaded again.");
 
-        // A download that fails says why, and the next one who asks tries again.
+        // A download that fails says why.
         (host.Runtime, host.Downloaded) = (null, null);
         Assert.AreEqual("No download in a test.", await models.InstallRuntimeAsync());
-        Assert.AreEqual("No download in a test.", await models.InstallRuntimeAsync());
-        Assert.AreEqual(3, host.RuntimeDownloads);
+        Assert.IsTrue(models.NeedsRuntime);
     }
 
     [TestMethod]
@@ -152,7 +148,7 @@ public sealed class PseudonymizerModelsTests
         string? Status() => plugin.GetUiContributions().OfType<PluginStatusContribution>().Single()
             .GetStatus(new PluginStatusContext { Plugin = active.Descriptor, Services = active.RuntimeContext.Services, SessionId = "session", ProjectId = "project" })?.Text;
 
-        // The plugin asks for the runtime as it starts, and the request that comes meanwhile waits for that download.
+        // The plugin asks for the runtime as it starts, and the request that comes meanwhile asks too and waits.
         var preparing = plugin.GetProviderBoundary(session)!.PrepareRequestAsync(Request(), CancellationToken.None).AsTask();
         await WaitForAsync(() => Status() == "downloading the engine of the model");
         Assert.IsFalse(preparing.IsCompleted, "Nothing is sent before the model can run.");
@@ -161,7 +157,6 @@ public sealed class PseudonymizerModelsTests
         host.Gate.SetResult();
         var refused = await Assert.ThrowsExactlyAsync<AgentProviderBoundaryException>(() => preparing);
         StringAssert.Contains(refused.Message, "could not be downloaded (No download in a test.)");
-        Assert.AreEqual(1, host.RuntimeDownloads);
         Assert.IsNull(Status());
 
         // Sent again, the request asks for the runtime again, and goes through the boundary of the model once it is there.
@@ -169,7 +164,6 @@ public sealed class PseudonymizerModelsTests
         var boundary = plugin.GetProviderBoundary(session)!;
         var sent = await boundary.PrepareRequestAsync(Request(), CancellationToken.None);
         StringAssert.Contains(sent.SessionInstructions, "Pseudonymization: on");
-        Assert.AreEqual(2, host.RuntimeDownloads);
         var answer = boundary.CreateResponseStream(AgentContentKind.Assistant, "content");
         Assert.AreEqual("Done.", answer.Write("Done.") + answer.Flush(), "The answer is restored by the same boundary.");
         await active.DeactivateAsync(TimeSpan.FromSeconds(5));
@@ -312,15 +306,10 @@ public sealed class PseudonymizerModelsTests
         // The runtime a download installs; null for a download that fails.
         public string? Downloaded { get; set; }
 
-        public int RuntimeDownloads => Volatile.Read(ref _runtimeDownloads);
-
-        private int _runtimeDownloads;
-
         public string? OnnxRuntimeLibrary() => Runtime;
 
         public async Task InstallOnnxRuntimeAsync(CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref _runtimeDownloads);
             if (Gate is { } gate) await gate.Task.WaitAsync(cancellationToken);
             Runtime = Downloaded ?? throw new PlatformNotSupportedException("No download in a test.");
         }

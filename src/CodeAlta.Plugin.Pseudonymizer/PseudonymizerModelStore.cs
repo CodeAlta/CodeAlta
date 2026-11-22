@@ -122,8 +122,6 @@ public sealed class PseudonymizerModelStore : IDisposable
     private readonly CancellationTokenSource _stopping = new();
     private PseudonymizerDownload _download = PseudonymizerDownload.Idle;
     private bool _running;
-    // The download of the ONNX Runtime that runs, shared by all who need the runtime; null when none runs. Under the gate.
-    private Task<string?>? _runtime;
 
     /// <summary>Creates the store over what keeps and runs the models.</summary>
     /// <param name="host">Where the models are kept and run.</param>
@@ -163,15 +161,19 @@ public sealed class PseudonymizerModelStore : IDisposable
     /// </summary>
     public bool NeedsRuntime => !_models.HasRuntime && NerModelCatalog.Presets.Any(_models.IsInstalled);
 
-    /// <summary>
-    /// Downloads the ONNX Runtime the models run on, a few megabytes; does nothing when it is there. One download runs at
-    /// a time: who asks while it runs gets the same one.
-    /// </summary>
+    /// <summary>Downloads the ONNX Runtime the models run on, a few megabytes; does nothing when it is there.</summary>
     /// <returns>Null once the runtime is there; otherwise why it could not be downloaded.</returns>
-    public Task<string?> InstallRuntimeAsync()
+    public async Task<string?> InstallRuntimeAsync()
     {
-        if (_models.HasRuntime) return Task.FromResult<string?>(null);
-        lock (_gate) return _runtime ??= Task.Run(DownloadRuntimeAsync);
+        try
+        {
+            await _models.InstallRuntimeAsync(_stopping.Token).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception exception) when (IsDownloadFailure(exception))
+        {
+            return FailureOf(exception);
+        }
     }
 
     /// <summary>Downloads the model of a language, after the one that runs; does nothing when it is there or on its way.</summary>
@@ -275,23 +277,6 @@ public sealed class PseudonymizerModelStore : IDisposable
 
             Changed?.Invoke(this, EventArgs.Empty);
             if (last) return;
-        }
-    }
-
-    private async Task<string?> DownloadRuntimeAsync()
-    {
-        try
-        {
-            await _models.InstallRuntimeAsync(_stopping.Token).ConfigureAwait(false);
-            return null;
-        }
-        catch (Exception exception) when (IsDownloadFailure(exception))
-        {
-            return FailureOf(exception);
-        }
-        finally
-        {
-            lock (_gate) _runtime = null;
         }
     }
 

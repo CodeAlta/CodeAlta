@@ -180,7 +180,8 @@ public sealed class SpeechRpcTests
 
         Assert.AreEqual("invalid_request", (await fixture.Service.InstallAsync(new("host", "not-a-preset"), default)).Status);
         Assert.AreEqual("ok", fixture.Service.CancelInstall(new("host")).Status);
-        var unsupported = new SpeechService(fixture.Options, "host", null, _ => throw new InvalidOperationException(), TimeProvider.System, null);
+        var unsupported = new SpeechService(fixture.Options, "host", new SherpaRuntime(fixture.Options.RuntimeRoot, fixture.Options.SpeechRoot, engine: null, handler: null), null,
+            _ => throw new InvalidOperationException(), TimeProvider.System);
         Assert.AreEqual("unsupported", (await unsupported.InstallAsync(new("host", null), default)).Status);
         Assert.AreEqual("unsupported", (await unsupported.StartAsync(new("host"), default)).Status);
         Assert.IsFalse((await unsupported.ReadAsync(new("host"), default)).Supported);
@@ -239,12 +240,12 @@ public sealed class SpeechRpcTests
         {
             Root = NewRoot();
             Options = new() { GlobalRoot = Root };
-            Service = new(Options, "host", handler, _ =>
+            Service = new(Options, "host", new SherpaRuntime(Options.RuntimeRoot, Options.SpeechRoot, SpeechModelCatalog.FindEngine(Runtime), handler), handler, _ =>
             {
                 var process = new FakeSpeechWorkerProcess(Engine);
                 lock (Started) Started.Add(process);
                 return process;
-            }, new SpeechTestClock(), Runtime);
+            }, new SpeechTestClock());
         }
 
         public string Root { get; }

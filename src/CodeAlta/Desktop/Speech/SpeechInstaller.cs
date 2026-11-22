@@ -82,9 +82,9 @@ internal sealed class SpeechInstallException(string code) : Exception(code)
 }
 
 /// <summary>
-/// Downloads what speech to prompt needs into the shared cache, one download at a time: the engine, the model
-/// that finds speech, and a speech model. The download belongs to the application, not to a window: a
-/// subscriber follows it and never ends it.
+/// Downloads what speech to prompt needs into the shared cache, one download at a time: the engine, through the
+/// runtime the application shares (<see cref="SherpaRuntime"/>), the model that finds speech, and a speech model.
+/// The download belongs to the application, not to a window: a subscriber follows it and never ends it.
 /// </summary>
 /// <remarks>
 /// A file is written as <c>name.part</c> in a <c>.partial</c> folder, resumed where it stopped, checked against
@@ -99,9 +99,8 @@ internal sealed class SpeechInstaller
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
 
     private readonly string _root;
-    private readonly string _runtimeRoot;
+    private readonly SherpaRuntime _runtime;
     private readonly PinnedDownloader _downloads;
-    private readonly SpeechEngineDefinition? _engine;
     private readonly SpeechModelDefinition _voiceDetector;
     private readonly Lock _gate = new();
     private readonly List<Action<SpeechInstallSnapshot>> _observers = [];
@@ -112,29 +111,17 @@ internal sealed class SpeechInstaller
 
     /// <summary>Creates the installer of a cache folder.</summary>
     /// <param name="root">The folder of speech to prompt in the cache.</param>
+    /// <param name="runtime">The engine, which the application shares.</param>
     /// <param name="handler">The handler of its requests, or null for the network.</param>
-    /// <param name="engine">The engine of this platform, or null when it has none.</param>
     /// <param name="voiceDetector">The one-file model that finds where speech starts and ends.</param>
-    public SpeechInstaller(string root, HttpMessageHandler? handler, SpeechEngineDefinition? engine, SpeechModelDefinition voiceDetector)
-        : this(root, Path.Combine(root, "runtime"), handler, engine, voiceDetector)
-    {
-    }
-
-    /// <summary>Creates the installer of a cache folder whose engine is in a shared runtime folder.</summary>
-    /// <param name="root">The folder of speech to prompt in the cache.</param>
-    /// <param name="runtimeRoot">The folder of the native runtimes in the cache (<c>CatalogOptions.RuntimeRoot</c>).</param>
-    /// <param name="handler">The handler of its requests, or null for the network.</param>
-    /// <param name="engine">The engine of this platform, or null when it has none.</param>
-    /// <param name="voiceDetector">The one-file model that finds where speech starts and ends.</param>
-    public SpeechInstaller(string root, string runtimeRoot, HttpMessageHandler? handler, SpeechEngineDefinition? engine, SpeechModelDefinition voiceDetector)
+    public SpeechInstaller(string root, SherpaRuntime runtime, HttpMessageHandler? handler, SpeechModelDefinition voiceDetector)
     {
         ArgumentException.ThrowIfNullOrEmpty(root);
-        ArgumentException.ThrowIfNullOrEmpty(runtimeRoot);
+        ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(voiceDetector);
         _root = Path.GetFullPath(root);
-        _runtimeRoot = Path.GetFullPath(runtimeRoot);
+        _runtime = runtime;
         _downloads = new(handler, new("CodeAlta", DesktopCommandLine.Version));
-        _engine = engine;
         _voiceDetector = voiceDetector;
     }
 
@@ -145,16 +132,16 @@ internal sealed class SpeechInstaller
     public string Root => _root;
 
     /// <summary>Gets whether the engine exists for this platform.</summary>
-    public bool IsSupported => _engine is not null;
+    public bool IsSupported => _runtime.Engine is not null;
 
     /// <summary>Gets the folder of the native libraries of the engine.</summary>
-    public string EngineDirectory => _engine is null ? Path.Combine(_runtimeRoot, "sherpa-onnx", "none") : SherpaRuntime.Resolve(_runtimeRoot, _root, _engine);
+    public string EngineDirectory => _runtime.InstallDirectory;
 
     /// <summary>Gets the file of the model that finds where speech starts and ends.</summary>
     public string VoiceDetectorPath => Path.Combine(_root, "vad", _voiceDetector.Files[0].Name);
 
     /// <summary>Gets the libraries of the engine in the order they are loaded.</summary>
-    public IReadOnlyList<string> EngineLibraries => _engine?.Libraries ?? [];
+    public IReadOnlyList<string> EngineLibraries => _runtime.Engine?.Libraries ?? [];
 
     /// <summary>Gets the latest state.</summary>
     public SpeechInstallSnapshot Current { get { lock (_gate) return _snapshot; } }
@@ -163,7 +150,7 @@ internal sealed class SpeechInstaller
 
     /// <summary>Gets whether the engine and the model that finds speech are on disk.</summary>
     public bool IsEngineInstalled
-        => _engine is not null && SherpaRuntime.IsInstalled(EngineDirectory, _engine)
+        => _runtime.IsInstalled
             && File.Exists(Path.Combine(_root, "vad", VoiceDetectorMarker)) && File.Exists(VoiceDetectorPath);
 
     /// <summary>Gets an installed model by its id, or null.</summary>
@@ -256,7 +243,10 @@ internal sealed class SpeechInstaller
         }
     }
 
-    /// <summary>Stops the running download. What is on disk stays, and the next download goes on from it.</summary>
+    /// <summary>
+    /// Stops the running download. What is on disk stays, and the next download goes on from it. The download of the
+    /// engine, which other features may wait for, goes on by itself.
+    /// </summary>
     public void Cancel()
     {
         lock (_gate) _cancellation?.Cancel();
@@ -307,17 +297,16 @@ internal sealed class SpeechInstaller
         var token = cancellation.Token;
         try
         {
-            if (_engine is null) throw new SpeechInstallException("unsupported_platform");
+            if (_runtime.Engine is not { } engine) throw new SpeechInstallException("unsupported_platform");
             if (id is null) throw new SpeechInstallException("unsupported_model");
             // A model that is there is not looked up again: only what it runs on may be missing.
             var installed = Find(id);
             var definition = installed is null ? SpeechModelCatalog.FindPreset(model) ?? await ResolveAsync(model, token).ConfigureAwait(false) : null;
-            var progress = new Progress(this, id, definition?.Name ?? installed!.Manifest.Name, (IsEngineInstalled ? 0 : _engine.Size + _voiceDetector.Size) + (definition?.Size ?? 0));
+            var progress = new Progress(this, id, definition?.Name ?? installed!.Manifest.Name, (IsEngineInstalled ? 0 : engine.Size + _voiceDetector.Size) + (definition?.Size ?? 0));
             progress.Publish("downloading", force: true);
             if (!IsEngineInstalled)
             {
-                await SherpaRuntime.InstallAsync(_downloads, _runtimeRoot, _engine, progress, () => progress.Publish("installing", force: true), token).ConfigureAwait(false);
-                progress.Publish("downloading", force: true);
+                await _runtime.InstallAsync(progress, token).ConfigureAwait(false);
                 await InstallFolderAsync(Path.Combine(_root, "vad"), VoiceDetectorMarker, [.. _voiceDetector.Files.Select(file => (file, _voiceDetector.AddressOf(file)))], null,
                     "{}"u8.ToArray(), progress, token).ConfigureAwait(false);
             }

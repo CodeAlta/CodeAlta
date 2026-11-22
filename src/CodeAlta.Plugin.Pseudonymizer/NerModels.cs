@@ -20,8 +20,11 @@ public interface IPseudonymizerModelHost
     /// <returns>The path, or null.</returns>
     string? OnnxRuntimeLibrary();
 
-    /// <summary>Downloads the ONNX Runtime; does nothing when it is there.</summary>
-    /// <param name="cancellationToken">Stops the download.</param>
+    /// <summary>
+    /// Downloads the ONNX Runtime; does nothing when it is there. A call made while it is downloaded waits for that
+    /// download.
+    /// </summary>
+    /// <param name="cancellationToken">Stops the wait.</param>
     /// <returns>The download.</returns>
     /// <exception cref="PinnedDownloadException">The download failed.</exception>
     /// <exception cref="PlatformNotSupportedException">This platform has no ONNX Runtime.</exception>
