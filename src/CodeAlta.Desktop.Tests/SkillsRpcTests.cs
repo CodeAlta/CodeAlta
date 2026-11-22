@@ -151,6 +151,31 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task ARepositoryCanDisableAUserSkillForItsSubProject_WithoutWritingTheSubProjectConfig()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var childConfig = Path.Combine(child.ProjectPath, ".alta", "config.toml");
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        config.SaveProjectDisabledSkillNames(fixture.ProjectPath, ["alpha"]);
+        var repositoryConfig = File.ReadAllText(fixture.ProjectConfig);
+
+        var listing = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", listing.Status);
+        var alpha = listing.Skills.Single(skill => skill.Name == "alpha");
+        Assert.IsTrue(alpha is { Enabled: false, EnabledGlobal: true, EnabledProject: false }, "The repository disabled this skill.");
+        var detail = await fixture.Service.DetailAsync(new(Epoch, child.Id, null, alpha.Source, alpha.Id), default);
+        Assert.AreEqual("ok", detail.Status);
+        Assert.IsFalse(detail.ModelVisible);
+
+        var enable = await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "alpha", true), default);
+        Assert.AreEqual(0, enable.Changed);
+        Assert.IsFalse((await fixture.Service.ListAsync(new(Epoch, child.Id), default)).Skills.Single(skill => skill.Name == "alpha").Enabled);
+        Assert.IsFalse(File.Exists(childConfig));
+        Assert.AreEqual(repositoryConfig, File.ReadAllText(fixture.ProjectConfig));
+    }
+
+    [TestMethod]
     public async Task List_ReturnsUserSkillsAndTheProjectSkillsOfTheNamedProject()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -871,6 +896,13 @@ public sealed class SkillsRpcTests
         public string ProjectPath => Project.ProjectPath;
         public string GlobalConfig => Projects.Options.ConfigPath;
         public string ProjectConfig => Path.Combine(ProjectPath, ".alta", "config.toml");
+
+        public async Task<ProjectDescriptor> AddSubProjectAsync()
+        {
+            Directory.CreateDirectory(Path.Combine(ProjectPath, "app"));
+            await File.WriteAllTextAsync(ProjectManifest.PathOf(ProjectPath), "[projects.app]\npath = \"app\"\n");
+            return (await Projects.LoadAsync()).Single(project => project.DeclaredKey == "app");
+        }
 
         private static void WriteSkill(string root, string name, string description)
         {

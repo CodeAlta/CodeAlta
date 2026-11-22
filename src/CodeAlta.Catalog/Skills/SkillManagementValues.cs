@@ -61,10 +61,18 @@ public readonly record struct SkillEnablementUpdateResult(int GlobalChanged, int
 /// <summary>The skills of a listing made for showing them, with the configuration files that could not be read.</summary>
 /// <param name="Skills">The skills, listed as if an unreadable configuration file disabled none.</param>
 /// <param name="Problems">The configuration files that could not be read or parsed; empty when every one was read.</param>
-public sealed record SkillListing(IReadOnlyList<SkillDescriptor> Skills, IReadOnlyList<SkillConfigurationProblem> Problems);
+public sealed record SkillListing(IReadOnlyList<SkillDescriptor> Skills, IReadOnlyList<SkillConfigurationProblem> Problems)
+{
+    /// <summary>Gets the names disabled by the configuration of an ancestor of the selected project.</summary>
+    public IReadOnlySet<string> InheritedDisabledSkillNames { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+}
 
 /// <summary>A configuration file whose disabled skills could not be read.</summary>
 /// <param name="IsProject">Whether the file is the one of the project; otherwise it is the one of the user.</param>
 /// <param name="Path">The file.</param>
 /// <param name="Message">What the parser or the system said.</param>
-public sealed record SkillConfigurationProblem(bool IsProject, string Path, string Message);
+public sealed record SkillConfigurationProblem(bool IsProject, string Path, string Message)
+{
+    /// <summary>Gets whether the configuration belongs to an ancestor of the selected project.</summary>
+    public bool IsInherited { get; init; }
+}

@@ -126,7 +126,7 @@ internal sealed class ProjectFilesService
         if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
         var project = request.Worktree is null
             ? await RootAsync(request.ProjectId, cancellationToken).ConfigureAwait(false)
-            : await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+            : await SettingsProjectScope.ResolveRootAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Root is not { } root) return Refused(project.Status);
         try
         {
@@ -740,7 +740,7 @@ internal sealed class ProjectFilesService
             : SkillFolder.TryParse(projectId, out var skill)
                 ? _skills?.ResolveAsync(skill, cancellationToken) ?? Task.FromResult<(string Status, string? Root)>(("unknown_project", null))
             : DiskFolders.IsId(projectId) ? Task.FromResult(_folders?.Resolve(projectId) ?? ("unknown_project", null))
-            : SettingsProjectScope.ResolveAsync(_projects, projectId, cancellationToken);
+            : SettingsProjectScope.ResolveRootAsync(_projects, projectId, cancellationToken);
 
     // Whether a request names a folder that is only read: nothing is created, changed or removed in it.
     private static bool ReadOnlyFolder(string? projectId) => SkillFolder.TryParse(projectId, out var skill) ? skill.ReadOnly : DiskFolders.IsReadOnly(projectId);

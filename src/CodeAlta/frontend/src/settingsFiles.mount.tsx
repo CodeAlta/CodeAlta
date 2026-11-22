@@ -29,7 +29,7 @@ const entry = (id: string, scope: "Global" | "Project", change: Partial<PluginsE
   loadable: true, changed: false, errors: null,
   icon: null, color: null, version: null, author: null, tags: null, image: null, ...change });
 const skill = (id: string, name: string, source: string, change: Partial<SkillsEntry> = {}): SkillsEntry => ({ id, name, title: name, description: `What ${name} is for.`, source,
-  scope: source.startsWith("Project") ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true,
+  scope: source.startsWith("Project") ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true, disabledByRepository: false,
   folder: `skill:global:${source}:${name}`, path: `C:\\skills\\${id}`, ...change });
 const query = new URLSearchParams(location.search);
 const invalidSkills = query.get("skills") === "invalid";

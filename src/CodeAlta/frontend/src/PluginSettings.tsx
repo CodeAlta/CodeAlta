@@ -126,7 +126,7 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
   return <div className="plugin-problems" role="alert">
     {problems.map((problem, index) => <small key={index} className="plugin-failure">
       {t(problemText[problem.kind] ?? "The settings could not be read.", { path: problem.path ?? "" })}{problem.message ? ` ${problem.message}` : ""}
-      {problem.kind === "config" && problem.path && problem.scope && files && <SettingsFileLocation path={problem.path} platform={files.platform}
+      {problem.kind === "config" && problem.path && (problem.scope === "Global" || problem.scope === "Project") && files && <SettingsFileLocation path={problem.path} platform={files.platform}
         onOpen={files.open ? () => files.open!({ kind: "config", scope: problem.scope! }) : undefined} onReveal={() => files.reveal({ kind: "config", scope: problem.scope! })} />}</small>)}
     {omitted > 0 && <small className="plugin-failure">{t("{count} more are not listed.", { count: omitted })}</small>}
   </div>;

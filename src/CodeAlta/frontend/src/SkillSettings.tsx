@@ -42,6 +42,7 @@ export const skillToggleable = (name: string) => {
   const normalized = name.trim().toLowerCase();
   return normalized.length <= 64 && /^[\p{L}\p{Nd}]+(?:-[\p{L}\p{Nd}]+)*$/u.test(normalized);
 };
+const canToggle = (skill: SkillsEntry) => !skill.disabledByRepository && skillToggleable(skill.name);
 
 /** The folder of a skill, as the code editor opens on it: the id the host gave it, its path and the name of the skill. */
 export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
@@ -74,7 +75,7 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
   return <section className="skill-detail" aria-label={t("Details for {name}", { name: skill.title || skill.name })}>
     <header><h2>{skill.title || skill.name}</h2>
       <span className="settings-editor-tags"><Tag minimal round>{t(skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
-        <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.enabled ? "Enabled" : "Disabled")}</Tag>
+        <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.disabledByRepository ? "Disabled by repository" : skill.enabled ? "Enabled" : "Disabled")}</Tag>
         {detail && !detail.modelVisible && skill.enabled && <Tag minimal round intent="warning">{t("Not offered to the model")}</Tag>}
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
         {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
@@ -141,7 +142,8 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
           {onDelete && skillRemovable(skill.source) && <RemoveButton name={name} disabled={disabled} onRemove={() => onDelete(skill)} />}
           {!spacelessSkillSource(skill.source) && skillToggleable(skill.name)
             && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={name} disabled={disabled} />}
-          <Switch checked={skill.enabled} disabled={disabled || !skillToggleable(skill.name)} aria-label={t("Enable {name}", { name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
+          {skill.disabledByRepository && <Tag minimal round>{t("Disabled by repository")}</Tag>}
+          <Switch checked={skill.enabled} disabled={disabled || !canToggle(skill)} aria-label={t("Enable {name}", { name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
       </Card>; })}
     {rows.windowed && <div className="row-window-spacer" style={{ height: after }} aria-hidden="true" />}
     {skills.length === 0 && <Card><span className="bp6-text-muted">{t(empty)}</span></Card>}
@@ -412,12 +414,12 @@ export function SkillSettings({ epoch, project, space = null, onEdit, onOpenFile
   // action and are left out of bulk writes, without losing their detail or remove actions. The bulk switches name the
   // filter, not the skills: the host switches every skill it matches, those beyond the listing limit included.
   const omitted = listing?.omitted ?? 0;
-  const toggleNames = [...new Set(shown.filter(skill => skillToggleable(skill.name)).map(skill => skill.name))];
+  const hasToggle = shown.some(canToggle);
   const toggle = (skill: SkillsEntry, enabled: boolean) => {
-    if (skillToggleable(skill.name)) void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, name: skill.name, enabled }, { timeoutMilliseconds: 30000 }));
+    if (canToggle(skill)) void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, name: skill.name, enabled }, { timeoutMilliseconds: 30000 }));
   };
   const toggleAll = (enabled: boolean) => {
-    if (toggleNames.length || omitted) void mutate(() => api.setMatchingEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, query: filter.trim(), enabled, spaceId }, { timeoutMilliseconds: 30000 }));
+    if (hasToggle || omitted) void mutate(() => api.setMatchingEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, query: filter.trim(), enabled, spaceId }, { timeoutMilliseconds: 30000 }));
   };
   const remove = (skill: SkillsEntry) => void mutate(() => api.delete({ expectedEpoch: epoch, projectId, id: skill.id, name: null, source: skill.source, spaceId }, { timeoutMilliseconds: 120000 }), "Removed.");
   // A folder of skills is added to or taken out of the list of its scope; nothing of it is changed on the disk.
@@ -463,8 +465,8 @@ export function SkillSettings({ epoch, project, space = null, onEdit, onOpenFile
         <ScopeChoice value={scope} project={project} disabled={busy} onChange={setScope} />
         <span className="settings-editor-spacer" />
         <span className="bp6-text-muted">{t("{enabled} of {total} enabled", { enabled: all.filter(skill => skill.enabled).length, total: all.length })}</span>
-        <Button size="small" disabled={busy || (toggleNames.length === 0 && omitted === 0)} onClick={() => toggleAll(true)}>{t("Enable all")}</Button>
-        <Button size="small" disabled={busy || (toggleNames.length === 0 && omitted === 0)} onClick={() => toggleAll(false)}>{t("Disable all")}</Button>
+        <Button size="small" disabled={busy || (!hasToggle && omitted === 0)} onClick={() => toggleAll(true)}>{t("Enable all")}</Button>
+        <Button size="small" disabled={busy || (!hasToggle && omitted === 0)} onClick={() => toggleAll(false)}>{t("Disable all")}</Button>
       </div>
       {omitted > 0 && <p className="bp6-text-muted skill-settings-omitted" role="status">
         {t("{count} more skills are not listed here. Enable all and Disable all act on them too when they match the filter.", { count: omitted })}</p>}

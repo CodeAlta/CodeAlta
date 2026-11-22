@@ -76,7 +76,7 @@ test("a skill of an added folder says where it comes from, is edited in the code
     { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] }]);
   const scope = { spaces, assignments: readAssignments({ status: "ok", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }), assign: never };
   const entry = (name: string, source: string): SkillsEntry => ({ id: `${source}-${name}`, name, title: name, description: "What it is for.", source,
-    scope: source === "ProjectFolder" ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true,
+    scope: source === "ProjectFolder" ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true, disabledByRepository: false,
     folder: null, path: `/skills/${name}` });
   const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
     createElement(SkillRows, { skills: [entry("everywhere", "UserFolder"), entry("work-only", "SpaceFolder")], spaceScope: scope, empty: "No skills were found.",
