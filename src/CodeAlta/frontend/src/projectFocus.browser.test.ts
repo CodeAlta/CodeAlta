@@ -237,6 +237,34 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
       assert.equal(commits.length, 1, "the settled value commits once");
       assert.equal(cleared, 1, "clearing the value and its temporary folds commits once");
     });
+    await t.test("deleting a project always asks and says why the host refused", async () => {
+      const form = "document.querySelector('.confirm-form')";
+      const cancel = `${form}?.querySelector('.rename-actions button:first-child')`;
+      const remove = `${form}.querySelector('.rename-actions button:last-child')`;
+      const requests = "projectFocusFixture.deletions";
+      const openDelete = async () => {
+        const line = "[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent==='Delete project…')";
+        await evaluate(`document.querySelector('button[aria-label="Project actions"]').click()`);
+        assert.equal(await wait(`!!${line}`), true);
+        await evaluate(`${line}.click()`);
+        assert.equal(await wait(`${form}?.textContent.includes('Delete this project?') && document.activeElement===${cancel}`), true);
+      };
+      await openDelete();
+      assert.equal(await evaluate(`${form}.querySelector('.confirm-subject').textContent`), "Project");
+      assert.equal(await evaluate(`${form}.querySelector('input[type=checkbox]')`), null, "the question cannot be skipped");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${form}`), true);
+      assert.equal(await evaluate(`${requests}.length`), 0, "cancel sends no deletion");
+      await openDelete();
+      await evaluate(`${remove}.click()`);
+      assert.equal(await wait(`${requests}.length===1 && ${cancel}.disabled`), true);
+      assert.deepEqual(await evaluate(`(({projectId, projectPath, confirmedName, confirmed})=>({projectId, projectPath, confirmedName, confirmed}))(${requests}[0].request)`),
+        { projectId: "project", projectPath: "/fixture/project", confirmedName: "Project", confirmed: true });
+      await evaluate(`(()=>{const {request,resolve}=${requests}[0];resolve({status:'session_in_use',hostEpoch:request.expectedHostEpoch,projectId:request.projectId,projectPath:request.projectPath})})()`);
+      assert.equal(await wait(`${form}?.querySelector('.confirm-error')?.textContent.includes('running or waits for an answer') && !${cancel}.disabled`), true);
+      await evaluate(`${cancel}.click()`);
+      assert.equal(await wait(`!${form} && ${scope("project")}.getAttribute('aria-pressed')==='true'`), true);
+    });
     await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
     assert.equal(await wait(`!!${otherSession}`), true);
     assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");
