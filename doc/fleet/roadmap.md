@@ -186,7 +186,7 @@ ephemeral cloud machines for heavy tasks.
 
 - **S1 never regresses**: a test asserts no fleet network activity and no new prompt for a profile that never paired
   or linked anything.
-- **The TUI keeps working** (no new TUI feature, `AGENTS.md`): its host is a node like the others when it runs.
+- **The TUI keeps working** (see the [frontend scope rules](../development-guide.md#architecture-rules)): its host is a node like the others when it runs.
 - **Release gates** from M3 on: partition and crash tests (moves, runs, publications), hostile-server tests, revocation
   tests, a restore of a backup into a fresh server; and before M3 and M4 ship, a review by a security specialist, beside
   the review sessions on other models at each milestone's end and the threat model kept up to date.

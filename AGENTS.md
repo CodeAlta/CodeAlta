@@ -6,7 +6,7 @@ Paths/commands below are relative to this directory.
 
 ## Orientation
 
-- Frontends: CodeAlta Desktop (`src/CodeAlta`, `alta`) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`). Follow the [frontend scope and layer rules](doc/development-guide.md#architecture-rules).
+- Frontends: CodeAlta Desktop (`src/CodeAlta`, `alta`) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`). New features go in Desktop only unless the task asks for TUI work; keep the TUI building and its tests passing (see the [frontend scope and layer rules](doc/development-guide.md#architecture-rules)).
 - Tests: `src/CodeAlta.Tests/` (MSTest)
 - The in-process agent tool remains `alta`; do not rename neutral `CodeAlta.*` libraries or shared `.alta` state when changing frontend identities.
 - Website: `site/` (Lunet end-user documentation)
