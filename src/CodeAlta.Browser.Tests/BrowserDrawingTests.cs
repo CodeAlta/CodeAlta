@@ -214,17 +214,17 @@ public sealed class BrowserDrawingTests
         await BrowserWait.ToolbarAsync(page, ready.ContextId, "drawState().drawing", timeout.Token);
 
         // Strokes, keys and clicks the page makes up, on the element it sees at the point (the host of the bar) and on
-        // the document, draw nothing, undo nothing and open no note.
-        await session.OkAsync("evaluate_script", """{"function":"() => { const at = (x, y) => ({ bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: 1, pointerId: 1, isPrimary: true }); for (const target of [document.elementFromPoint(200, 200), document.body, document]) { target.dispatchEvent(new PointerEvent('pointerdown', at(100, 100))); for (let x = 100; x < 300; x += 20) target.dispatchEvent(new PointerEvent('pointermove', at(x, x))); target.dispatchEvent(new PointerEvent('pointerup', at(300, 300))); target.dispatchEvent(new MouseEvent('click', at(300, 300))); } for (const key of ['Enter', 'z', 'Escape']) document.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: key === 'z', bubbles: true, composed: true })); const host = document.querySelector('[data-codealta-toolbar]'); return 'open=' + !!(host && host.shadowRoot) + ';'; }"}""");
-        // dispatchEvent finishes its listeners before the evaluation returns.
+        // the document, draw nothing, undo nothing and open no note. Let the frames in which a save would report finish.
+        await session.OkAsync("evaluate_script", """{"function":"() => { const at = (x, y) => ({ bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: 1, pointerId: 1, isPrimary: true }); for (const target of [document.elementFromPoint(200, 200), document.body, document]) { target.dispatchEvent(new PointerEvent('pointerdown', at(100, 100))); for (let x = 100; x < 300; x += 20) target.dispatchEvent(new PointerEvent('pointermove', at(x, x))); target.dispatchEvent(new PointerEvent('pointerup', at(300, 300))); target.dispatchEvent(new MouseEvent('click', at(300, 300))); } for (const key of ['Enter', 'z', 'Escape']) document.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: key === 'z', bubbles: true, composed: true })); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve('sent')))); }"}""");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().shapes === 0", timeout.Token), "nothing was drawn");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().drawing", timeout.Token), "Draw is still on: Esc made up by the page does nothing");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting === false", timeout.Token), "no note was opened");
+        await BrowserAnnotationsTests.CdpSessionOf(state.Page).FlushAsync(timeout.Token);
+        Assert.IsFalse(messages.Any(static message => message.Type == "drawing"));
 
         // The same stroke with the browser's input draws.
         await DrawAsync(state, (100, 120), (300, 200), timeout.Token);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "drawState().shapes === 1", timeout.Token));
-        Assert.IsFalse(messages.Any(static message => message.Type == "drawing"));
     }
 
     [TestMethod]
@@ -377,6 +377,7 @@ public sealed class BrowserDrawingTests
         var drawing = Next(messages, "drawing", timeout.Token);
         Assert.AreEqual("Newer drawing", drawing.Note);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, $"drawn({BrowserSession.JsonText(drawing.Id!)})", timeout.Token));
+        await BrowserAnnotationsTests.CdpSessionOf(state.Page).FlushAsync(timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type == "image"), "the image went with the cancelled note");
     }
 

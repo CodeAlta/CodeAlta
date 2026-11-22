@@ -60,6 +60,7 @@ internal static class BrowserWait
             if (described.Node.ShadowRoots?.SingleOrDefault() is not { } root) return false;
             var resolved = await session.DOM.ResolveNodeAsync(new DOMResolveNodeParams { BackendNodeId = root.BackendNodeId }, cancellationToken);
             rootId = resolved.Object.ObjectId;
+            if (rootId is null) return false;
             var result = await session.Runtime.CallFunctionOnAsync(new RuntimeCallFunctionOnParams
             {
                 ObjectId = rootId, ReturnByValue = true, FunctionDeclaration = $"function () {{ return {condition}; }}",
@@ -69,8 +70,15 @@ internal static class BrowserWait
         }
         finally
         {
-            if (rootId is not null) await session.Runtime.ReleaseObjectAsync(new RuntimeReleaseObjectParams { ObjectId = rootId }, cancellationToken);
-            await session.Runtime.ReleaseObjectAsync(new RuntimeReleaseObjectParams { ObjectId = hostId }, cancellationToken);
+            if (rootId is not null) await ReleaseAsync(session, rootId);
+            await ReleaseAsync(session, hostId);
         }
+    }
+
+    private static async Task ReleaseAsync(CdpSession session, string objectId)
+    {
+        // Even when the poll was cancelled, release both handles independently of its token.
+        try { await session.Runtime.ReleaseObjectAsync(new RuntimeReleaseObjectParams { ObjectId = objectId }, CancellationToken.None); }
+        catch (CdpException) { /* gone with its document */ }
     }
 }

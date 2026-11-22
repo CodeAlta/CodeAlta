@@ -282,6 +282,7 @@ public sealed class BrowserAnnotationsTests
         // A choice made in another tab reaches this one; a page that made up a click on the switch would change nothing.
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "details(false)", timeout.Token));
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().details === false", timeout.Token));
+        await CdpSessionOf(state.Page).FlushAsync(timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type == "details"));
     }
 
@@ -428,8 +429,7 @@ public sealed class BrowserAnnotationsTests
 
         var seen = await session.OkAsync("evaluate_script", """{"function":"() => [typeof globalThis.__codealtaToolbarMessage, typeof globalThis.__codealtaToolbar].join(',')"}""");
         StringAssert.Contains(seen, "undefined,undefined");
-        // The page has no reporting channel, so there is no completion to observe for a stray binding message.
-        await Task.Delay(50, timeout.Token); // not a limit
+        await CdpSessionOf(session.Pages[0].Page).FlushAsync(timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type == "annotation"));
     }
 
@@ -457,6 +457,7 @@ public sealed class BrowserAnnotationsTests
         // dispatchEvent finishes its listeners before the evaluation returns.
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().chosen === 0", timeout.Token), "no element was chosen");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting === false", timeout.Token), "no note was opened");
+        await CdpSessionOf(session.Pages[0].Page).FlushAsync(timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type == "annotation"));
     }
 
@@ -628,6 +629,7 @@ public sealed class BrowserAnnotationsTests
         Assert.AreEqual("Newer note", newer.Note);
         Assert.AreEqual("c3", newer.Elements!.Single().Id);
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "state().noting === false", timeout.Token));
+        await CdpSessionOf(state.Page).FlushAsync(timeout.Token);
         Assert.IsFalse(messages.Any(static message => message.Type == "image"), "the image went with the cancelled note");
         Assert.IsTrue(await page.CallToolbarAsync(ready.ContextId, "clear()", timeout.Token));
     }
@@ -725,8 +727,10 @@ public sealed class BrowserAnnotationsTests
               FileReader.prototype.readAsDataURL = function (blob) {
                 FileReader.prototype.readAsDataURL = read;
                 globalThis.__testFinishImageRead = () => new Promise(resolve => {
-                  // Resolve after the load handlers and the toolbar's queued save have run.
-                  this.addEventListener('loadend', () => setTimeout(() => resolve(!this.error), 0), { once: true });
+                  // In the next task the image promises have run. A queued drawing save reports after two frames.
+                  this.addEventListener('loadend', () => setTimeout(() => {
+                    requestAnimationFrame(() => requestAnimationFrame(() => resolve(!this.error)));
+                  }, 0), { once: true });
                   read.call(this, blob);
                 });
               };
@@ -747,7 +751,11 @@ public sealed class BrowserAnnotationsTests
     }
 
     internal static async Task FinishImageReadAsync(IBrowserPage page, int contextId, CancellationToken cancellationToken)
-        => Assert.IsTrue(await EvaluateInToolbarAsync(page, contextId, "globalThis.__testFinishImageRead()", cancellationToken), "the cancelled note's image read finished");
+    {
+        Assert.IsTrue(await EvaluateInToolbarAsync(page, contextId, "globalThis.__testFinishImageRead()", cancellationToken), "the cancelled note's image read finished");
+        // The command reply follows the frames, but the binding events can still be queued for delivery.
+        await CdpSessionOf(page).FlushAsync(cancellationToken);
+    }
 
     private static async Task<bool> EvaluateInToolbarAsync(IBrowserPage page, int contextId, string expression, CancellationToken cancellationToken)
     {
