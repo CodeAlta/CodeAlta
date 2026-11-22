@@ -405,7 +405,7 @@ a worker: the same executable started with `--speech-worker` or `--embedding-wor
   the margin one font gives, and press the modifier of the system.
 - **The real window.** Headless Edge is not WebView2, WKWebView or WebKitGTK. A visual or native change is checked in
   the developer instance, driven over its MCP server (`codealta-dev`: snapshot, screenshot, click, `evaluate_script`),
-  in both themes and a narrow window; `AGENTS.md` ("Working on the desktop WebApp") has the loop.
+  in both themes and a narrow window; see the [developer-instance loop](../src/CodeAlta/README.md#developer-instance).
 
 ## Charts
 
