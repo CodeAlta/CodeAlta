@@ -6,6 +6,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Credentials;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -5342,6 +5343,25 @@ public sealed partial class AltaLiveToolTests
         CollectionAssert.DoesNotContain(disruptive, "session fork");
         CollectionAssert.Contains(mutating, "session rewind");
         CollectionAssert.Contains(disruptive, "session rewind");
+    }
+
+    [TestMethod]
+    public async Task CredentialPolicies_AreListedWhenOnlyTheBrokerIsRegistered()
+    {
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = _home.Path });
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(broker));
+
+        var help = await dispatcher.InvokeAsync(["credential", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsTrue(help.IsHelp);
+        var tools = await dispatcher.InvokeAsync(["tool", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, tools.ExitCode);
+        var paths = ReadJsonLines(tools.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.paths");
+        var credentials = paths.GetProperty("paths").EnumerateArray().Select(static item => item.GetString())
+            .Where(static name => name?.StartsWith("credential ", StringComparison.Ordinal) == true).ToArray();
+        CollectionAssert.AreEquivalent(
+            new[] { "credential types", "credential list", "credential status", "credential unlock", "credential lock", "credential add", "credential remove" },
+            credentials);
+        AssertJsonArrayContains(paths.GetProperty("mutating"), "credential unlock");
     }
 
     [TestMethod]

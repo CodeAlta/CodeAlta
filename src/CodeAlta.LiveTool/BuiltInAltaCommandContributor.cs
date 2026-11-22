@@ -343,7 +343,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var fleet = context.Services.Get<IAltaFleet>() is not null;
         var secrets = context.Services.Get<ProjectCatalog>() is not null;
         var llama = context.Services.Get<IAltaModelServers>() is not null;
-        if (!llama && !secrets && !changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !releaseNotes && !fleet && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces) policies.AddRange(LabelPolicies);
