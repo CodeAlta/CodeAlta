@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Agent.ModelCatalog;
@@ -388,6 +389,16 @@ public sealed partial class CodeAltaConfigStore
         }
 
         return SharedTextFile.TryReadAllText(_options.ConfigPath) ?? GetDefaultGlobalConfigContent();
+    }
+
+    /// <summary>Returns the stable revision token for configuration text.</summary>
+    /// <param name="content">The configuration text to identify.</param>
+    /// <returns>A content revision for comparison, not for authorization.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> is null.</exception>
+    public static string GetGlobalConfigRevision(string content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)).AsSpan(0, 16));
     }
 
     /// <summary>
@@ -1886,10 +1897,46 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Edits the provider definitions of the global file without filling in defaults or applying overlays. Disabled
+    /// providers are included; the sections of types this version does not know are left alone.
+    /// </summary>
+    /// <param name="edit">
+    /// Changes the definitions synchronously while the file is locked. Return <see langword="true"/> to save the list,
+    /// or <see langword="false"/> to skip saving it.
+    /// </param>
+    /// <param name="expectedRevision">
+    /// The revision of the text the editor read (see <see cref="GetGlobalConfigRevision"/>), or <see langword="null"/> not to check it.
+    /// </param>
+    /// <returns><see langword="false"/> if the revision did not match and the edit did not run; otherwise <see langword="true"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="edit"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration cannot be read, locked or saved.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">A definition is invalid or uses an unknown provider's key, or the store is read-only.</exception>
+    public bool UpdateGlobalProviderDefinitions(Func<List<CodeAltaProviderDocument>, bool> edit, string? expectedRevision = null)
+    {
+        ArgumentNullException.ThrowIfNull(edit);
+        var matched = false;
+        UpdateGlobal(() =>
+        {
+            if (expectedRevision is not null && !string.Equals(expectedRevision, GetGlobalConfigRevision(LoadGlobalConfigContent()), StringComparison.Ordinal))
+                return;
+
+            var document = LoadDocument(_options.ConfigPath);
+            var definitions = document.Providers?.Values.ToList() ?? [];
+            if (edit(definitions)) SaveGlobalProviderDefinitions(document, definitions);
+            matched = true;
+        });
+        return matched;
+    }
+
+    /// <summary>
     /// Saves the complete set of global provider definitions. The providers of the file whose type this version
-    /// does not know are not part of that set: their sections stay as they are.
+    /// does not know are not part of that set: their sections stay as they are. To edit an existing set, use
+    /// <see cref="UpdateGlobalProviderDefinitions"/> instead.
     /// </summary>
     /// <param name="definitions">The provider definitions to persist.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="definitions"/> is null.</exception>
     /// <exception cref="InvalidOperationException">
     /// A definition is not valid, has the key of a provider whose type this version does not know, or the store is
     /// read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).
@@ -1902,7 +1949,11 @@ public sealed partial class CodeAltaConfigStore
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
+        SaveGlobalProviderDefinitions(document, definitions);
+    }
 
+    private void SaveGlobalProviderDefinitions(CodeAltaConfigDocument document, IEnumerable<CodeAltaProviderDocument> definitions)
+    {
         var normalizedDefinitions = definitions
             .Select(CloneProviderDefinition)
             .Select(static definition =>
