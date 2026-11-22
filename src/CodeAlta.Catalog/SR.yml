@@ -48,6 +48,12 @@
   fr: "La configuration a changé sur disque. Rechargez-la et réappliquez vos modifications ; le démarrage n'a pas repris."
   ja: "ディスク上の設定が変更されました。再読み込みして編集を再適用してください。起動は続行されていません。"
   zh: "磁盘上的配置已更改。请重新加载并重新应用编辑；启动尚未继续。"
+"Provider configuration changed on disk. Refresh before saving again.":
+  de: "Die Anbieterkonfiguration wurde auf dem Datenträger geändert. Aktualisieren Sie sie, bevor Sie erneut speichern."
+  es: "La configuración de proveedores cambió en disco. Actualiza antes de volver a guardar."
+  fr: "La configuration des fournisseurs a changé sur disque. Actualisez-la avant d'enregistrer à nouveau."
+  ja: "ディスク上のプロバイダー設定が変更されました。もう一度保存する前に更新してください。"
+  zh: "磁盘上的提供方配置已更改。请先刷新，再重新保存。"
 "Repair the TOML and save to continue. Recovery only reads and validates configuration; it does not initialize providers, plugins or sessions.":
   de: "Reparieren und speichern Sie das TOML, um fortzufahren. Die Wiederherstellung liest und validiert nur die Konfiguration; sie initialisiert keine Anbieter, Plugins oder Sitzungen."
   es: "Repara el TOML y guarda para continuar. La recuperación solo lee y valida la configuración; no inicializa proveedores, plugins ni sesiones."
