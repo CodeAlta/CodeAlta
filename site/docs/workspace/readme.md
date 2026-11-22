@@ -47,7 +47,7 @@ In CodeAlta Desktop, right-click a text field, the prompt or a code editor, or p
 
 The Explorer lists the projects of the space the window shows. **Chats**, at the top, are sessions of no project. With several spaces, its foot has a button for each space and says what its sessions are doing.
 
-- **Filter sessions**, at the top, keeps the sessions, chats, projects and Claude Code conversations whose title has every word you type, however old the sessions are. `Esc` or **×** clears it.
+- When you pause typing in **Filter sessions**, at the top, the Explorer keeps the sessions, chats, projects and Claude Code conversations whose title has every word you typed, however old the sessions are. `Esc` or **×** clears the filter immediately.
 - Click the arrow of a project to show or hide its sessions; **Collapse all** closes them all. Open projects stay open at the next start.
 - A project lists its most recent sessions. **Show more…** says how many older ones it has and lists a few more at each click ([Settings > Appearance](settings.md) sets that number); **Browse all…** opens the [session browser](#session-browser) on all of them.
 - A project or a [label](../labels.md) shows a spinner while sessions run in it, with their number when there are several, and a yellow mark with the number of sessions that wait for you: a folded one tells it without being opened. A project with no session or terminal has no arrow.

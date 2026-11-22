@@ -1378,23 +1378,27 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (message) showToast({ intent: "warning", icon: "warning-sign", timeout: 20_000, message });
     // Told when the files change, not when another snapshot or the language does.
   }, [secondary, unreadableProjects]);
-  // The filter at the top of the sidebar: while something is typed, the sidebar shows only the sessions, the projects
-  // and the Claude Code sessions started elsewhere whose title has every word, open. Nothing of the tree is changed.
-  const [sidebarText, setSidebarText] = useState("");
+  // The applied filter opens scopes with matches. Its temporary folds are cleared with the filter; the tree stays as it was.
+  const [sidebarFilter, setSidebarFilter] = useState<Readonly<{
+    text: string; words: readonly string[]; folded: ReadonlySet<string | null>;
+  }>>(() => ({ text: "", words: [], folded: new Set() }));
+  const { text: sidebarText, words: sidebarWords, folded: filterFolded } = sidebarFilter;
+  const applySidebarFilter = useCallback((text: string) => {
+    setSidebarFilter(current => {
+      if (current.text === text) return current;
+      const words = readQuery(text).words;
+      return { text, words, folded: words.length ? current.folded : new Set() };
+    });
+  }, []);
   // What the search of the window and the saved sessions look for, which the list of the sessions is read with.
   const [searchWant, setSearchWant] = useState<WorkspaceWantedSearch | null>(null);
   const [browserWant, setBrowserWant] = useState<Readonly<{ projectId: string | null; text: string; rows: number }> | null>(null);
-  const sidebarWords = useMemo(() => readQuery(sidebarText).words, [sidebarText]);
   // The Claude Code sessions started elsewhere the search and the filter look through, read when one of them is used.
   const [searchedClaudeCode, setSearchedClaudeCode] = useState<ClaudeCodeConversations | null>(null);
   // Whether that read answered (with nothing when it failed): until then, the filter does not say that nothing matches.
   const [claudeCodeSearched, setClaudeCodeSearched] = useState(false);
   const filterView = useMemo(() => sidebarWords.length && snapshot ? sidebarFilterView(snapshot, sidebarWords, searchedClaudeCode?.conversations) : null,
     [snapshot, sidebarWords, searchedClaudeCode]);
-  // The scopes the filter opens that are folded while it is used; the tree of the sidebar is left as it is.
-  const [filterFolded, setFilterFolded] = useState<ReadonlySet<string | null>>(() => new Set());
-  const filtering = sidebarWords.length > 0;
-  useEffect(() => { if (!filtering) setFilterFolded(new Set()); }, [filtering]);
   const fullListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
   // A sub-project found keeps the repositories above it, unopened, so that it stays in its place in their groups.
   const filterShows = (id: string) => !!filterView && (filterView.projects.has(id) || !!filterView.frames?.has(id));
@@ -2961,7 +2965,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // rows of the open lists, what is typed in the filter, the search and the saved sessions, and the archived sessions
   // while the saved sessions show them.
   const [storedSessions] = useState(() => storedTabSessions(localStorage));
-  const typedFilter = useSettled(sidebarWords.join(" "), 200);
+  const typedFilter = sidebarWords.join(" ");
   const typedSearch = useSettled(searchOpen ? searchWant : null, 200);
   const typedBrowser = useSettled(dialog === "sessions" ? browserWant : null, 200);
   const openTabSessions = tabs.open.map(tab => tab.sessionId).join("\n");
@@ -6496,10 +6500,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
             } : undefined}
-            filter={<SidebarFilterBox value={sidebarText} onChange={setSidebarText}
+            filter={<SidebarFilterBox applied={sidebarText} onApply={applySidebarFilter}
               empty={!!filterView && !filterView.scopes.size && !filterView.projects.size && !filterView.claudeCode.size && (!claudeCodeConfigured || claudeCodeSearched) && wantsServed} />}
             tree={{ expanded: id => filterView && filterOpens(filterView, id) ? !filterFolded.has(id) : isExpanded(projectTree, id),
-              toggle: id => filterView && filterOpens(filterView, id) ? setFilterFolded(current => toggleFilterFold(current, id))
+              toggle: id => filterView && filterOpens(filterView, id) ? setSidebarFilter(current => ({ ...current, folded: toggleFilterFold(current.folded, id) }))
                 : setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,

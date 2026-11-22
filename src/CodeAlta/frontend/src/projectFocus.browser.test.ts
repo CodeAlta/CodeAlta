@@ -198,6 +198,45 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
       t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
       assert.deepEqual(renders, [0, 0, 0, 0, 0, 0]);
     });
+    await t.test("typing in the sidebar applies one settled filter", async t => {
+      const input = "document.querySelector('.sidebar-filter input')";
+      const one = `document.querySelector('.session-row[data-session-id="one"]')`;
+      const two = `document.querySelector('.session-row[data-session-id="two"]')`;
+      await evaluate(`${input}.focus()`);
+      await frames();
+      assert.equal(await evaluate(`!!${one} && !!${two}`), true);
+      // Dispatch the burst in one browser task, so Node or DevTools delays cannot turn it into separate pauses.
+      const { strokes, lastInputAt } = await evaluate(`(() => {
+        const field=${input};
+        const setValue=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+        const marks=() => performance.getEntriesByName("${appRender}", "mark");
+        performance.clearMarks("${appRender}");
+        let lastInputAt=0;
+        const strokes=['t','tw','two'].map(value => {
+          lastInputAt=performance.now();
+          setValue.call(field,value);
+          field.dispatchEvent(new Event('input',{bubbles:true}));
+          return {value:field.value,renders:marks().length,originalRow:!!${one}};
+        });
+        return {strokes,lastInputAt};
+      })()`);
+      assert.equal(await wait(`!${one} && !!${two}`), true, "the paused query narrows the list");
+      await frames();
+      const commits = await evaluate(`performance.getEntriesByName("${appRender}", "mark").map(mark => Math.round(mark.startTime - ${lastInputAt}))`);
+      await evaluate(`${scope("project")}.querySelector('.tree-twist').click()`);
+      assert.equal(await wait(`${scope("project")}.getAttribute('aria-expanded')==='false'`), true, "a matching group can be folded temporarily");
+      await evaluate(`${input}.focus()`);
+      await frames();
+      await resetAppRenders();
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`${input}.value==='' && !!${one} && !!${two} && ${scope("project")}.getAttribute('aria-expanded')==='true'`), true, "Escape restores the original open group");
+      await frames();
+      const cleared = await appRenders();
+      t.diagnostic(`App commits during burst: ${strokes.map((stroke: { renders: number }) => stroke.renders).join(", ")} cumulative; offsets from last input: ${commits.join(", ")} ms; clearing: ${cleared} commit(s)`);
+      assert.deepEqual(strokes, ["t", "tw", "two"].map(value => ({ value, renders: 0, originalRow: true })));
+      assert.equal(commits.length, 1, "the settled value commits once");
+      assert.equal(cleared, 1, "clearing the value and its temporary folds commits once");
+    });
     await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
     assert.equal(await wait(`!!${otherSession}`), true);
     assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");
