@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using CodeAlta.Catalog.Skills;
 
 namespace CodeAlta.Catalog.Tests;
@@ -437,6 +438,28 @@ public sealed class SkillCatalogTests
         StringAssert.Contains(activation.Payload, "<file>assets/visible.svg</file>");
         StringAssert.Contains(activation.Payload, "<file>references/guide.md</file>");
         Assert.IsFalse(activation.Payload.Contains("ignored.svg", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task SkillCatalog_ActivateAsync_PluginRuntimeSkillIsShortAndLinksToShippedSamples()
+    {
+        var catalog = new SkillCatalog();
+        var activation = await catalog.ActivateAsync(new SkillCatalogQuery(), "codealta-plugin-runtime").ConfigureAwait(false);
+
+        Assert.IsNotNull(activation);
+        Assert.AreEqual(SkillSourceKind.Builtin, activation.Descriptor.SourceKind);
+
+        var body = activation.Document.Body;
+        var words = Regex.Count(body, @"\S+");
+        Assert.IsLessThan(2_500, words, $"Skill activation loads {words:N0} words before the file list.");
+
+        var sampleLinks = Regex.Matches(body, @"(?<=\]\()samples/[^)\s]+");
+        Assert.IsGreaterThan(0, sampleLinks.Count, "The contribution index must link to shipped samples.");
+        foreach (Match link in sampleLinks)
+        {
+            Assert.IsTrue(File.Exists(Path.Combine(activation.Document.Path, link.Value, "plugin.cs")),
+                $"No sample plugin at {link.Value}");
+        }
     }
 
     [TestMethod]
