@@ -178,6 +178,7 @@ import { createCoalescedRead } from "./coalescedRead";
 import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDrag, type SessionRowDrag } from "./explorer/sessionDrag";
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
+import { useSessionMoveDialog } from "./explorer/SessionMoveDialog";
 import { confirmDeletedSession, createSessionDeletion, deleteSelectionCurrent, hostSessionPresence, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
@@ -1118,8 +1119,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
     conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview,
     conversations: workspace.claudeCodeConversations }));
-  // The session whose project is being chosen, with the project it is in when its menu was used.
-  const [movingSession, setMovingSession] = useState<SessionMoveDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
   // The session Move to machine… moves, while its window is open.
   const [machineMove, setMachineMove] = useState<WorkspaceSession | null>(null);
@@ -1363,6 +1362,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
+  const sessionMoveDialog = useSessionMoveDialog(snapshot?.projects, movingBusy, (moving, project) => void moveSessionTo(moving, project));
   // A project file of the catalog that cannot be read leaves its project out of the lists: the main window says so once,
   // and again when the files change.
   const unreadableProjects = snapshot?.unreadableProjectFiles?.join("\n") ?? "";
@@ -4998,7 +4998,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     } finally { deletingPending.current = false; if (creationAlive.current) setDeletingBusy(false); }
   }
 
-  // The session is the selected one, in the selected project: the window asks which project it goes to.
   // A session chosen in its menu goes to another space: the space it is in now is not offered.
   function beginSpaceMove(row: WorkspaceSession) {
     if (movingPending.current) return;
@@ -5257,7 +5256,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!project || project.archived || row.projectId !== project.id || row.workspacePath !== project.path || movingPending.current) return;
     setRenamingId(null);
     sessionDeleteQuestion.close();
-    setMovingSession({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
+    sessionMoveDialog.open({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
   }
 
   // The row of a session of a project can be dragged onto the row of another project: the drop moves it there.
@@ -5294,7 +5293,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // The locks of the menu, again: a rename or a delete may have become pending or unconfirmed while the window was open.
     if (renamingBusy || deletingBusy || renamingPending.current || deletingPending.current
       || renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current) {
-      setMovingSession(null);
+      sessionMoveDialog.close();
       showToast({ message: t(sessionMoveMessage("busy")), intent: "warning", icon: "warning-sign", timeout: 6000 });
       return;
     }
@@ -5320,7 +5319,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         const selected = selectedSessionId.current;
         if (selected && result.moved.some(value => value.sessionId === selected)) selectProject(target.id, selected);
       }
-      setMovingSession(null);
+      sessionMoveDialog.close();
       if (result.kind === "moved") {
         if (fresh && !movedSessionsVisible(fresh, result.moved))
           showToast({ message: t("The session moved, but the refreshed list does not show it in {project} yet. Refresh to check.", { project: target.name }),
@@ -7102,9 +7101,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       projects={catalog.current?.projects ?? []} sessions={catalog.current?.sessions ?? []} spaces={spacesState.spaces} canDelete={owned && !!mutation?.capability.canMutate()}
       checkWorktrees={checkDeletedWorktrees}
       onOpen={session => { setChildrenView(null); revealSession(session); }} onDelete={deleteChildrenTree} onClose={() => setChildrenView(null)} />}
-    {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
-      projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
-      onClose={() => setMovingSession(null)} />}
+    {sessionMoveDialog.dialog}
     {continuingClaudeCode && snapshot && <MoveSessionDialog title={continuingClaudeCode.title} projectId={null} continuing
       projects={snapshot.projects} busy={claudeCodeImporting !== null} onMove={project => void importClaudeCodeInto(continuingClaudeCode, project)}
       onClose={() => { if (!claudeCodeImportPending.current) setContinuingClaudeCode(null); }} />}

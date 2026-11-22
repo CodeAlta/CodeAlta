@@ -120,6 +120,32 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     const expanded = () => evaluate(`['project','other'].map(id=>${scope("'+id+'")}.getAttribute('aria-expanded')).join()`);
     const otherSession = `document.querySelector('#project-list .session-row > button[title="other-session"]')`;
     assert.equal(await expanded(), "true,false", "with nothing remembered the selected project is the one open");
+    await t.test("moving a session offers other projects and confirms the captured source and target", async () => {
+      const trigger = "document.querySelector('.session-row[data-session-id=\"one\"] .session-actions-trigger')";
+      const line = "[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].find(item=>item.textContent.trim()==='Move to project…')";
+      const dialog = "document.querySelector('dialog.move-session-dialog[open]')";
+      const option = `${dialog}?.querySelector('[role=option]')`;
+      const moves = "projectFocusFixture.moves";
+      const openMove = async () => {
+        await evaluate(`${trigger}.click()`);
+        assert.equal(await wait(`!!${line}`), true);
+        await evaluate(`${line}.click()`);
+        assert.equal(await wait(`!!${option}`), true);
+      };
+      await openMove();
+      assert.match(await evaluate(`${dialog}.querySelector('h2').textContent`), /Move one to another project/);
+      assert.deepEqual(await evaluate(`[...${dialog}.querySelectorAll('[role=option] .reference-name')].map(row=>row.textContent)`), ["Other project"]);
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${dialog}`), true);
+      assert.equal(await evaluate(`${moves}.length`), 0, "cancel sends no move");
+      await openMove();
+      await evaluate(`${option}.click()`);
+      assert.equal(await wait(`${moves}.length===1 && ${option}?.getAttribute('aria-disabled')==='true'`), true);
+      assert.deepEqual(await evaluate(`(({sessionId,projectId,projectPath,targetProjectId,targetProjectPath})=>({sessionId,projectId,projectPath,targetProjectId,targetProjectPath}))(${moves}[0].request)`),
+        { sessionId: "one", projectId: "project", projectPath: "/fixture/project", targetProjectId: "other", targetProjectPath: "/fixture/other" });
+      await evaluate(`(()=>{const {request,resolve}=${moves}[0];resolve({...request,hostEpoch:request.expectedHostEpoch,status:'target_missing',moved:[],warnings:[]})})()`);
+      assert.equal(await wait(`!${dialog} && document.body.textContent.includes('The project to move the session to is gone or archived.')`), true);
+    });
     await t.test("typing a session title does not render App", async t => {
       const input = `document.querySelector('.rename-popover input')`;
       const openRename = async () => {
