@@ -410,15 +410,21 @@ public sealed class SessionPermissionServiceTests
         try
         {
             var request = Request() with { WorkingDirectory = "Q:\\fixture" };
-            SessionPermissionService.OwnedPermissionExecution? first = null;
+            // A runaway send: its requests wait up to the bound of a send, and its next one is denied. The other sends
+            // keep their places, until the bound of the service.
+            SessionPermissionService.OwnedPermissionExecution? runaway = null;
             for (var i = 0; i < SessionPermissionService.OwnedPendingLimit / SessionPermissionService.OwnedPendingPerExecutionLimit; i++)
             {
                 var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
                 Assert.IsNotNull(execution);
-                first ??= execution;
+                runaway ??= execution;
                 Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
                 for (var j = 0; j < SessionPermissionService.OwnedPendingPerExecutionLimit; j++)
                     deliveries.Add(service.HandleOwnedCommandAsync(execution, request, CancellationToken.None));
+                if (i > 0) continue;
+                var beyond = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
+                deliveries.Add(beyond);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await beyond.WithinAsync(TestTime.Seconds(5))).Kind);
             }
             Assert.AreEqual(SessionPermissionService.OwnedPendingLimit, (await service.ListAsync()).Count);
             var extra = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
@@ -427,7 +433,7 @@ public sealed class SessionPermissionServiceTests
             var denied = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
             deliveries.Add(denied);
             Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WithinAsync(TestTime.Seconds(5))).Kind);
-            await service.CloseOwnedExecutionAsync(first!);
+            await service.CloseOwnedExecutionAsync(runaway!);
             var reclaimed = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
             deliveries.Add(reclaimed);
             Assert.AreEqual(SessionPermissionService.OwnedPendingLimit - SessionPermissionService.OwnedPendingPerExecutionLimit + 1,
@@ -522,11 +528,8 @@ public sealed class SessionPermissionServiceTests
             Assert.IsNull(await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", cancellation.Token));
             var first = executions[0];
             Assert.IsTrue(await service.BindOwnedExecutionAsync(first, Guid.NewGuid(), attachment, new ModelProviderId("test")));
-            for (var i = 0; i < SessionPermissionService.OwnedPendingPerExecutionLimit; i++)
+            for (var i = 0; i < 4; i++)
                 deliveries.Add(service.HandleOwnedCommandAsync(first, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None));
-            var overflow = service.HandleOwnedCommandAsync(first, Request() with { WorkingDirectory = "Q:\\fixture" }, CancellationToken.None);
-            deliveries.Add(overflow);
-            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await overflow.WithinAsync(TestTime.Seconds(5))).Kind);
             var handles = (await service.ListAsync()).Select(snapshot => snapshot.Handle).ToArray();
             cancellation.Cancel();
             foreach (var handle in handles)
@@ -543,6 +546,56 @@ public sealed class SessionPermissionServiceTests
         {
             await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, [cancellation]);
         }
+    }
+
+    // An agent makes several calls at once and each one asks, as Claude Code does: one send has more requests than the
+    // window of the card. None is denied unseen: they all wait, the window lists the oldest four, and each answer brings
+    // the next one in, in the order they came, also after requests answered before them.
+    [TestMethod]
+    public async Task OwnedPermission_RequestsOfOneSendBeyondTheWindowWaitAndComeInTheirTurn()
+    {
+        var service = new SessionPermissionService();
+        var forwarding = new OwnedProviderEventForwarding();
+        var attachment = forwarding.RegisterAttachment("session", "handle", () => Task.CompletedTask, () => Task.CompletedTask);
+        attachment.CompleteSetup();
+        var deliveries = new List<Task<AgentPermissionDecision>>();
+        try
+        {
+            var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+            Assert.IsNotNull(execution);
+            Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+            AgentCommandPermissionRequest Command(string command) => Request() with { Command = command, WorkingDirectory = "Q:\\fixture" };
+            foreach (var earlier in new[] { "earlier 1", "earlier 2" })
+            {
+                var answered = service.HandleOwnedCommandAsync(execution, Command(earlier), CancellationToken.None);
+                deliveries.Add(answered);
+                var handle = (await service.ListOwnedCommandsAsync("session", default)).Entries.Single().Handle;
+                Assert.IsTrue(await service.ResolveOwnedCommandAsync(handle, AgentPermissionDecisionKind.AllowOnce, default));
+                Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await answered.WithinAsync(TestTime.Seconds(5))).Kind);
+            }
+
+            var commands = Enumerable.Range(1, 7).Select(static i => $"call {i}").ToList();
+            var waiting = commands.Select(command => service.HandleOwnedCommandAsync(execution, Command(command), CancellationToken.None)).ToList();
+            deliveries.AddRange(waiting);
+            Assert.AreEqual(commands.Count, (await service.ListAsync()).Count, "Every request of the send waits for the user.");
+            Assert.IsFalse(waiting.Any(static delivery => delivery.IsCompleted));
+            for (var i = 0; i < commands.Count; i++)
+            {
+                var page = await service.ListOwnedCommandsAsync("session", default);
+                CollectionAssert.AreEqual(commands.Skip(i).Take(4).ToArray(), page.Entries.Select(static entry => entry.Request.Command).ToArray());
+                Assert.AreEqual(commands.Count - i > 4, page.HasMore);
+                var decision = i % 2 == 0 ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny;
+                Assert.IsTrue(await service.ResolveOwnedCommandAsync(page.Entries[0].Handle, decision, default));
+                Assert.AreEqual(decision, (await waiting[i].WithinAsync(TestTime.Seconds(5))).Kind);
+                if (i is not (0 or 2)) continue;
+                // A request that comes while older ones wait takes the place of an answered one, and still comes last.
+                commands.Add($"late call {i}");
+                waiting.Add(service.HandleOwnedCommandAsync(execution, Command(commands[^1]), CancellationToken.None));
+                deliveries.Add(waiting[^1]);
+            }
+            Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
+        }
+        finally { await CloseOwnedFixtureAsync(service, forwarding, attachment, deliveries, []); }
     }
 
     [TestMethod]
