@@ -53,7 +53,7 @@ tool output, paths and credentials: they are private user data.
 
 | Under `<project>/.alta/` | Content |
 | --- | --- |
-| `config.toml` | Project overrides, environment and CLI profiles of its sessions (`[env]`, `[identity.cli.*]`), project automations, `[search] enabled`. |
+| `config.toml` | Project overrides, environment and CLI profiles of its sessions (`[env]`, `[identity.cli.*]`), project automations, the archive policies of its sessions (`[[sessions.archive_policies]]`), `[search] enabled`. |
 | `issues.toml`, `local/issues.toml` | Views of the issues and of the pull requests (`[<service>.pull_requests]`), and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
 | `mcp.json`, `plugins/`, `plugin-data/`, `skills/`, `prompts/` | Project MCP servers, plugins, plugin data, skills, prompts. |
 | `plans/`, `tasks/` | Plans and follow-up tasks, Markdown with a front matter. |
@@ -73,7 +73,7 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
 | `[chat]`, `[providers.<key>]` | Default provider; provider definitions (`type`, `enabled`, `model`, credentials by environment variable name). |
 | `[plugins.<id>]` | Enablement, the settings the plugin declares (one key each, written by `PluginSettingsStore`), plus plugin-owned policy (`[plugins.mcp]`, `[plugins.mcp.servers.*]`) the store does not model. |
 | `[skills]`, `[tools]` | Disabled skills and the folders of skills added for every space; tools every session does without. |
-| `[sessions]`, `[review]`, `[commits]`, `[external_writing]`, `[work_items]` | Title mode and prompt suggestions; review before commit; co-author trailer; the attribution of what agents write in other systems; tasks and plans. |
+| `[sessions]`, `[review]`, `[commits]`, `[external_writing]`, `[work_items]` | Title mode, prompt suggestions and archive policies; review before commit; co-author trailer; the attribution of what agents write in other systems; tasks and plans. |
 | `[worktrees]`, `[storage]`, `[speech]`, `[search]` | Where worktrees go; scratchpad and session retention; desktop speech and search. |
 | `[models]` | Model tiers and fallback (below). |
 | `[automations.<guid>]` | Desktop automations, read and written by the desktop, kept by every typed save. |
@@ -83,8 +83,16 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
 - The bundled template (`src/CodeAlta.Catalog/DefaultConfig/config.toml`, every provider disabled) is written only when
   the file is missing; an existing file is never reconciled with new defaults. A provider entry without `enabled` is
   enabled; one with missing credentials is skipped at startup and stays in the file.
-- Session-specific choices (provider, model, effort, tier, mode) are not configuration: they live in the local state of
-  the journal, so a session keeps them when defaults change.
+- Session-specific choices (provider, model, effort, tier, mode, labels) are not configuration: they live in the local
+  state of the journal, so a session keeps them when defaults change.
+- **Archive policies** (`SessionArchivePolicy`, `[[sessions.archive_policies]]`) are read from the user's file, for every
+  session, and from the file of each project, for its own sessions (`LoadGlobalSessionArchivePolicies`,
+  `LoadProjectSessionArchivePolicies`): a policy is a team's, committed with its repository. A policy that names neither
+  labels nor automations, or neither an age nor a number to keep, is not read. `SessionArchivePolicyService` (desktop:
+  `DesktopSessionArchivePolicies`, after the restoration, then hourly) archives, never deletes, through
+  `SetSessionArchivedAsync` with the children, so its refusals (work, questions, queued prompts) apply; it leaves out the
+  sessions `SessionRetentionProtection.IsSessionKept` names (open, bookmarked, claimed) and every session while an owner
+  is not ready. Why archive and not retention: the result of a run stays findable, and retention keeps deleting by age.
 - MCP connections are JSON (`mcp.json`) so they stay compatible with other clients; TOML only overlays policy.
 - **Overlays.** `CatalogOptions.Config` (`CodeAltaConfigOptions`) tells every store built from those options how to read
   the user's configuration: the file, or none (`IgnoreUserConfig`), then each `CodeAltaConfigOverlay` in order (the
@@ -224,14 +232,24 @@ Which space a window shows, and its tabs, belong to the page's local storage, no
 
 ## Labels
 
-A label names a group of projects inside a space; labels nest. `LabelCatalog` (reached as `SpaceCatalog.Labels`) keeps
-one Markdown file per label under `labels/`, written as spaces are: the file name is the id, kept on rename and move;
-the front matter has `name`, `icon`, `color`, `order` among its siblings, `parent`, `favorite` and `space`. A project
-names its labels in its own file (`labels`), edited one line at a time as `spaces` is (`UpdateLabelsAsync`).
+A label names a group of projects inside a space, or a group of sessions inside a project; labels nest. `LabelCatalog`
+(reached as `SpaceCatalog.Labels`) keeps one Markdown file per label under `labels/`, written as spaces are: the file
+name is the id, kept on rename and move; the front matter has `name`, `icon`, `color`, `order` among its siblings,
+`parent`, `favorite`, `space` and `for: sessions` (`LabelDescriptor.Target`). A project names its labels in its own
+file (`labels`), edited one line at a time as `spaces` is (`UpdateLabelsAsync`); a session names its labels in the
+local state of its journal (`labels`), changed by `SessionRuntimeService.SetSessionLabelsAsync` and listed by the session
+list (`local_labels`).
 
 - **Only a top-level label has a space**; the labels under it are in the same one. Why: a tree split across spaces
   would show its branches in spaces where their parent is missing. A label without a space is in every space
   (`SpaceScope.IsAvailable`).
+- **One catalog, two trees.** A top-level label is for projects or for sessions, chosen at its creation; the labels
+  under it are the same, and a label does not move to the other tree. Why one catalog: a label of sessions has what a
+  label of projects has (name, icon, color, what it stands for, space, sub-labels) and the same pages and commands; a
+  label of sessions never shows in the tree of the projects, where an empty label is a group of its own.
+- **A session keeps the id of a deleted label of sessions**, which is shown nowhere: deleting a label writes no journal.
+  An automation finds the label it names, or creates it for sessions (`GetOrCreateForSessionsAsync`), at the start of
+  each run.
 - **Reads never fail on the tree.** A parent that does not exist, that makes a loop, or that puts a label deeper than
   `LabelDescriptor.MaximumDepth` is read as none; the labels are listed in the order of their tree.
 - **Deletes cascade without losing projects.** A deleted label leaves the project files and its sub-labels take its

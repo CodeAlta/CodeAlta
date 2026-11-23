@@ -47,7 +47,7 @@ In CodeAlta Desktop, right-click a text field, the prompt or a code editor, or p
 
 The Explorer lists the projects of the space the window shows. **Chats**, at the top, are sessions of no project. With several spaces, its foot has a button for each space and says what its sessions are doing.
 
-- When you pause typing in **Filter sessions**, at the top, the Explorer keeps the sessions, chats, projects and Claude Code conversations whose title has every word you typed, however old the sessions are. `Esc` or **×** clears the filter immediately.
+- When you pause typing in **Filter sessions**, at the top, the Explorer keeps the sessions, chats, projects and Claude Code conversations whose title has every word you typed, however old the sessions are. A word `label:audit` keeps the sessions with a [label](../labels.md#labels-of-sessions) whose id starts with `audit`. `Esc` or **×** clears the filter immediately.
 - Click the arrow of a project to show or hide its sessions; **Collapse all** closes them all. Open projects stay open at the next start.
 - A project lists its most recent sessions. **Show more…** says how many older ones it has and lists a few more at each click ([Settings > Appearance](settings.md) sets that number); **Browse all…** opens the [session browser](#session-browser) on all of them.
 - A project or a [label](../labels.md) shows a spinner while sessions run in it, with their number when there are several, and a yellow mark with the number of sessions that wait for you: a folded one tells it without being opened. A project with no session or terminal has no arrow.
@@ -79,7 +79,7 @@ Press `Ctrl+P` to search and run any command. In CodeAlta Desktop, `Ctrl+P` or t
 - the **commands**, each with its slash command and its shortcut. A command that cannot run now is dimmed, and when the session in front knows why, the reason replaces its description;
 - the **skills** of the current project.
 
-`Tab` switches between **All**, **Sessions**, **Conversations**, **Projects**, **Files**, **Commands**, **Skills**, **Docs**, **Tools** and **Archived** (`Enter` restores an archived session). **Conversations**, **Docs** and **Tools** come from the [search index](../search.md). Start with `/` for a command or a skill. A **?** beside a category means it has not been searched yet.
+`Tab` switches between **All**, **Sessions**, **Conversations**, **Projects**, **Files**, **Commands**, **Skills**, **Docs**, **Tools** and **Archived** (`Enter` restores an archived session). A word `label:pr-review` keeps the sessions of that [label](../labels.md#labels-of-sessions). **Conversations**, **Docs** and **Tools** come from the [search index](../search.md). Start with `/` for a command or a skill. A **?** beside a category means it has not been searched yet.
 
 `Ctrl+F` in a session [finds in that session](../search.md#find-in-a-session). `Ctrl+Shift+F` opens this search on **Sessions**.
 
@@ -100,7 +100,7 @@ A prompt can name several skills anywhere in its text, such as `/grilling the pl
 
 In CodeAlta Desktop, `Ctrl+Alt+B`, **Browse saved sessions** in the menu of a project, or **Browse all…** at the end of a list of sessions, opens the session browser: a searchable table of all the sessions of a project or of the global scope, with their provider, last update and message count. **Archived** shows the [archived sessions](../sessions/readme.md#archive-a-session) instead: **Restore** (or `Enter`, or a double-click) restores and opens one, **Info…** shows what is recorded of it, and **Delete** deletes it.
 
-Child sessions are listed under the session they come from. Typing a few words shows the sessions they find, each with the whole tree it belongs to, grayed: what a check of its top session would check too.
+Child sessions are listed under the session they come from. Typing a few words shows the sessions they find, each with the whole tree it belongs to, grayed: what a check of its top session would check too. A word `label:audit` keeps the sessions of that [label](../labels.md#labels-of-sessions), such as the runs of an automation to archive together.
 
 To clean up a project, check the sessions in the first column: checking a session checks its child sessions too, and Shift-click checks the rows down to the one clicked before. The box of the header checks every session the search finds. Sort by **Updated** to put the oldest together. Then:
 
