@@ -74,3 +74,11 @@ test("a scope the filter opens is folded apart from the tree, and opened again b
   assert.deepEqual([...toggleFilterFold(folded, "p1")], []);
   assert.deepEqual([...toggleFilterFold(folded, null)], ["p1", null]);
 });
+
+test("a word label: keeps the sessions with a label whose id starts with it, with the other words in their title", () => {
+  const audit = { title: "Weekly audit", fullTitle: "Weekly audit", labels: ["audit"] };
+  assert.equal(sessionMatches(audit, ["label:aud"]), true);
+  assert.equal(sessionMatches(audit, ["label:audit", "weekly"]), true);
+  assert.equal(sessionMatches(audit, ["label:audit", "monthly"]), false);
+  assert.equal(sessionMatches({ title: "Weekly audit", fullTitle: "Weekly audit" }, ["label:audit"]), false);
+});

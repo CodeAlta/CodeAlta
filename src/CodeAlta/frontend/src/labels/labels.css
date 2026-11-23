@@ -109,3 +109,19 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; user-sel
 .label-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
 .label-delete-anchor { position: relative; }
 .label-form-empty { color: var(--muted); }
+
+/* The sessions of a project under their labels: a title with the badge of the label, how many sessions it holds and what
+   runs or waits in them, then its sessions. The title is tinted with the color of its label, as a label of projects is. */
+.ide-shell .session-label-group { --label-color: var(--muted); display: flex; align-items: center; margin-top: 2px; border-radius: 4px;
+  background: linear-gradient(to right, color-mix(in srgb, var(--label-color) 14%, transparent), transparent 70%); }
+.ide-shell .session-label-group > .session-label-toggle { display: flex; flex: 1; align-items: center; gap: 5px; width: auto; min-width: 0; min-height: 24px;
+  padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 12px; text-align: start; }
+.ide-shell .session-label-group > .session-label-toggle:hover { background: color-mix(in srgb, var(--label-color) 10%, transparent); }
+.ide-shell .session-label-group > .session-label-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ide-shell .session-label-other { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.ide-shell .session-label-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--label-color) 16%, transparent);
+  color: var(--muted); font-size: 10.5px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* The labels of a session after its title: they shrink before the title does. */
+.ide-shell .session-row .session-label-badges { display: inline-flex; flex: 0 4 auto; align-items: center; gap: 3px; min-width: 0; overflow: hidden; }
+.ide-shell .session-label-badges > .label-badge { flex: 0 1 auto; min-width: 24px; }

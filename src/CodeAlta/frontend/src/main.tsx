@@ -200,11 +200,11 @@ import { SubProjectsWindow } from "./subprojects/SubProjectsWindow";
 import { monorepoSetupPrompt } from "./subprojects/subProjects";
 import "./subprojects/subprojects.css";
 import { createLabelsHub } from "./labels/labelsHub";
-import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, ownLabels, projectLabels } from "./labels/labels";
+import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, ownLabels, projectLabels, projectLabelsOnly, sessionLabels, sessionLabelsOnly } from "./labels/labels";
 import { LabelRailRow, type LabelRowEditing } from "./labels/LabelRailRow";
 import { LabelDragGhost, LabelFormPopover } from "./labels/LabelViews";
 import { LabelSettings } from "./labels/LabelSettings";
-import { ProjectLabelBadges, ProjectLabelsPopover } from "./labels/ProjectLabels";
+import { LabelBadges, ProjectLabelsPopover, SessionLabelsPopover } from "./labels/ProjectLabels";
 import { labelMoveTarget, useRailDrag, type RailDrag, type RailDrop } from "./labels/labelDrag";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { ProjectSecurityPopover, projectSecurityApi } from "./explorer/ProjectSecurityPopover";
@@ -251,8 +251,9 @@ import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { terminalPaste } from "./terminal/shellBlocks";
-import { ExplorerSessions, SessionListDisclosure, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
-import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
+import { ExplorerSessions, SessionLabelGroupRow, SessionListDisclosure, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey, type SessionLabelGrouping } from "./explorer/ExplorerSessions";
+import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry, type SessionTreeEntry } from "./explorer/sessionTree";
+import { groupSessionsByLabels } from "./explorer/sessionLabelGroups";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
 import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode, readClaudeCodeConversations, type ClaudeCodeConversations } from "./claudeCodeImport/claudeCodeSessions";
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
@@ -270,7 +271,7 @@ import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type Sess
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { startSplitterDrag } from "./splitterPress";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
-  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, isLabelFolded, setLabelFolded, type ProjectTree } from "./explorer/projectTree";
+  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, isLabelFolded, setLabelFolded, isGroupedByLabels, setGroupedByLabels, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
@@ -1398,23 +1399,28 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     favorites: fullListing.projects.slice(0, fullListing.favorites).filter(project => filterShows(project.id)).length } : fullListing;
   // The labels of the shown space, and the parts of the Explorer when it lists the projects under them: while the list
   // is filtered, only the labels with a project that matches, unfolded.
-  const spaceLabels = useMemo(() => labelsOfSpace(labelsState.labels, spaceId), [labelsState.labels, spaceId]);
+  // The labels for projects make the tree of the projects; the labels for sessions group the sessions of a project.
+  const projectLabelCatalog = useMemo(() => projectLabelsOnly(labelsState.labels), [labelsState.labels]);
+  const spaceLabels = useMemo(() => labelsOfSpace(projectLabelCatalog, spaceId), [projectLabelCatalog, spaceId]);
+  const spaceSessionLabels = useMemo(() => labelsOfSpace(sessionLabelsOnly(labelsState.labels), spaceId), [labelsState.labels, spaceId]);
   const railGroups = projectListing && labelsState.available && projectGrouping === "labels"
     ? projectRailGroups(projectListing.projects, projectListing.favorites, spaceLabels, !filterView) : [];
   // A label made from the Explorer at the top is in the shown space, or in every space from the default one.
   const labelSpace = spaceId === defaultSpaceId ? null : spaceId;
   const [newLabel, setNewLabel] = useState<{ busy: boolean; error: string | null } | null>(null);
+  // The session whose labels are shown in a popover beside its row in the list of the selected scope.
+  const [labelingSession, setLabelingSession] = useState<string | null>(null);
   async function createTopLabel(name: string, icon: string, color: string) {
     setNewLabel({ busy: true, error: null });
     const outcome = await labelsHub.create(name, { icon: icon || null, color: color || null, space: labelSpace });
     setNewLabel(outcome.ok ? null : { busy: false, error: outcome.message ?? t("The label could not be created.") });
   }
-  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: ownLabels(labelsState.labels), update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
-    create: (name, look) => labelsHub.create(name, { ...look, space: look.parent ? null : labelSpace }) }), [labelsState.labels, labelsHub, labelSpace]);
+  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: ownLabels(projectLabelCatalog), update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
+    create: (name, look) => labelsHub.create(name, { ...look, space: look.parent ? null : labelSpace }) }), [projectLabelCatalog, labelsHub, labelSpace]);
   // A label dragged before, after or under another one; a project dragged onto a label gets it, and leaves the label
   // it was dragged out of unless Ctrl or Alt is held; dropped on the projects of no label, it leaves that label.
   function railDropAccepts(drag: RailDrag, drop: RailDrop): boolean {
-    const all = labelsState.labels;
+    const all = projectLabelCatalog;
     if (drag.kind === "project") {
       if (!drop.labelId) return drag.from !== null;
       return drop.labelId !== drag.from && !all.find(label => label.id === drop.labelId)?.projectIds.includes(drag.projectId);
@@ -1425,7 +1431,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   async function railDropped(drag: RailDrag, drop: RailDrop, copy: boolean) {
     const outcome = drag.kind === "project"
       ? await labelsHub.assign(drag.projectId, drop.labelId ? [drop.labelId] : [], drag.from && (!copy || !drop.labelId) ? [drag.from] : [])
-      : await (async () => { const target = labelMoveTarget(labelsState.labels, drag.labelId, drop); return target ? labelsHub.move(drag.labelId, target.parent, target.index) : null; })();
+      : await (async () => { const target = labelMoveTarget(projectLabelCatalog, drag.labelId, drop); return target ? labelsHub.move(drag.labelId, target.parent, target.index) : null; })();
     if (outcome && !outcome.ok) showToast({ message: outcome.message ?? t("The labels could not be changed."), intent: "danger" });
   }
   const railDrag = useRailDrag(railDropAccepts, (drag, drop, copy) => void railDropped(drag, drop, copy));
@@ -4577,8 +4583,27 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (pending.action === "rename") { beginSessionRename(rows[0]); sessionDeleteQuestion.close(); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
+  // The sessions of a scope under their labels, when its list is grouped: while the sidebar is filtered, no group is folded.
+  const groupEntries = (scope: string | null, entries: readonly SessionTreeEntry[]): readonly SessionTreeEntry[] =>
+    labelsState.available && isGroupedByLabels(projectTree, scope)
+      ? groupSessionsByLabels(entries, spaceSessionLabels, scopeKey(scope), key => !filterView && isLabelFolded(projectTree, key)) : entries;
+  const sessionGrouping: SessionLabelGrouping = {
+    labels: spaceSessionLabels,
+    fold: (key, folded) => setProjectTree(current => setLabelFolded(current, key, folded)),
+    activity: sessions => <><WaitingBadge count={sessions.reduce((count, session) => count + (waitingSessions.has(session.id) ? 1 : 0), 0)} />
+      {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tabs={sessions.map(session => ({ projectId: session.projectId, sessionId: session.id, path: session.workspacePath }))} />}</>,
+  };
+  // The labels of a session in a popover beside its row, from Labels… in its menu: the labels for sessions of the shown space.
+  const sessionLabelsPopover = owned && labelsState.available ? (session: WorkspaceSession, close: () => void) => <SessionLabelsPopover sessionId={session.id}
+    sessionTitle={plainTitle(session.title)} current={session.labels ?? []} labels={ownLabels(spaceSessionLabels)}
+    // The Explorer shows the change with a fresh list of the sessions.
+    assign={async (id, add, remove) => { const outcome = await labelsHub.assignSession(id, add, remove); if (outcome.ok) readSessionList.current(); return outcome; }}
+    create={name => labelsHub.create(name, { space: labelSpace, forSessions: true })} onClose={close} /> : undefined;
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
+    // Grouped, a session is listed under the first of its labels: its badges name the others.
+    const labels = sessionLabels(session, spaceSessionLabels);
     return <>
+      <LabelBadges labels={isGroupedByLabels(projectTree, scope) ? labels.slice(1) : labels} all={spaceSessionLabels} className="session-label-badges" />
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
       <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />
@@ -4615,7 +4640,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} unreachable={snapshot.wantedTruncated === true} filtered={!!filterView}
+    return <ExplorerSessions entries={withClaudeCodeSessions(groupEntries(scope, shown.entries as SessionTreeEntry[]), scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} unreachable={snapshot.wantedTruncated === true} filtered={!!filterView}
+      grouping={sessionGrouping} labels={sessionLabelsPopover}
       onBrowse={() => scopeSessionAction(scope, "browse")} browseKeys={commandKeys(commandDefinitions.find(command => command.id === "browseSessions")!)[0]}
       extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
@@ -6411,7 +6437,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         <SessionContentLayout sessionsHidden={!railVisible}
           projects={sessions => { const railHead = <>
           <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span>
-            {newLabel && <span className="label-new-anchor"><LabelFormPopover heading={t("New label")} submitLabel={t("Create")} labels={labelsState.labels} parent={null} ownId={null}
+            {newLabel && <span className="label-new-anchor"><LabelFormPopover heading={t("New label")} submitLabel={t("Create")} labels={projectLabelCatalog} parent={null} ownId={null}
               initial={{ name: "", icon: "", color: "" }} busy={newLabel.busy} error={newLabel.error}
               onSubmit={look => void createTopLabel(look.name, look.icon, look.color)} onCancel={() => setNewLabel(null)} /></span>}</span><span>
             {snapshot && <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="collapseAll" size={16} />} aria-label={t("Collapse all")} title={t("Collapse all")}
@@ -6476,7 +6502,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 drag={owned && !group.label.repository ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined}
                 activity={labelActivity(labelSubtreeProjects(group.label.id, spaceLabels))} />,
               repository: project => projectTitle(project, catalog.current?.projects ?? projectListing?.projects ?? []).repository,
-              badges: project => <ProjectLabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
+              badges: project => <LabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
               drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
             } : undefined}
@@ -6537,6 +6563,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 all: () => openFile(canvasesTab) } : undefined,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
                 search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse"),
+                labels: labelsState.available ? { grouped: id => isGroupedByLabels(projectTree, id),
+                  setGrouped: (id, grouped) => setProjectTree(current => setGroupedByLabels(current, id, grouped)) } : undefined,
                 cloud: cloudOffered ? { create: newCloudSession, bring: id => { if (scopeCanCreateSession(id)) setCloudBring({ projectId: id, link: "" }); } } : undefined } }}
             editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
               unsaved: project => fileEditors.dirty(fileTabKey(editorTab(project))), show: project => openProjectEditor(project) } : undefined} />}
@@ -6562,10 +6590,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           </div>}
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
           <div className="session-list">
-            {selectedList.entries.map((entry, index) => {
+            {groupEntries(projectId, selectedList.entries).map((entry, index) => {
               if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
                 onMore={() => sessionTree.more(entry.parentId)} onFewer={() => sessionTree.fewer(entry.parentId)} />;
               if (entry.kind === "link") return <SessionLinkRow key={`link:${entry.parentId}:${entry.session.id}`} entry={entry} />;
+              if (entry.kind === "label") return <SessionLabelGroupRow key={entry.key} entry={entry} grouping={sessionGrouping} />;
               const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere, childrenElsewhere } = entry.row;
               const twist = sessionTwist(entry, sessionTree.toggle);
               const menu = activeMenu?.id === session.id ? activeMenu : null;
@@ -6636,6 +6665,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   ...sessionLineageEntries(session),
                   ...sessionReviewEntries(session),
                   ...sessionMachineEntries(session),
+                  ...(sessionLabelsPopover ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => setLabelingSession(session.id) }] : []),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
@@ -6649,6 +6679,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onSubmit={title => void renameSelectedSession(title)} onCancel={() => setRenamingId(null)} />}
               {sessionDeleteQuestion.render(session)}
               {sessionArchiveQuestion.render(session, "explorer")}
+              {labelingSession === session.id && sessionLabelsPopover?.(session, () => setLabelingSession(null))}
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && !filterView && omittedSessions(snapshot, projectId) === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}

@@ -1,12 +1,18 @@
 import type { WorkspaceClaudeCodeConversation, WorkspaceClaudeCodeSession, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 import { fieldsScore } from "../search/searchResults";
+import { hasLabelWords, splitLabelWords } from "../labels/labels";
 import { plainTitle } from "../sessionTitle";
 import { repositoriesAbove } from "./projectRail";
 
-/** Whether a session of CodeAlta has every word typed in the filter of the sidebar in its title. */
-export const sessionMatches = (session: Readonly<Pick<WorkspaceSession, "title" | "fullTitle">>, words: readonly string[]): boolean =>
-  fieldsScore(words, [[plainTitle(session.title), 0], [session.fullTitle, 3]]) !== null;
+/**
+ * Whether a session of CodeAlta has every word typed in the filter of the sidebar in its title, and a label for each
+ * `label:` word (`label:audit`).
+ */
+export function sessionMatches(session: Readonly<Pick<WorkspaceSession, "title" | "fullTitle" | "labels">>, words: readonly string[]): boolean {
+  const query = splitLabelWords(words);
+  return hasLabelWords(session, query.labels) && fieldsScore(query.words, [[plainTitle(session.title), 0], [session.fullTitle, 3]]) !== null;
+}
 
 /**
  * The rows of a list of sessions the filter keeps: those whose title has every word, and the sessions they are under,

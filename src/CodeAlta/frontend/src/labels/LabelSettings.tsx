@@ -50,7 +50,9 @@ export function LabelSettings({ hub, spaces, projects, shownId, canEdit }: {
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   // The labels of the maps of the repositories are the team's: they are changed in the map, not here.
-  const labels = ownLabels(state.labels);
+  const [target, setTarget] = useState<"projects" | "sessions">("projects");
+  // The labels for projects and those for sessions are two trees: the page shows one at a time.
+  const labels = ownLabels(state.labels).filter(value => !!value.forSessions === (target === "sessions"));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -80,7 +82,7 @@ export function LabelSettings({ hub, spaces, projects, shownId, canEdit }: {
 
   async function create(look: LabelLook) {
     const outcome = await run(() => hub.create(look.name, { icon: look.icon || null, color: look.color || null,
-      space: spaceFilter || (shownId !== "default" ? shownId : null) }));
+      space: spaceFilter || (shownId !== "default" ? shownId : null), forSessions: target === "sessions" }));
     if (outcome.ok) { setCreating(false); if (outcome.label) setSelected(outcome.label.id); }
   }
   const spaceOf = (id: string | null) => id === null ? null : spaces.find(space => space.id === id) ?? null;
@@ -94,6 +96,11 @@ export function LabelSettings({ hub, spaces, projects, shownId, canEdit }: {
     </span>}>
     {state.loaded && !state.available ? <p className="bp6-text-muted">{t("Labels need CodeAlta Desktop with its own catalog.")}</p> : <div className="label-board">
       <Card className="label-tree-card">
+        <label className="label-space-filter"><span>{t("Labels for")}</span>
+          <HTMLSelect value={target} onChange={event => { setTarget(event.currentTarget.value === "sessions" ? "sessions" : "projects"); setSelected(null); }}>
+            <option value="projects">{t("Projects")}</option>
+            <option value="sessions">{t("Sessions")}</option>
+          </HTMLSelect></label>
         {spaces.length > 1 && <label className="label-space-filter"><span>{t("Space")}</span>
           <HTMLSelect value={spaceFilter} onChange={event => setSpaceFilter(event.currentTarget.value)}>
             <option value="">{t("Every label")}</option>
@@ -113,7 +120,7 @@ export function LabelSettings({ hub, spaces, projects, shownId, canEdit }: {
               </button>
               {item.favorite && <AppIcon name="star" size={12} className="label-tree-favorite" aria-label={t("Favorite")} />}
               <span className="label-tree-space" title={space ? space.name : undefined}>{item.parent === null && space && <SpaceIcon space={space} size={13} />}</span>
-              <span className="label-tree-count">{item.projectIds.length}</span>
+              <span className="label-tree-count">{item.forSessions ? null : item.projectIds.length}</span>
               <span className="label-tree-tools">
                 <Button variant="minimal" size="small" icon={<AppIcon name="arrowUp" size={13} />} disabled={!canEdit || busy || !steppedPlace(labels, item.id, "up")}
                   aria-label={t("Move {name} up", { name: item.name })} title={t("Move up")} onClick={() => move(item.id, steppedPlace(labels, item.id, "up"))} />
@@ -129,6 +136,7 @@ export function LabelSettings({ hub, spaces, projects, shownId, canEdit }: {
           {listed.length === 0 && <li className="label-tree-empty">{t("No label yet.")}</li>}
         </ul>
         <p className="settings-field-help">{t("Drag a label onto another one to put it under it, or above or below it to move it.")}</p>
+        {target === "sessions" && <p className="settings-field-help">{t("The Explorer can list the sessions of a project under these labels: Group sessions by labels, in the menu of the project. A session gets them with Labels…, in its own menu.")}</p>}
       </Card>
       {label ? <LabelForm key={label.id} label={label} labels={labels} spaces={spaces} projects={projects} canEdit={canEdit} busy={busy} run={run}
         hub={hub} onDeleted={() => setSelected(null)} /> : <Card className="label-form-card label-form-empty"><p className="bp6-text-muted">{t("Select a label to change it.")}</p></Card>}
@@ -197,6 +205,7 @@ function LabelForm({ label, labels, spaces, projects, canEdit, busy, run, hub, o
         onChange={event => setDescription(event.target.value)} onBlur={() => { if (description.trim() !== (label.description ?? "")) void save({ description: description.trim() }); }} />
       <p className="settings-field-help">{t("The agents read it.")}</p>
     </div>
+    {!label.forSessions && <>
     <h3 className="label-form-projects">{t("Projects")}<span className="space-section-count">{label.projectIds.length}</span></h3>
     {projects.length > 8 && <InputGroup type="search" size="small" value={filter} placeholder={t("Search")} aria-label={t("Search")}
       leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setFilter(event.target.value)} />}
@@ -205,11 +214,11 @@ function LabelForm({ label, labels, spaces, projects, canEdit, busy, run, hub, o
         onChange={event => { const add = event.currentTarget.checked; void run(() => hub.assign(project.id, add ? [label.id] : [], add ? [] : [label.id])); }}>
         <span className="space-project-name">{project.name}</span><span className="space-project-path">{project.path}</span></Checkbox>)}
       {listed.length === 0 && <p className="bp6-text-muted">{t(projects.length ? "No project matches." : "No project yet.")}</p>}
-    </div>
+    </div></>}
     <footer className="label-form-footer"><span className="label-delete-anchor">
       <Button intent="danger" variant="outlined" icon={<AppIcon name="trash" size={14} />} disabled={disabled} onClick={() => setDeleting(true)}>{t("Delete label…")}</Button>
       {deleting && <ConfirmPopover always placement="top-start" title={t("Delete this label?")} subject={labelPath(label, labels)} intent="danger" confirmLabel={t("Delete")}
-        detail={t("Its projects lose it and stay. The labels under it take its place.")} busy={busy}
+        detail={t(label.forSessions ? "Its sessions lose it and stay. The labels under it take its place." : "Its projects lose it and stay. The labels under it take its place.")} busy={busy}
         onConfirm={() => void run(() => hub.remove(label.id)).then(outcome => { setDeleting(false); if (outcome.ok) onDeleted(); })} onCancel={() => setDeleting(false)} />}
     </span>
     {labelDepth(label, labels) >= maximumLabelDepth && <span className="bp6-text-muted">{t("Labels go {count} levels deep at most.", { count: maximumLabelDepth })}</span>}
