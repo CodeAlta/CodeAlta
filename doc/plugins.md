@@ -144,9 +144,10 @@ prompt live in the handlers of the tools, below the interceptor, so arguments a 
 plugin can make the policy stricter, never looser. That is also why no plugin hook answers a permission prompt: one that
 could allow would be the only way around the guards. The one decision that answers a prompt,
 `AgentToolCallDecision.Approve`, belongs to the guard of an automation with Autonomy (`SessionToolGuards` keeps it, the
-plugin bridge masks its capability): Claude Code offers it (`AgentToolHookCapabilities.Approve`) for a tool it runs
-itself other than its commands and edits, named by the CLI, and answers that call's `can_use_tool` without asking the
-run, after its own checks (no shell, plan mode). An ACP agent names its tools by a title it writes, so it offers none.
+plugin bridge masks its capability): Claude Code offers it (`AgentToolHookCapabilities.Approve`) for a tool of an MCP
+server it runs itself (`mcp__<server>__<tool>`, named by the CLI), and answers the `can_use_tool` of that same call
+(same id, tool and input) without asking the run, after its own checks (no shell, plan mode). An ACP agent names its
+tools by a title it writes, so it offers none.
 
 The adapter calls only the plugins that override a hook (read once at activation), one after the other: the first block
 wins, replaced arguments are the next hook's input, each result hook sees the result the one before left, and details a

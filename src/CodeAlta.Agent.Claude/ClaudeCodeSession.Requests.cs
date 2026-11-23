@@ -39,7 +39,10 @@ internal sealed partial class ClaudeCodeSession
         {
             runForOwnTurn = _runForOwnTurn?.Task;
             _permissionPrompts[requestId] = prompt;
-            approvedByHooks = ClaudeCodeJson.GetString(request, "tool_use_id") is { } toolUseId && _approvedByHooks.Remove(toolUseId);
+            // The approval is for the call that was checked: another tool, or an input another hook of the CLI changed
+            // since, is asked as usual.
+            approvedByHooks = ClaudeCodeJson.GetString(request, "tool_use_id") is { } toolUseId && _approvedByHooks.Remove(toolUseId, out var approved)
+                && string.Equals(approved.Tool, toolName, StringComparison.Ordinal) && JsonElement.DeepEquals(approved.Input, input);
         }
 
         try
@@ -192,8 +195,8 @@ internal sealed partial class ClaudeCodeSession
 
     private static bool IsFileTool(string toolName) => toolName is "Edit" or "MultiEdit" or "Write" or "NotebookEdit";
 
-    // The tools whose permission prompts are asked as commands and file changes: they follow the permission mode.
-    private static bool IsCommandOrEditTool(string toolName) => toolName is "Bash" or "PowerShell" or "Monitor" || IsFileTool(toolName);
+    // What starts the name of a tool of an MCP server, as the CLI names it (`mcp__<server>__<tool>`).
+    private const string McpToolNamePrefix = "mcp__";
 
 
     // Why a file tool of a CLI without its shell may not write where it asks, or null when it may.

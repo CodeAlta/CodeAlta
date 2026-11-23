@@ -111,10 +111,11 @@ public sealed class AutomationRunGuardTests
         Assert.AreEqual(Slack + """ {"channel_id":"C1"}""", recorded.Single());
     }
 
-    // A person approves the complete action: an approval names the digest of the tool and its complete arguments, and a call too
-    // long to be shown whole says that it is shortened, with that digest and where the complete arguments are read.
+    // A person approves the complete action: a call too long to be shown whole says that it is shortened, with the digest of
+    // the tool and its complete arguments and where they are read. The request names no approval of a provider, which the
+    // review of a session would refuse to show.
     [TestMethod]
-    public async Task AnApproval_IsBoundToTheDigestOfTheCompleteCall_AndALongOneSaysItIsShortened()
+    public async Task AnApproval_OfALongCall_SaysItIsShortened_WithTheDigestOfTheCompleteCall()
     {
         var asker = new Asker();
         var guard = new AutomationRunGuard(Entry(new AutomationAutonomy()), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
@@ -124,14 +125,13 @@ public sealed class AutomationRunGuardTests
         var arguments = $$"""{"padding":"{{new string('a', 3000)}}","target":"prod-db"}""";
         await guard.BeforeToolCallAsync(Call("db_drop", arguments), default);
         var asked = asker.Asked.Single();
-        Assert.AreEqual(Digest("db_drop", arguments), asked.ApprovalId, "the approval is bound to the complete call");
+        Assert.IsNull(asked.ApprovalId);
         StringAssert.Contains(asked.Command, "shortened");
         StringAssert.Contains(asked.Command, Digest("db_drop", arguments));
         StringAssert.Contains(asked.Reason, "complete arguments");
 
-        // A short call is shown whole, and bound to its digest as well.
+        // A short call is shown whole.
         await guard.BeforeToolCallAsync(Call("db_drop", """{ "target" : "dev-db" }"""), default);
-        Assert.AreEqual(Digest("db_drop", """{"target":"dev-db"}"""), asker.Asked[1].ApprovalId, "the digest is of the arguments without their spacing");
         Assert.AreEqual("""db_drop { "target" : "dev-db" }""", asker.Asked[1].Command);
     }
 

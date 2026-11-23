@@ -105,8 +105,8 @@ public enum AgentToolHookCapabilities
 
     /// <summary>
     /// A hook can answer the permission prompt of a call an agent runs itself for the user
-    /// (<see cref="AgentToolCallDecision.Approve"/>): an agent offers it where it names the tool by its real name, and
-    /// never for its own commands and edits, which follow the permission mode.
+    /// (<see cref="AgentToolCallDecision.Approve"/>): an agent offers it where it names the tool by its real name, for the
+    /// tools of the MCP servers it runs, and never for its own commands and edits, which follow the permission mode.
     /// </summary>
     Approve = 8,
 }

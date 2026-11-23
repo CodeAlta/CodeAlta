@@ -170,6 +170,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 _toolCalls.Clear();
                 _toolCallOrder.Clear();
                 _approvedByHooks.Clear();
+                _approvalRuns++;
             }
 
             waiting = _runForOwnTurn;
@@ -932,6 +933,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _toolCalls.Clear();
             _toolCallOrder.Clear();
             _approvedByHooks.Clear();
+            _approvalRuns++;
             _stateEventsSeen = false;
             _cliRunning = false;
             _turnActive = false;

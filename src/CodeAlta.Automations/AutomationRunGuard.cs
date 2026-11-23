@@ -263,13 +263,13 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     private static AgentToolCallDecision NotMade(string tool, string why)
         => AgentToolCallDecision.Block($"The call of {tool} was not made: {why}. Its target is not as it must be to act; say what you found instead.");
 
-    // Asks a person a call, bound to the digest of the complete call (its approval id): a call shortened to be shown says where
-    // the complete arguments are read.
+    // Asks a person a call: a call shortened to be shown names the digest of the complete call, and says where the complete
+    // arguments are read. The request names no approval of a provider: the review of a session shows only such a request.
     private async Task<AgentToolCallDecision> AskAsync(string sessionId, string tool, string shown, string digest, string reason, string? folder, CancellationToken cancellationToken)
     {
         if (shown.Contains(digest, StringComparison.Ordinal)) reason += " The call is shortened here: its complete arguments are in the tool call of the session.";
         var request = new AgentCommandPermissionRequest(new ModelProviderId("automation"), string.Empty, _time.GetUtcNow(), null, "automation-" + Guid.NewGuid().ToString("N"),
-            digest, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
+            null, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
         using var timeout = _autonomy.ApprovalTimeout is { } minutes && _autonomy.OnTimeout == AutomationAutonomy.StopOnTimeout && !TakenOver
             ? new CancellationTokenSource(TimeSpan.FromMinutes(minutes), _time) : new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
