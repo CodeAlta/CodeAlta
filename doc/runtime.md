@@ -170,6 +170,9 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
   interaction and a fresh attempt id, so an old or replayed answer resolves nothing. The mode of a session decides
   (`SessionPermissionModes.Policy`: `bypassPermissions` approves, `acceptEdits` grants file changes and reviews commands,
   anything else reviews); a change of mode applies to a running send at once. The provider still enforces the decision.
+  Every request of a send waits, however many it makes at once; only the bound of the service (`OwnedPendingLimit`,
+  128 requests and questions together, against a runaway agent) denies the next one unseen. The window of a session
+  (`ListOwnedCommandsAsync`) lists its oldest four, and the card shows them one at a time.
 - **Command guards.** A command refused in every mode is an `AgentCommandGuard`, checked before any permission by the
   shell tool and by the Claude Code hook.
 - **Tools turned off.** A session does without the union of `[tools] disabled` (global), `tools.disabled` of its space

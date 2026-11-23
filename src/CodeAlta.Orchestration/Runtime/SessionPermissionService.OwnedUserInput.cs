@@ -7,9 +7,9 @@ public sealed partial class SessionPermissionService
     private readonly Dictionary<SessionOwnedUserInputHandle, PendingUserInput> _inputs = [];
     private readonly HashSet<PendingUserInput> _inputDeliveries = [];
 
-    private bool HasOwnedDeliveryCapacity(OwnedPermissionExecution execution)
-        => _ownedDeliveries.Count + _inputDeliveries.Count < OwnedPendingLimit
-            && execution.Deliveries.Count + execution.InputDeliveries.Count < OwnedPendingPerExecutionLimit;
+    // A send has no bound of its own: an agent that makes several calls at once has each of them wait, and the window of
+    // its session shows them in turn. Only the bound of the service, against a runaway agent, denies a request unseen.
+    private bool HasOwnedDeliveryCapacity() => _ownedDeliveries.Count + _inputDeliveries.Count < OwnedPendingLimit;
 
     private Task JoinOwnedDeliveries() => JoinDeliveryOriginalsAsync(_ownedDeliveries.Select(p => (Task)p.Delivery!)
         .Concat(_inputDeliveries.Select(p => (Task)p.Delivery!)));
@@ -24,7 +24,7 @@ public sealed partial class SessionPermissionService
         var delivery = await ExecuteAsync<Task<AgentUserInputResponse?>?>(() =>
         {
             if (!execution.EnableUserInput || !execution.RunBound || !CanUse(execution) || token.IsCancellationRequested
-                || !HasOwnedDeliveryCapacity(execution) || execution.AttachmentOrdinal is <= 0 or > 9007199254740991
+                || !HasOwnedDeliveryCapacity() || execution.AttachmentOrdinal is <= 0 or > 9007199254740991
                 || request is null || request.SessionId != execution.SessionId || request.ProviderId.Value != execution.ProviderId
                 || !OwnedUserInputValidation.Text(request.InteractionId, 128, identity: true)
                 || (request.RunId is not null && request.RunId != execution.RunId)) return null;
