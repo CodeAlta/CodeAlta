@@ -1370,7 +1370,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, options.McpHome, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost, profileRoot: options.Profile)).ReadAsync,
                     });
-                    builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch));
+                    builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch)
+                    {
+                        AssignSession = (sessionId, add, remove, token) => host.RuntimeService.SetSessionLabelsAsync(sessionId, add, remove, token),
+                    });
                     builder.AddSubProjectsService(new SubProjectsService(host.ProjectCatalog, spaceView, epoch));
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch,
                         new Spaces.SpaceIdentityChecks(host.SpaceCatalog.Projects.Options.GlobalRoot, host.Credentials)));

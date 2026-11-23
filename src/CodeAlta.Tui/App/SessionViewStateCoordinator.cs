@@ -328,6 +328,8 @@ internal sealed class SessionViewStateCoordinator
             {
                 snapshot.PromptProvenance = ClonePromptProvenance(latestState.PromptProvenance);
                 snapshot.QueuedPrompts = CloneQueuedPrompts(latestState.QueuedPrompts);
+                // The terminal UI does not show the labels of a session: it keeps them as they are.
+                snapshot.Labels = latestState.Labels is null ? null : [.. latestState.Labels];
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

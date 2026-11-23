@@ -722,6 +722,7 @@ public sealed partial class SessionViewJournalStore
             AgentPromptId = state.AgentPromptId,
             Archived = state.Archived,
             ArchivedAt = state.ArchivedAt,
+            Labels = LabelDescriptor.NormalizeIds(state.Labels) is { Count: > 0 } labels ? labels : null,
             MessageCount = state.MessageCount,
             ParentSessionId = state.ParentSessionId,
             CreatedBy = state.CreatedBy,

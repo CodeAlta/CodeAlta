@@ -91,6 +91,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         // It gives the session to another machine; a sandboxed session may not (it is not among the commands its sandbox allows).
         Mutating("session move"),
         Mutating("session title"),
+        Mutating("session label"),
         Disruptive("session abort"),
         Mutating("session compact"),
         Mutating("session fork"),
@@ -868,6 +869,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         // A host whose agents reach other machines lists them for `create --machine` and the prompts sent there.
         if (context.Services.Get<SessionRuntimeService>()?.RemoteChildren is not null) group.Add(CreateSessionMachinesCommand(context));
         group.Add(CreateSessionTitleCommand(context));
+        group.Add(CreateSessionLabelCommand(context));
         group.Add(CreateSessionAbortCommand(context));
         group.Add(CreateSessionCompactCommand(context));
         group.Add(CreateSessionForkCommand(context));
@@ -929,6 +931,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var limit = 50;
         var includeMetrics = false;
         var includeArchived = false;
+        var labels = new List<string>();
         var command = Leaf("list", "List recoverable/live sessions as JSONL.");
         command.Add("project=", "Filter by project id, slug, or path.", value => project = value);
         command.Add("space=", "Filter by space: id, start of id, or name. The sessions listed in that space.", value => space = value);
@@ -938,11 +941,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("limit=", "Maximum sessions to return.", (int value) => limit = value);
         command.Add("metrics", "Include compact session metrics for emitted rows. This reads stored session history.", value => includeMetrics = value is not null);
         command.Add("archived", "Include the archived sessions, which are left out otherwise.", value => includeArchived = value is not null);
-        command.Add(async (_, _) => await HandleSessionListAsync(context, project, space, state, provider, limit, includeMetrics, includeArchived).ConfigureAwait(false));
+        command.Add("label=", "List the sessions that have this label for sessions, or one under it: id, name, path, or start of id; several separated by commas.", value => AddLabelReferences(labels, value));
+        command.Add(async (_, _) => await HandleSessionListAsync(context, project, space, state, provider, limit, includeMetrics, includeArchived, labels).ConfigureAwait(false));
         AddHelpText(command,
             "Examples: `alta session list --project CodeAlta --state all --limit 20`; add `--metrics` for compact duration/usage fields.",
             "Archived sessions are left out unless `--archived` (or `--state all`) is given; `--state archived` lists only them.",
-            "`--space <space>` lists the sessions of a space: the ones that record it, and those created before sessions had a space in every space of their project. `spaceId` is the space a session records.");
+            "`--space <space>` lists the sessions of a space: the ones that record it, and those created before sessions had a space in every space of their project. `spaceId` is the space a session records.",
+            "`--label <label>` lists the sessions of a label for sessions, such as `alta session list --project CodeAlta --label audit`; `labels` names the labels of each session.");
         return command;
     }
 
@@ -1186,6 +1191,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
         command.Add("sandbox=", "The sandbox the session runs in: a profile (workspace, strict, or one of the user's; `alta sandbox list` says what each allows), or `off`. Without it, the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = value);
         command.Add("no-sub-sessions", "Create the session without sub-sessions: it cannot create, fork or start sessions of its own, and its instructions do not mention them. For a child that must do its part itself.", value => options.NoSubSessions = value is not null);
+        command.Add("label=", "A label for sessions the session gets, of its space or of every space: id, name, path, or start of id; several separated by commas, or the option given again.", value => AddLabelReferences(options.Labels, value));
         command.Add("machine=", "Start the session on another machine (its name or id, as `alta session machines` lists them), as a child of the calling session.", value => options.Machine = value);
         command.Add("message=", "With --machine: the first prompt of the session.", value => options.Message = value);
         command.Add("stdin", "With --machine: read the first prompt of the session from stdin.", value => options.UseStdin = value is not null);
@@ -2392,11 +2398,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? providerFilter,
         int limit,
         bool includeMetrics,
-        bool includeArchived = false)
+        bool includeArchived = false,
+        IReadOnlyList<string>? labelFilter = null)
     {
         if (limit <= 0)
         {
             return UsageError(context, "usage.invalidLimit", "--limit must be a positive integer.", "alta session list");
+        }
+
+        var (labelIds, labelExit) = await ResolveSessionListLabelsAsync(context, labelFilter ?? []).ConfigureAwait(false);
+        if (labelExit != AltaExitCodes.Success)
+        {
+            return labelExit;
         }
 
         var infos = await LoadSessionInfosAsync(context, includeActivity: false).ConfigureAwait(false);
@@ -2451,6 +2464,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             .Where(inSpace)
             .Where(info => string.IsNullOrWhiteSpace(providerFilter) || string.Equals(info.Session.ProviderId, providerFilter, StringComparison.OrdinalIgnoreCase))
             .Where(info => includeArchived || !string.Equals(info.State, "archived", StringComparison.OrdinalIgnoreCase))
+            .Where(info => labelIds is null || info.Labels.Any(labelIds.Contains))
             .ToArray();
         if (!string.IsNullOrWhiteSpace(stateFilter) && !string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase))
@@ -3196,6 +3210,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return modelSelection.ExitCode;
         }
 
+        var (createdLabels, labelsExit) = await ResolveCreatedSessionLabelsAsync(context, options.Labels, space.SpaceId).ConfigureAwait(false);
+        if (createdLabels is null)
+        {
+            return labelsExit;
+        }
+
         if (parentResolution.ParentSessionId is { } parentId) context.ClaimSessionWork(parentId);
         // The invocation retains preparation and parent claims through original-fault
         // classification, including unconfirmed dependencies during creation.
@@ -3343,6 +3363,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             await runtime.SetSessionTierAsync(session.SessionId, tier, context.CancellationToken).ConfigureAwait(false);
         }
 
+        IReadOnlyList<string> labels = createdLabels.Count == 0 ? []
+            : await runtime.SetSessionLabelsAsync(session.SessionId, createdLabels, null, context.CancellationToken).ConfigureAwait(false) ?? [];
+
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = "alta.session.created",
@@ -3365,6 +3388,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             permissionMode = session.PermissionMode,
             sandbox = SandboxRecord(await runtime.GetSessionSandboxAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false)),
             options = SessionOptionsRecord(session.Options),
+            labels,
         });
         return AltaExitCodes.Success;
     }
@@ -7221,6 +7245,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             status = SessionStatusWire(info.Session.Status),
             // When the session was archived; absent for one that is not, or that was archived before the time was kept.
             archivedAt = info.ArchivedAt,
+            // The identifiers of its labels for sessions (`alta session label`); empty for none.
+            labels = info.Labels,
             workingDirectory = info.Session.WorkingDirectory,
             // Where the session works: the worktree it records, while that folder is there.
             worktreeDirectory = NormalizeOptionalText(info.Session.WorktreeDirectory) is { } worktreeDirectory && Directory.Exists(worktreeDirectory) ? worktreeDirectory : null,
@@ -8245,6 +8271,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? Sandbox { get; set; }
 
         public bool NoSubSessions { get; set; }
+
+        public List<string> Labels { get; } = [];
 
         public string? Machine { get; set; }
 

@@ -1345,6 +1345,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
+            Labels = localState.Labels is { Count: > 0 } labels ? [.. labels] : null,
             MessageCount = localState.MessageCount,
             ParentSessionId = localState.ParentSessionId,
             CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),

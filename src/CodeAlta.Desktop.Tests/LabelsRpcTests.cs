@@ -50,6 +50,31 @@ public sealed class LabelsRpcTests
     }
 
     [TestMethod]
+    public async Task ALabelForSessions_IsListedAsSuch_AndOnlyItGoesToASession()
+    {
+        using var fixture = new Fixture();
+        var given = new List<string>();
+        var service = new LabelsService(new SpaceCatalog(fixture.Projects).Labels, fixture.View, Epoch)
+        {
+            AssignSession = (sessionId, add, remove, _) => Task.FromResult<IReadOnlyList<string>?>(sessionId == "s1"
+                ? [.. given.Except(remove).Concat(add).Distinct()] : null),
+        };
+        var audit = await service.CreateAsync(new(Epoch, "Audit", null, "shield", null, null, false, null, null) { ForSessions = true }, default);
+        Assert.AreEqual(("ok", (bool?)true), (audit.Status, audit.Label!.ForSessions));
+        Assert.IsNull((await service.CreateAsync(new(Epoch, "Infra", null, null, null, null, false, null, null), default)).Label!.ForSessions);
+        StringAssert.Contains(JsonSerializer.Serialize((await service.ListAsync(new(Epoch), default)).Labels[0], DesktopJsonContext.Default.LabelItem), "\"forSessions\":true");
+
+        var assigned = await service.AssignSessionAsync(new(Epoch, "s1", ["audit"], null), default);
+        Assert.AreEqual("ok", assigned.Status);
+        CollectionAssert.AreEqual(new[] { "audit" }, assigned.Labels.ToArray());
+        Assert.AreEqual("invalid", (await service.AssignSessionAsync(new(Epoch, "s1", ["infra"], null), default)).Status, "A label for projects is not given to a session.");
+        Assert.AreEqual("not_found", (await service.AssignSessionAsync(new(Epoch, "s1", ["missing"], null), default)).Status);
+        Assert.AreEqual("not_found", (await service.AssignSessionAsync(new(Epoch, "s2", ["audit"], null), default)).Status);
+        Assert.AreEqual("unavailable", (await fixture.Service.AssignSessionAsync(new(Epoch, "s1", ["audit"], null), default)).Status,
+            "A window without the runtime of the sessions does not change them.");
+    }
+
+    [TestMethod]
     public async Task ARequestOfAnotherHost_OrOfAWindowWithoutLabels_IsRefused()
     {
         using var fixture = new Fixture();

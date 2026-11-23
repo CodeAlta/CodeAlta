@@ -3,7 +3,8 @@ using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
 
-// The `alta label` commands: labels name groups of projects inside a space, and can be under one another.
+// The `alta label` commands: labels name groups of projects inside a space, or groups of sessions inside a project, and
+// can be under one another.
 internal sealed partial class BuiltInAltaCommandContributor
 {
     private static readonly AltaCommandPolicy[] LabelPolicies =
@@ -20,7 +21,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static Command CreateLabelCommand(AltaCommandContext context)
     {
-        var group = Group("label", "Use the labels of CodeAlta: names given to projects to find them together, which can be under one another.");
+        var group = Group("label", "Use the labels of CodeAlta: names given to projects, or to sessions, to find them together, which can be under one another.");
         group.Add(CreateLabelListCommand(context));
         group.Add(CreateLabelShowCommand(context));
         group.Add(CreateLabelCreateCommand(context));
@@ -32,7 +33,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddHelpText(
             group,
             "A label groups projects, such as `Infra` or `Client X`; a project can have several labels, and a label can be under another one (`Infra › Helm charts`).",
-            "A top-level label is in one space or in every space; its sub-labels are in the same. The CodeAlta window lists the projects of a space under their labels.",
+            "A label for sessions (`--for sessions`) groups the sessions of a project instead, such as `audit`, `pr-review` or `bug`: give it with `alta session label`, list its sessions with `alta session list --label`.",
+            "A top-level label is in one space or in every space, and for projects or for sessions; its sub-labels are the same. The CodeAlta window lists the projects of a space under their labels.",
             "<label> is the id of a label, its name, its path (`Infra › Helm` or `Infra/Helm`), or the start of its id when only one label starts so.",
             "When the user asks for work on the projects of a label, list them with `alta label show <label>` or `alta project list --label <label>`.",
             "Examples: `alta label list`; `alta label show infra`; `alta label create \"Helm charts\" --parent infra`; `alta label assign infra CodeAlta C:/code/Tomlyn`.");
@@ -42,15 +44,17 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateLabelListCommand(AltaCommandContext context)
     {
         string? space = null;
+        string? target = null;
         var all = false;
-        var command = Leaf("list", "List the labels in the order of their tree: id, name, path, parent, icon, color, favorite, space and how many projects each has.");
+        var command = Leaf("list", "List the labels in the order of their tree: id, name, path, parent, icon, color, favorite, space, what each is for and how many projects each has.");
         command.Add("space=", "List the labels of this space: id, start of id, or name.", value => space = value);
         command.Add("all", "List every label, whatever its space.", value => all = value is not null);
-        command.Add(async (_, _) => await HandleLabelListAsync(context, space, all).ConfigureAwait(false));
+        command.Add("for=", "List only the labels for `projects` or for `sessions`.", value => target = value);
+        command.Add(async (_, _) => await HandleLabelListAsync(context, space, all, target).ConfigureAwait(false));
         AddHelpText(command,
             "Without --space or --all, the labels are those of the space of the calling session, else of the space the CodeAlta window shows: the labels of that space and the labels of every space.",
-            "`projectCount` counts the projects that have the label itself and are not archived; `alta label show` also lists those of its sub-labels.",
-            "Examples: `alta label list`; `alta label list --all`.");
+            "`projectCount` counts the projects that have the label itself and are not archived; `alta label show` also lists those of its sub-labels. A label for sessions has `for: sessions` and no projects.",
+            "Examples: `alta label list`; `alta label list --all`; `alta label list --for sessions`.");
         return command;
     }
 
@@ -73,17 +77,32 @@ internal sealed partial class BuiltInAltaCommandContributor
         var options = new LabelWriteOptions();
         string? name = null;
         string? parent = null;
+        string? target = null;
         var command = Leaf("create", "Create a label, last among the labels of its parent.");
         command.Add("<name>", "Name of the label, 1 to 64 characters.", value => name = value);
         command.Add("parent=", "The label to put it under: id, name, path, or start of id.", value => parent = value);
+        command.Add("for=", "What a top-level label is given to: `projects` (the default) or `sessions`. A sub-label is for what its parent is for.", value => target = value);
         AddLabelWriteOptions(command, options);
-        command.Add(async (_, _) => await HandleLabelCreateAsync(context, name, parent, options).ConfigureAwait(false));
+        command.Add(async (_, _) => await HandleLabelCreateAsync(context, name, parent, target, options).ConfigureAwait(false));
         AddHelpText(command,
-            "The id of the label is worked out from its name and never changes afterwards.",
+            "The id of the label is worked out from its name and never changes afterwards, nor does what it is for.",
             "Without --space, a top-level label is in the space of the calling session; created from the default space, or by the user, it is in every space. A sub-label is in the space of its parent.",
-            "Examples: `alta label create Infra --icon cube --color #2d72d2`; `alta label create \"Helm charts\" --parent infra`.");
+            "Examples: `alta label create Infra --icon cube --color #2d72d2`; `alta label create \"Helm charts\" --parent infra`; `alta label create Audit --for sessions --description \"Runs of the weekly audit\"`.");
         return command;
     }
+
+    // The value of --for: null when none is given, or when the value names neither projects nor sessions (`Invalid`).
+    private static (LabelTarget? Target, bool Invalid) ParseLabelTarget(string? value)
+        => NormalizeOptionalText(value)?.ToLowerInvariant() switch
+        {
+            null => (null, false),
+            "projects" or "project" => (LabelTarget.Projects, false),
+            "sessions" or "session" => (LabelTarget.Sessions, false),
+            _ => (null, true),
+        };
+
+    private static int InvalidLabelTargetError(AltaCommandContext context, string commandPath) =>
+        UsageError(context, "usage.invalidLabelTarget", "--for takes `projects` or `sessions`.", commandPath);
 
     private static Command CreateLabelSetCommand(AltaCommandContext context)
     {
@@ -257,6 +276,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (label.Color is not null) record["color"] = label.Color;
         record["favorite"] = label.Favorite;
         if (label.Space is not null) record["space"] = label.Space;
+        record["for"] = label.IsForSessions ? "sessions" : "projects";
         record["order"] = label.Order;
         // A label the map of a repository declares: read-only here, changed with `alta project manifest label`.
         if (label.Repository is not null) record["repository"] = label.Repository;
@@ -296,12 +316,18 @@ internal sealed partial class BuiltInAltaCommandContributor
         return (space.Id, AltaExitCodes.Success);
     }
 
-    private static async ValueTask<int> HandleLabelListAsync(AltaCommandContext context, string? spaceRef, bool all)
+    private static async ValueTask<int> HandleLabelListAsync(AltaCommandContext context, string? spaceRef, bool all, string? targetRef)
     {
         const string CommandPath = "alta label list";
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces))
         {
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var (target, invalidTarget) = ParseLabelTarget(targetRef);
+        if (invalidTarget)
+        {
+            return InvalidLabelTargetError(context, CommandPath);
         }
 
         if (all && NormalizeOptionalText(spaceRef) is not null)
@@ -324,7 +350,8 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         var members = await spaces.Labels.LoadMembersAsync(includeArchived: false, context.CancellationToken).ConfigureAwait(false);
         var labels = members.Select(static member => member.Label).ToArray();
-        var listed = members.Where(member => visible.Any(label => label.Id == member.Label.Id) && (spaceId is null || member.Label.IsIn(spaceId))).ToArray();
+        var listed = members.Where(member => visible.Any(label => label.Id == member.Label.Id) && (spaceId is null || member.Label.IsIn(spaceId))
+            && (target is null || member.Label.Target == target)).ToArray();
         foreach (var member in listed)
         {
             AltaJsonlWriter.WriteRecord(context.Stdout, LabelRecord(context, "alta.label.item", member.Label, labels, member.ProjectIds.Count));
@@ -370,6 +397,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             .ToArray();
         var record = LabelRecord(context, type, label, labels, projects.Count(project => ProjectLabelIds(project).Contains(label.Id, StringComparer.Ordinal)));
         record["subLabels"] = tree.Skip(1).ToArray();
+        if (label.IsForSessions)
+        {
+            record["note"] = $"A label for sessions: list its sessions with `alta session list --label {label.Id}`.";
+        }
+
         record["projects"] = projects.Select(project => new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["id"] = project.Id,
@@ -382,12 +414,18 @@ internal sealed partial class BuiltInAltaCommandContributor
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
     }
 
-    private static async ValueTask<int> HandleLabelCreateAsync(AltaCommandContext context, string? name, string? parentRef, LabelWriteOptions options)
+    private static async ValueTask<int> HandleLabelCreateAsync(AltaCommandContext context, string? name, string? parentRef, string? targetRef, LabelWriteOptions options)
     {
         const string CommandPath = "alta label create";
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces))
         {
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var (target, invalidTarget) = ParseLabelTarget(targetRef);
+        if (invalidTarget)
+        {
+            return InvalidLabelTargetError(context, CommandPath);
         }
 
         if (NormalizeOptionalText(name) is not { } labelName)
@@ -422,8 +460,13 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         // A session that names no space puts a top-level label in its own space, unless that is the default space.
         space ??= own is { IsDefault: false } ? own.Id : null;
+        if (parent is not null && target is { } wanted && wanted != parent.Target)
+        {
+            return UsageError(context, "label.invalid", $"The label '{parent.Name}' is for {(parent.IsForSessions ? "sessions" : "projects")}: a label under it is for the same.", CommandPath);
+        }
+
         var created = await spaces.Labels.CreateAsync(labelName, parent?.Id, options.Icon, options.Color, NormalizeOptionalText(space), options.Favorite ?? false,
-            description, context.CancellationToken).ConfigureAwait(false);
+            description, target ?? LabelTarget.Projects, context.CancellationToken).ConfigureAwait(false);
         if (created.Label is not { } label || !created.Succeeded)
         {
             return LabelChangeFailed(context, created, CommandPath);
@@ -620,6 +663,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         foreach (var project in projects)
         {
             var had = project.Labels.Contains(label.Id, StringComparer.Ordinal);
+            if (assign && label.IsForSessions)
+            {
+                return UsageError(context, "label.invalid", $"The label '{label.Name}' is for sessions, not for projects: give it to a session with `alta session label <session> --add {label.Id}`.", commandPath);
+            }
+
             var result = await spaces.Labels.AssignAsync(project.Id, assign ? [label.Id] : null, assign ? null : [label.Id], context.CancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
