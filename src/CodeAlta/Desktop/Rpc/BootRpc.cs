@@ -729,6 +729,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(LabelDeleteRequest))]
 [JsonSerializable(typeof(LabelAssignRequest))]
 [JsonSerializable(typeof(LabelChangeResponse))]
+[JsonSerializable(typeof(LabelSessionAssignRequest))]
+[JsonSerializable(typeof(LabelSessionAssignResponse))]
 [JsonSerializable(typeof(SubProjectsRequest))]
 [JsonSerializable(typeof(SubProjectsMapResponse))]
 [JsonSerializable(typeof(SubProjectsInspectResponse))]

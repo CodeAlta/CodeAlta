@@ -18,6 +18,7 @@ const hub = createLabelsHub({
   move: async request => (calls.push(`move ${request.id} ${request.parent} ${request.index}`), done),
   delete: async request => (calls.push(`delete ${request.id}`), done),
   assign: async request => (calls.push(`assign ${request.projectId} +${request.add?.join(",")} -${request.remove?.join(",")}`), done),
+  assignSession: async request => (calls.push(`assign session ${request.sessionId}`), { status: "ok", message: null, labels: request.add ?? [] }),
 });
 hub.connect("12345678-1234-1234-1234-123456789abc");
 const projects = [{ id: "alpha", name: "alpha", path: "/alpha", archived: false }, { id: "beta", name: "beta", path: "/beta", archived: false }];

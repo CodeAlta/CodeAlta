@@ -23,6 +23,8 @@ export type ScopeSessionActions = {
   browse: (projectId: string | null) => void;
   /** A session of the project that runs in the cloud, and one brought here from it; absent where the space has no Claude Code. */
   cloud?: Readonly<{ create: (projectId: string) => void; bring: (projectId: string) => void }>;
+  /** Whether the Explorer lists the sessions of the scope under their labels, and what changes it; absent where there are no labels. */
+  labels?: Readonly<{ grouped: (projectId: string | null) => boolean; setGrouped: (projectId: string | null, grouped: boolean) => void }>;
 };
 export type ProjectRowAuthority = {
   current: () => ProjectRowContext;
@@ -267,6 +269,9 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
           ] : []),
           { key: "search", label: `${t("Search sessions")}…`, icon: "search" as const, onSelect: () => sessionAction("search", visible) },
           { key: "browse", label: t("Browse saved sessions"), icon: "browse" as const, onSelect: () => sessionAction("browse", visible) },
+          ...(authority.sessions.labels ? [authority.sessions.labels.grouped(project.id)
+            ? { key: "sessions-one-list", label: t("Sessions in one list"), icon: "list" as const, onSelect: () => { dismiss(); authority.sessions?.labels?.setGrouped(project.id, false); } }
+            : { key: "sessions-by-labels", label: t("Group sessions by labels"), icon: "tag" as const, onSelect: () => { dismiss(); authority.sessions?.labels?.setGrouped(project.id, true); } }] : []),
           { key: "project", divider: true as const },
         ] : []),
         { key: "open", label: t("Open"), icon: "open", onSelect: () => action("open", visible) },

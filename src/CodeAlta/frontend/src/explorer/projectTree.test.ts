@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isClaudeCodeOpen, isCollapsed, isExpanded, isFavorite, isLabelFolded, persistProjectTree, projectTreeLimit, restoreProjectTree, setClaudeCodeOpen,
-  scopeKey, setCollapsed, setFavorite, setLabelFolded, toggleScope, type ProjectTree } from "./projectTree";
+import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isClaudeCodeOpen, isCollapsed, isExpanded, isFavorite, isGroupedByLabels, isLabelFolded, persistProjectTree, projectTreeLimit, restoreProjectTree, setClaudeCodeOpen,
+  scopeKey, setCollapsed, setFavorite, setGroupedByLabels, setLabelFolded, toggleScope, type ProjectTree } from "./projectTree";
+
+test("the sessions of a scope are listed under their labels once asked, and the choice is kept", () => {
+  let tree = setGroupedByLabels(setGroupedByLabels(emptyProjectTree, "a", true), null, true);
+  assert.deepEqual([isGroupedByLabels(tree, "a"), isGroupedByLabels(tree, null), isGroupedByLabels(tree, "b")], [true, true, false]);
+  assert.equal(setGroupedByLabels(tree, "a", true), tree);
+  let stored = "";
+  assert.equal(persistProjectTree(value => { stored = value; }, tree), true);
+  assert.deepEqual(restoreProjectTree(() => stored)?.sessionsByLabels, ["a", globalScope]);
+  tree = setGroupedByLabels(tree, "a", false);
+  assert.deepEqual(tree.sessionsByLabels, [globalScope]);
+  assert.equal(persistProjectTree(value => { stored = value; }, setGroupedByLabels(tree, null, false)), true);
+  assert.equal(restoreProjectTree(() => stored)?.sessionsByLabels, undefined, "Nothing is stored while no scope is grouped.");
+});
 
 test("scopes open and close one by one, and all close at once", () => {
   let tree = expandScope(expandScope(emptyProjectTree, "a"), null);

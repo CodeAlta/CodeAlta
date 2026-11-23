@@ -1,4 +1,5 @@
 import type { WorkspaceClaudeCodeConversation, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { hasLabelWords, splitLabelWords } from "../labels/labels";
 import { plainTitle } from "../sessionTitle";
 import type { ContentResult } from "./contentResults";
 import type { SkillResult } from "./skillResults";
@@ -121,11 +122,14 @@ export function searchProjects(snapshot: WorkspaceSnapshot, words: readonly stri
  * project, then by their id. As good a match, the session that was updated last comes first; so does every session
  * when nothing is typed. `projectId` keeps the sessions of one project (null for the chats); undefined keeps them all.
  */
-export function searchSessions(snapshot: WorkspaceSnapshot, words: readonly string[], projectId?: string | null): SessionResult[] {
+export function searchSessions(snapshot: WorkspaceSnapshot, typed: readonly string[], projectId?: string | null): SessionResult[] {
   const projects = new Map(snapshot.projects.map(project => [project.id, project]));
   const results: SessionResult[] = [];
+  // A word `label:audit` keeps the sessions with a label whose id starts with `audit`; the other words are looked for.
+  const { words, labels } = splitLabelWords(typed);
   for (const session of snapshot.sessions) {
     if (projectId !== undefined && session.projectId !== projectId) continue;
+    if (!hasLabelWords(session, labels)) continue;
     const project = session.projectId === null ? null : projects.get(session.projectId) ?? null;
     // The title as it is shown: without the marks of Markdown that a first message may start with.
     const score = fieldsScore(words, [[plainTitle(session.title), 0], [session.fullTitle, 3], [project?.name ?? "", 60], [session.id, 90]]);

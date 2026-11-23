@@ -70,6 +70,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         const string CommandPath = "alta session create";
         if (options.Worktree || options.NoWorktree || options.WorktreeBase is not null || options.WorktreePath is not null)
             return UsageError(context, "usage.machineWorktree", "Where a session of another machine works is that machine's: leave out --worktree, --worktree-path, --no-worktree and --base with --machine.", CommandPath);
+        if (options.Labels.Count > 0)
+            return UsageError(context, "usage.machineLabel", "The labels of this computer mean nothing on another machine: leave out --label with --machine.", CommandPath);
         if (options.NoParent)
             return UsageError(context, "usage.machineParent", "A session of another machine is the child of the calling session: leave out --no-parent.", CommandPath);
         if (options.Global && !string.IsNullOrWhiteSpace(options.Project))

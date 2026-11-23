@@ -15,6 +15,8 @@ import { useShellLanguage } from "../shellLanguage";
 import { sessionRowProviderName } from "../machines/machineProviderNames";
 import { queuedLabel } from "../machines/seats";
 import { sessionEntries, type SessionListEntry } from "./sessionTree";
+import { labelAncestors, type Label } from "../labels/labels";
+import { LabelBadge } from "../labels/LabelViews";
 import type { SessionRowDrag } from "./sessionDrag";
 import { SessionLinkRow, SessionOriginLine } from "./sessionFamily";
 
@@ -79,6 +81,39 @@ export function MachineChip({ session }: { session: Pick<WorkspaceSession, "mach
     {!grouped && <AppIcon name={queued ? "timer" : "remote"} size={10} />}<span>{queued ? t(queued.key, queued.vars) : label}</span></span>;
 }
 
+/** What the titles of the groups of sessions under their labels need: the labels for sessions of the space, their folding, and what goes on in them. */
+export type SessionLabelGrouping = Readonly<{
+  labels: readonly Label[];
+  fold: (key: string, folded: boolean) => void;
+  /** What a title says of its sessions: those that wait for the user, and those that run. */
+  activity: (sessions: readonly WorkspaceSession[]) => ReactNode;
+}>;
+
+/**
+ * The title of a group of the sessions of a scope under a label: its chevron, its badge with the labels above it, how
+ * many sessions it holds, and which of them wait or run, so that a folded group says it. Left folds it, right unfolds it.
+ */
+export function SessionLabelGroupRow({ entry, grouping }: { entry: Extract<SessionListEntry, { kind: "label" }>; grouping: SessionLabelGrouping }) {
+  const { t } = useShellLanguage();
+  const name = entry.label?.name ?? t("Other sessions");
+  return <div className="session-label-group" data-colored={entry.label?.color ? "true" : undefined}
+    style={entry.label?.color ? { ["--label-color" as string]: entry.label.color } : undefined}>
+    <button type="button" className="session-label-toggle" aria-expanded={!entry.folded} style={{ paddingLeft: sessionRowIndent(0) - 12 }}
+      title={entry.label?.description ?? undefined} aria-label={t("{name}: {count} sessions", { name, count: entry.sessions.length })}
+      onClick={() => grouping.fold(entry.key, !entry.folded)}
+      onKeyDown={event => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.key !== (entry.folded ? "ArrowRight" : "ArrowLeft")) return;
+        event.preventDefault(); event.stopPropagation(); grouping.fold(entry.key, !entry.folded);
+      }}>
+      <AppIcon name="chevronDown" size={12} className={entry.folded ? "tree-chevron" : "tree-chevron expanded"} />
+      {entry.label ? <LabelBadge label={entry.label} small path={labelAncestors(entry.label, grouping.labels)} />
+        : <span className="session-label-other">{name}</span>}
+      <span className="session-label-count">{entry.sessions.length}</span>
+      {grouping.activity(entry.sessions)}
+    </button>
+  </div>;
+}
+
 /** What follows the listed sub-agents of a session when it has more, or lists more than at first. */
 export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<SessionListEntry, { kind: "more" }>; onMore: () => void; onFewer: () => void }) {
   const { t } = useShellLanguage();
@@ -128,7 +163,7 @@ export function SessionListDisclosure({ more, omitted, unreachable, filtered, ex
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, omitted = 0, unreachable = false, onBrowse, browseKeys, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
+export function ExplorerSessions({ entries, global, projectId, more, omitted = 0, unreachable = false, onBrowse, browseKeys, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false, grouping, labels }: {
   /** The sessions listed, what stands for the sub-agents that are not, and the place of the Claude Code sessions started elsewhere. */
   entries: readonly SessionListEntry[];
   /** Whether the sidebar is filtered: a scope with no session found says nothing. */
@@ -179,10 +214,15 @@ export function ExplorerSessions({ entries, global, projectId, more, omitted = 0
   drag?: (session: WorkspaceSession) => SessionRowDrag;
   /** The group of the Claude Code sessions started in VS Code or a terminal in the folder of a project, last in its list. */
   claudeCode?: (projectId: string) => ReactNode;
+  /** The titles of the groups of sessions under their labels, when the list has them. */
+  grouping?: SessionLabelGrouping;
+  /** The labels of a session in a popover beside its row, opened by Labels… in its menu; absent where they cannot be changed. */
+  labels?: (session: WorkspaceSession, close: () => void) => ReactNode;
 }) {
   const { t } = useShellLanguage();
   const brands = useContext(ProviderBrandsContext);
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  const [labeling, setLabeling] = useState<string | null>(null);
   // What a row says besides its title (whose session started it, what is wrong with it), for a screen reader.
   const tipId = useId();
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
@@ -193,6 +233,7 @@ export function ExplorerSessions({ entries, global, projectId, more, omitted = 0
       if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
         onMore={() => tree.more(entry.parentId)} onFewer={() => tree.fewer(entry.parentId)} />;
       if (entry.kind === "link") return <SessionLinkRow key={`link:${entry.parentId}:${entry.session.id}`} entry={entry} />;
+      if (entry.kind === "label") return grouping ? <SessionLabelGroupRow key={entry.key} entry={entry} grouping={grouping} /> : null;
       const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere, childrenElsewhere } = entry.row;
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
@@ -242,6 +283,7 @@ export function ExplorerSessions({ entries, global, projectId, more, omitted = 0
             ...(openEntries?.(session) ?? []),
             ...openElsewhereEntries(t, session, brands.get(session.providerKey?.toLowerCase() ?? "")?.type, allowed, action => onAction(session, action)),
             ...(actionEntries?.(session) ?? []),
+            ...(labels ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => setLabeling(session.id) }] : []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             ...(spaces ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !allowed.space, onSelect: () => onAction(session, "space") }] : []),
             { key: "archive", label: archiveAsks?.(session) ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture={sessionRowGesture("archive")} />, disabled: !allowed.archive, onSelect: () => onAction(session, "archive") },
@@ -249,6 +291,7 @@ export function ExplorerSessions({ entries, global, projectId, more, omitted = 0
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,
           ]} />}
+        {labeling === session.id && labels?.(session, () => setLabeling(null))}
       </div>;
     })}
     {sessionEntries(entries).length === 0 && !filtered && omitted === 0 && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}

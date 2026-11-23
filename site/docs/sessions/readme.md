@@ -188,6 +188,29 @@ Archive a session you are done with for now but may come back to. In CodeAlta De
 
 Agents use `alta session archive <id>` and `alta session restore <id>` (with `--with-children` for the sessions below), for sessions of their own space only. `alta session list` shows archived sessions only with `--archived`. CodeAlta TUI does not list archived sessions.
 
+### Archive policies
+
+An archive policy archives sessions by itself: those of some [labels](../labels.md#labels-of-sessions), or the runs of some [automations](../automations.md), once they have been inactive for some days, or beyond the most recent ones. For example, a weekly cleanup of the audits and the pull request reviews:
+
+```toml
+[[sessions.archive_policies]]
+labels = ["audit", "pr-review"]
+older_than_days = 7
+
+[[sessions.archive_policies]]
+automations = ["Nightly review"]
+keep_last = 10
+```
+
+- `labels` names labels for sessions by their id; a label under one of them counts too. `automations` names automations by their name or their id. A policy applies to the sessions that match either.
+- `older_than_days` archives a session inactive for more days than that; `keep_last` keeps that many of the most recent ones, counted in each project. With both, a session is archived only when it is old enough and beyond the most recent ones.
+- A policy without a label or an automation, or without `older_than_days` or `keep_last`, is not applied.
+- A session is archived, never deleted: find it with **Archived** in the session browser, or in the search. Its sessions below are archived with it, and a session below another one is never archived alone.
+- A session is kept while it is open in a tab, bookmarked, at work, waits for an answer or has queued prompts, and so is a session with such a session below it.
+- CodeAlta Desktop applies the policies once the window is restored, then every hour.
+
+Policies in your `~/.alta/config.toml` apply to the sessions of every project and to the chats. Policies in the `.alta/config.toml` of a project apply to its own sessions: commit the file to share them with your team.
+
 ## Move a session
 
 In CodeAlta Desktop, a project session can move to another project, for example from one [worktree](../worktrees.md) of a repository, added as a project, to another one. To keep it in its project and only change the worktree it works in, see [Move a session to another worktree](../worktrees.md#move-a-session-to-another-worktree). To move it to another space, see [Move a session to another space](../spaces.md#move-a-session).

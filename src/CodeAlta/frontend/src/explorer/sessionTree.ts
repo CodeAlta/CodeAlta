@@ -1,4 +1,5 @@
 import type { WorkspaceSession } from "#neoastra";
+import type { Label } from "../labels/labels";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 
 /**
@@ -31,6 +32,17 @@ export type SessionTreeEntry =
     hidden: number;
     /** Whether more of them than at first are listed. */
     extended: boolean;
+  }>
+  | Readonly<{
+    kind: "label";
+    /** The label whose sessions follow, until the next title; null for the sessions of no label. */
+    label: Label | null;
+    /** What its folding is kept under (`sessionLabelGroupKey`). */
+    key: string;
+    /** The sessions at the top of the group, their sub-agents not counted. */
+    sessions: readonly WorkspaceSession[];
+    /** Whether its sessions are hidden. */
+    folded: boolean;
   }>;
 
 /**

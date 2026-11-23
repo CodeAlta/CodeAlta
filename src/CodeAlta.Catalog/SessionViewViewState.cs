@@ -385,6 +385,15 @@ public sealed class SessionViewLocalState
     public DateTimeOffset? ArchivedAt { get; set; }
 
     /// <summary>
+    /// Gets or sets the labels of the session: identifiers of labels for sessions (<see cref="LabelDescriptor.Target"/>),
+    /// each once, in the order they were given; <see langword="null"/> or empty for none. A label that no longer exists
+    /// stays named here and is not shown.
+    /// </summary>
+    [JsonPropertyName("labels")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Labels { get; set; }
+
+    /// <summary>
     /// Gets or sets the cached message count when known.
     /// </summary>
     [JsonPropertyName("message_count")]

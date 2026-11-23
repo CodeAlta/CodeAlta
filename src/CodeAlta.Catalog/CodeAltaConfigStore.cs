@@ -1519,6 +1519,42 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads the archive policies of the user's configuration file (<c>[[sessions.archive_policies]]</c>), which apply to the
+    /// sessions of every project and to the chats. A policy that cannot be applied is left out.
+    /// </summary>
+    /// <returns>The policies; none when the file names none, or cannot be read.</returns>
+    public IReadOnlyList<SessionArchivePolicy> LoadGlobalSessionArchivePolicies()
+    {
+        try
+        {
+            return SessionArchivePolicy.ReadAll(ReadSharedGlobalDocument().Sessions?.ArchivePolicies);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Reads the archive policies of the configuration file of a project (<c>.alta/config.toml</c>), which apply to the
+    /// sessions of that project and are shared with its repository. A policy that cannot be applied is left out.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>The policies; none when the file names none, or cannot be read.</returns>
+    public IReadOnlyList<SessionArchivePolicy> LoadProjectSessionArchivePolicies(string projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return [];
+        try
+        {
+            return SessionArchivePolicy.ReadAll(LoadProject(projectRoot).Sessions?.ArchivePolicies);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
     /// Persists how a session nobody named is titled, in the user's configuration file. The default is not written.
     /// </summary>
     /// <param name="mode">The mode.</param>
@@ -2564,7 +2600,8 @@ public sealed partial class CodeAltaConfigStore
             if (sessions.PromptSuggestions is not false) sessions.PromptSuggestions = null;
             // The default is to list the Claude Code conversations: the absence of the setting.
             if (sessions.ClaudeCodeConversations is not false) sessions.ClaudeCodeConversations = null;
-            if (sessions is { Title: null, PromptSuggestions: null, ClaudeCodeConversations: null })
+            if (sessions.ArchivePolicies is { Count: 0 }) sessions.ArchivePolicies = null;
+            if (sessions is { Title: null, PromptSuggestions: null, ClaudeCodeConversations: null, ArchivePolicies: null })
             {
                 document.Sessions = null;
             }

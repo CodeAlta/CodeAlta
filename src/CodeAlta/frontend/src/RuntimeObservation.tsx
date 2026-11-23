@@ -11,15 +11,18 @@ export type RuntimeObservationControls = { store: ReturnType<typeof createRuntim
  * Sidebar activity: a spinner while an observed session (or any observed session of a project) is running, and
  * a quieter mark for a session that runs no turn while its provider still works in the background.
  */
-export function RunningSessionBadge({ controls, tab, projectId, projectIds }: {
+export function RunningSessionBadge({ controls, tab, projectId, projectIds, tabs }: {
   controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null;
   /** The projects of a label and of the labels under it: the badge counts the sessions that run in any of them. */
   projectIds?: ReadonlySet<string>;
+  /** The sessions of a group of sessions under a label: the badge counts those that run. */
+  tabs?: readonly SessionTab[];
 }) {
   const { t } = useShellLanguage();
   // The answer is followed, not the observations: a refresh that changes nothing of it renders nothing.
   const running = useSyncExternalStore(controls.store.subscribe,
     () => tab ? sessionRunning(controls.store.getSnapshot(), tab) ? 1 : 0
+      : tabs ? tabs.reduce((count, value) => count + (sessionRunning(controls.store.getSnapshot(), value) ? 1 : 0), 0)
       : runningCount(controls.store.getSnapshot(), projectIds ? id => id !== null && projectIds.has(id) : id => id === (projectId ?? null)));
   const background = useSyncExternalStore(controls.store.subscribe, () => tab ? sessionBackground(controls.store.getSnapshot(), tab) : 0);
   if (!controls.enabled || tab && !controls.canObserve(tab)) return null;

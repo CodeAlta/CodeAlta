@@ -15,7 +15,8 @@ const limits = (value: Partial<SessionListLimits> & { collapsedIds?: readonly st
 // A line for each entry: the session with its depth, "-" before a collapsed one, or what its parent does not list.
 const lines = (rows: readonly SessionHierarchyRow[], value: SessionListLimits) => sessionList(rows, value).entries.map(entry =>
   entry.kind === "session" ? `${entry.collapsed ? "-" : ""}${entry.row.session.id}@${entry.row.depth}`
-    : entry.kind === "link" ? `link ${entry.session.id}@${entry.depth}<${entry.parentId}` : `more ${entry.parentId}@${entry.depth} ${entry.hidden}${entry.extended ? " extended" : ""}`);
+    : entry.kind === "link" ? `link ${entry.session.id}@${entry.depth}<${entry.parentId}`
+    : entry.kind === "more" ? `more ${entry.parentId}@${entry.depth} ${entry.hidden}${entry.extended ? " extended" : ""}` : `label ${entry.key}`);
 
 // Two sessions: "a" has six sub-agents, the second of which has three of its own; "b" has none. Newest first.
 const sessions = [row("a", null, 20), row("b", null, 10),

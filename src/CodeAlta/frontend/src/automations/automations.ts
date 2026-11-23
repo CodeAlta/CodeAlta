@@ -253,6 +253,8 @@ export type AutomationForm = Readonly<{
   notify: AutomationNotify;
   /** Whom it is published to on the server of its machine: `team:<id>`, `organization`, or null (absent) for the person's own. */
   publishTo?: string | null;
+  /** The label for sessions every session of its runs gets, by its id or its name; empty (absent) for one of its name. */
+  label?: string;
   triggers: readonly AutomationTriggerItem[];
   /** What its runs may do without a person; null for an automation that runs as before. */
   autonomy: AutomationAutonomyItem | null;
@@ -300,7 +302,7 @@ export function formOf(item: AutomationItem): AutomationForm {
     withoutModel: item.scriptMode === "direct", writes: item.scriptMode === "direct" && item.scriptAccess === "write", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", tier: item.tier ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
-    runsOn: item.runsOn ?? null, runsOnTags: item.runsOnTags ?? null, maxRuns: item.maxRuns ?? null, notify: notifyOf(item.notify), publishTo: item.publishTo ?? null, triggers: item.triggers,
+    runsOn: item.runsOn ?? null, runsOnTags: item.runsOnTags ?? null, maxRuns: item.maxRuns ?? null, notify: notifyOf(item.notify), publishTo: item.publishTo ?? null, ...item.label ? { label: item.label } : {}, triggers: item.triggers,
     autonomy: item.autonomy ?? null };
 }
 
@@ -424,6 +426,8 @@ export function inputOf(form: AutomationForm): AutomationInput {
     maxRuns: form.maxRuns && form.maxRuns > 1 ? form.maxRuns : null,
     // A run placed on another machine ends there: only the runs of this computer notify.
     notify: placedElsewhere(form) ? null : form.notify || null,
+    // Its runs get a label of its name unless it names one.
+    ...form.label?.trim() ? { label: form.label.trim() } : {},
     // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
     publishTo: form.storeInProject || !(form.runsOn || form.runsOnTags) ? null : form.publishTo ?? null,
     autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,

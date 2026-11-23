@@ -612,6 +612,12 @@ public sealed class DesktopWorkspaceTests
         Assert.HasCount(first.Sessions.Length + 2, Search("zebra").Sessions);
         Assert.HasCount(first.Sessions.Length + 1, Search("busy-699").Sessions, "A session is found by its identifier.");
         Assert.HasCount(first.Sessions.Length, Search("nothing has this").Sessions);
+        // A word that names a label finds the sessions that have one whose id starts so, with the other words in their title.
+        sessions[650] = sessions[650] with { ViewState = new AgentSessionViewStateMetadata(Archived: false) { Labels = ["audit-weekly"] } };
+        CollectionAssert.AreEqual(new[] { "busy-650" }, Search("label:audit").Sessions.Select(static session => session.Id).Except(first.Sessions.Select(static session => session.Id)).ToArray());
+        Assert.HasCount(first.Sessions.Length + 1, Search("zebra label:AUDIT").Sessions);
+        Assert.HasCount(first.Sessions.Length, Search("parser label:audit").Sessions);
+        Assert.HasCount(first.Sessions.Length, Search("label:weekly").Sessions);
         // A search of one list leaves the others alone.
         Assert.HasCount(first.Sessions.Length, Search("zebra", scoped: true, project: "quiet").Sessions);
         Assert.HasCount(first.Sessions.Length, Search("zebra", scoped: true).Sessions);

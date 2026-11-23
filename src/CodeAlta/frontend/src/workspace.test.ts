@@ -91,6 +91,17 @@ test("a list that leaves more or fewer older sessions out is another list: Show 
   assert.notEqual(sessionListSignature({ ...busy(7), wantedTruncated: true }), sessionListSignature(busy(7)));
 });
 
+test("a session that gets or loses a label makes another list: the Explorer shows its labels", () => {
+  const session: WorkspaceSnapshot["sessions"][number] = { id: "s1", title: "Audit", fullTitle: "Audit", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project",
+    projectId: "p1", lineageIssue: null, createdAt: null, workspacePath: "/p1", providerKey: "fixture", updatedAt: "2026-11-01T00:00:00Z", messageCount: null, automationId: null,
+    worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0,
+    rewindCount: 0, spaceId: null, archived: false, archivedAt: null };
+  const listed = (labels?: string[]): WorkspaceSnapshot => ({ ...empty, sessions: [{ ...session, ...labels ? { labels } : {} }] });
+  assert.equal(sessionListSignature(listed()), sessionListSignature(listed([])));
+  assert.notEqual(sessionListSignature(listed()), sessionListSignature(listed(["audit"])));
+  assert.notEqual(sessionListSignature(listed(["audit"])), sessionListSignature(listed(["audit", "bug"])));
+});
+
 test("a list says how many of its older sessions the window was not given, and nothing when it has them all", () => {
   const snapshot: WorkspaceSnapshot = { ...empty, sessionsTruncated: true, omittedChatSessions: 3,
     projects: [{ id: "busy", name: "Busy", path: "/busy", archived: false, omittedSessions: 211 }, { id: "quiet", name: "Quiet", path: "/quiet", archived: false }] };

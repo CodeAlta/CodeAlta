@@ -30,6 +30,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         new("journal_header_read", "INTEGER NOT NULL DEFAULT 0"),
         new("local_queued_prompt_count", "INTEGER"),
         new("local_cloud", "TEXT"),
+        // Sessions had no labels before the column: a journal written before it holds none.
+        new("local_labels", "TEXT"),
     ];
 
     private readonly record struct AdditiveColumn(string Name, string Type, bool InvalidatesRows = false)
@@ -47,7 +49,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         protocol_family, provider_id, provider_key, working_directory, title, summary, model_id, reasoning_effort, agent_prompt_id,
         parent_session_id, created_by_session_id, created_by_run_id, provider_session_id, summary_json, local_provider_key,
         local_model_id, local_reasoning_effort, local_agent_prompt_id, local_permission_mode, local_title_mode, local_sandbox, local_options, archived,
-        local_archived_at_utc_ticks, local_queued_prompt_count, local_cloud, message_count, local_parent_session_id, created_by_json,
+        local_archived_at_utc_ticks, local_queued_prompt_count, local_cloud, local_labels, message_count, local_parent_session_id, created_by_json,
         local_state_cached, space_id, journal_header_json, journal_header_read
         """;
 
@@ -750,6 +752,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         local_archived_at_utc_ticks = $local_archived_at_utc_ticks,
         local_queued_prompt_count = $local_queued_prompt_count,
         local_cloud = $local_cloud,
+        local_labels = $local_labels,
         message_count = $message_count,
         local_parent_session_id = $local_parent_session_id,
         created_by_json = $created_by_json,
@@ -770,6 +773,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_archived_at_utc_ticks", state.Archived ? state.ArchivedAt?.UtcTicks : null);
         AddParameter(command, "$local_queued_prompt_count", state.CountPendingQueuedPrompts());
         AddParameter(command, "$local_cloud", FormatCloud(state.Cloud?.ToListing()));
+        AddParameter(command, "$local_labels", FormatLabels(state.Labels));
         AddParameter(command, "$message_count", state.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
         AddParameter(command, "$created_by_json", SerializeCreatedBy(state.CreatedBy));
@@ -1902,6 +1906,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_archived_at_utc_ticks,
                 local_queued_prompt_count,
                 local_cloud,
+                local_labels,
                 message_count,
                 local_parent_session_id,
                 created_by_json,
@@ -1946,6 +1951,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_archived_at_utc_ticks,
                 $local_queued_prompt_count,
                 $local_cloud,
+                $local_labels,
                 $message_count,
                 $local_parent_session_id,
                 $created_by_json,
@@ -1992,6 +1998,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_archived_at_utc_ticks = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_archived_at_utc_ticks ELSE session_projection_cache.local_archived_at_utc_ticks END,
                 local_queued_prompt_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_queued_prompt_count ELSE session_projection_cache.local_queued_prompt_count END,
                 local_cloud = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_cloud ELSE session_projection_cache.local_cloud END,
+                local_labels = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_labels ELSE session_projection_cache.local_labels END,
                 message_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.message_count ELSE session_projection_cache.message_count END,
                 local_parent_session_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_parent_session_id ELSE session_projection_cache.local_parent_session_id END,
                 created_by_json = CASE WHEN excluded.local_state_cached = 1 THEN excluded.created_by_json ELSE session_projection_cache.created_by_json END,
@@ -2044,6 +2051,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_archived_at_utc_ticks", localState?.Archived == true ? localState.ArchivedAt?.UtcTicks : null);
         AddParameter(command, "$local_queued_prompt_count", localState?.QueuedPromptCount);
         AddParameter(command, "$local_cloud", FormatCloud(localState?.Cloud));
+        AddParameter(command, "$local_labels", FormatLabels(localState?.Labels));
         AddParameter(command, "$message_count", localState?.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
         AddParameter(command, "$created_by_json", NormalizeOptionalText(localState?.CreatedByJson));
@@ -2146,6 +2154,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 ArchivedAt = GetNullableInt64(reader, "local_archived_at_utc_ticks") is { } archivedAt ? FromUtcTicks(archivedAt) : null,
                 QueuedPromptCount = GetNullableInt32(reader, "local_queued_prompt_count"),
                 Cloud = ParseCloud(GetString(reader, "local_cloud")),
+                Labels = ParseLabels(GetString(reader, "local_labels")),
             };
         }
 
@@ -2194,8 +2203,18 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             ArchivedAt = state.Archived ? state.ArchivedAt : null,
             QueuedPromptCount = state.CountPendingQueuedPrompts(),
             Cloud = state.Cloud is { Id.Length: > 0 } cloud ? cloud.ToListing() : null,
+            Labels = ParseLabels(FormatLabels(state.Labels)),
         };
     }
+
+    // What a row keeps of the labels of a session: their identifiers separated by commas, which no identifier holds; null for none.
+    private static string? FormatLabels(IEnumerable<string>? labels)
+        => LabelDescriptor.NormalizeIds(labels) is { Count: > 0 } ids ? string.Join(',', ids) : null;
+
+    // The labels a row names; null for none.
+    private static IReadOnlyList<string>? ParseLabels(string? text)
+        => string.IsNullOrWhiteSpace(text) ? null
+            : LabelDescriptor.NormalizeIds(text.Split(',', StringSplitOptions.RemoveEmptyEntries)) is { Count: > 0 } ids ? ids : null;
 
     // What a row keeps of the cloud session of a session: its JSON, or null for a session that never ran in the cloud.
     private static string? FormatCloud(AgentSessionCloud? cloud)

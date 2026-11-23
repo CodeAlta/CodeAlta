@@ -257,6 +257,7 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
             ActivityKnown = includeActivity,
             ArchivedAt = localState?.ArchivedAt,
             QueuedPromptCount = localState?.QueuedPromptCount ?? 0,
+            Labels = localState?.Labels ?? [],
         };
     }
 
@@ -282,7 +283,10 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
                 cached.ModelId,
                 cached.ReasoningEffort,
                 cached.AgentPromptId,
-                queuedPromptCount);
+                queuedPromptCount)
+            {
+                Labels = cached.Labels ?? [],
+            };
         }
 
         if (sessionCatalog is not null)
@@ -318,6 +322,9 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
         string? AgentPromptId,
         int QueuedPromptCount)
     {
+        // The identifiers of the labels of the session, in their order.
+        public IReadOnlyList<string> Labels { get; init; } = [];
+
         public static ListedState From(SessionViewLocalState state)
             => new(
                 state.Archived,
@@ -329,7 +336,10 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
                 state.ModelId,
                 state.ReasoningEffort,
                 state.AgentPromptId,
-                state.CountPendingQueuedPrompts());
+                state.CountPendingQueuedPrompts())
+            {
+                Labels = LabelDescriptor.NormalizeIds(state.Labels),
+            };
     }
 
     private static SessionViewPreference? TryGetPreference(SessionViewViewState? viewState, string sessionId)
@@ -407,4 +417,7 @@ internal sealed record AltaSessionInfo(
 
     // How many queued prompts of the session wait to be sent.
     public int QueuedPromptCount { get; init; }
+
+    // The identifiers of the labels of the session, in their order; empty for none.
+    public IReadOnlyList<string> Labels { get; init; } = [];
 }

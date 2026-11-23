@@ -531,6 +531,7 @@ internal sealed class AutomationsService
                 RunsOnTags = definition.RunsOnTags,
                 MaxRuns = definition.MaxRuns,
                 Notify = definition.Notify,
+                Label = definition.Label,
                 PublishTo = definition.PublishTo,
                 Placement = placed,
                 Autonomy = Autonomy(definition.Autonomy),
@@ -695,6 +696,7 @@ internal sealed class AutomationsService
             } : null,
             CatchUp = input.CatchUp,
             Notify = Blank(input.Notify),
+            Label = Blank(input.Label),
             Triggers = triggers,
         };
         problem = AutomationConfig.Validate(definition with { Prompt = definition.Prompt.ReplaceLineEndings("\n").Trim() });
@@ -929,6 +931,10 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 
     /// <summary>Which of its runs tell the user with a notification when they end: <c>always</c>, <c>failures</c>, or null for none.</summary>
     public string? Notify { get; init; }
+
+    /// <summary>The label for sessions the sessions of its runs get, by its id or its name; absent for one of its name.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Label { get; init; }
 
     /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
     public string? PublishTo { get; init; }
@@ -1209,6 +1215,10 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>Which of its runs tell the user with a notification when they end: <c>always</c>, <c>failures</c>, or null for none.</summary>
     public string? Notify { get; init; }
+
+    /// <summary>The label for sessions the sessions of its runs get, by its id or its name; absent for one of its name.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Label { get; init; }
 
     /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
     public string? PublishTo { get; init; }

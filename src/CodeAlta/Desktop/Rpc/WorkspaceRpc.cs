@@ -307,7 +307,8 @@ internal sealed partial class WorkspaceService
                 + WireLength(session.WorkspacePath) + WireLength(session.ProviderKey) + WireLength(projectId) + WireLength(automationId)
                 + WireLength(worktreePath) + WireLength(worktreeRoot) + WireLength(worktreeName)
                 + WireLength(forkedFrom) + WireLength(forkedTitle) + WireLength(spaceId) + 6 * 24
-                + (session.ViewState?.Cloud is null ? 0 : 6 * 900);
+                + (session.ViewState?.Cloud is null ? 0 : 6 * 900)
+                + (session.ViewState?.Labels?.Sum(static label => label.Length + 4) ?? 0);
             if (cost > remaining) return false;
             remaining -= cost;
             kept.Add(index);
@@ -320,6 +321,7 @@ internal sealed partial class WorkspaceService
             {
                 ProviderConversation = (session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is { Length: > 0 } ? true : null,
                 Cloud = WorkspaceSessionCloud.Of(session.ViewState?.Cloud),
+                Labels = session.ViewState?.Labels is { Count: > 0 } labels ? labels : null,
             }));
             return true;
         }
@@ -495,6 +497,14 @@ internal sealed partial class WorkspaceService
                 var (all, own) = (true, false);
                 foreach (var word in words)
                 {
+                    // A word `label:audit` asks for a label whose id starts so, as the window reads it.
+                    if (word.StartsWith(LabelWordPrefix, StringComparison.Ordinal))
+                    {
+                        if (ordered[position].ViewState?.Labels?.Any(id => id.StartsWith(word.AsSpan(LabelWordPrefix.Length), StringComparison.OrdinalIgnoreCase)) == true) { own = true; continue; }
+                        all = false;
+                        break;
+                    }
+
                     if (ordered[position].SessionId.Contains(word, StringComparison.OrdinalIgnoreCase)
                         || (text ??= title(position)).Contains(word, StringComparison.OrdinalIgnoreCase)) { own = true; continue; }
                     if ((project ??= projectName(position) ?? string.Empty).Contains(word, StringComparison.OrdinalIgnoreCase)) continue;
@@ -508,6 +518,9 @@ internal sealed partial class WorkspaceService
             }
         }
     }
+
+    // What starts a word of a search that names a label of sessions (`labelWordPrefix` of the page).
+    private const string LabelWordPrefix = "label:";
 
     /// <summary>The most sessions a snapshot lists.</summary>
     internal const int MaximumSessions = 500;
@@ -775,6 +788,10 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     // The name of its provider as that machine names it: a provider of the same key here may be another one.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MachineProviderName { get; init; }
+
+    // The identifiers of its labels for sessions, in their order; absent for a session without a label.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Labels { get; init; }
 }
 
 /// <summary>What the Explorer shows of the cloud session a session runs as, or ran as.</summary>

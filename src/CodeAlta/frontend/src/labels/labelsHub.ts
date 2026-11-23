@@ -2,13 +2,16 @@
 import type { labels as labelsService, LabelChangeResponse } from "#neoastra";
 import { readLabels, sameLabels, type Label } from "./labels";
 
-export type LabelsApi = Pick<typeof labelsService, "list" | "create" | "update" | "move" | "delete" | "assign">;
+export type LabelsApi = Pick<typeof labelsService, "list" | "create" | "update" | "move" | "delete" | "assign" | "assignSession">;
 
 /** What the page shows of the labels. `loaded` is false until the host answered once. */
 export type LabelsState = Readonly<{ loaded: boolean; available: boolean; labels: readonly Label[] }>;
 
 /** How a change ended: done, or refused with what the host said. */
 export type LabelOutcome = Readonly<{ ok: boolean; status: string; message: string | null; label: Label | null }>;
+
+/** How a change of the labels of a session ended: done with its labels after it, or refused with what the host said. */
+export type SessionLabelsOutcome = Readonly<{ ok: boolean; status: string; message: string | null; labels: readonly string[] }>;
 
 /** What to change of a label: a value left out stays as it is, an empty text is removed. */
 export type LabelEdit = Readonly<{ name?: string; description?: string; icon?: string; color?: string; favorite?: boolean; space?: string }>;
@@ -71,9 +74,10 @@ export function createLabelsHub(api: LabelsApi) {
     refresh: () => list(),
     /** Creates a label, last under its parent (null: at the top), and gives it to the projects named. */
     create: (name: string, look: Readonly<{ parent?: string | null; icon?: string | null; color?: string | null; space?: string | null; favorite?: boolean;
-      description?: string | null }> = {}, projectIds: readonly string[] = []) =>
+      description?: string | null; forSessions?: boolean }> = {}, projectIds: readonly string[] = []) =>
       change(host => api.create({ expectedEpoch: host, name, parent: look.parent ?? null, icon: look.icon ?? null, color: look.color ?? null,
-        space: look.space ?? null, favorite: look.favorite ?? false, description: look.description ?? null, projectIds }, { timeoutMilliseconds: 30_000 })),
+        space: look.space ?? null, favorite: look.favorite ?? false, description: look.description ?? null, projectIds,
+        ...look.forSessions ? { forSessions: true } : {} }, { timeoutMilliseconds: 30_000 })),
     update: (id: string, edit: LabelEdit) => change(host => api.update({ expectedEpoch: host, id, name: edit.name ?? null, description: edit.description ?? null,
       icon: edit.icon ?? null, color: edit.color ?? null, favorite: edit.favorite ?? null, space: edit.space ?? null }, { timeoutMilliseconds: 30_000 })),
     /** Moves a label under a parent (null: to the top), at a place among its new siblings (-1: last). */
@@ -83,5 +87,14 @@ export function createLabelsHub(api: LabelsApi) {
     /** Gives labels to a project and takes others from it, in one edit. */
     assign: (projectId: string, add: readonly string[], remove: readonly string[] = []) =>
       change(host => api.assign({ expectedEpoch: host, projectId, add, remove }, { timeoutMilliseconds: 30_000 })),
+    /** Gives labels for sessions to a session and takes others from it; the Explorer shows the change with the next list of the sessions. */
+    async assignSession(sessionId: string, add: readonly string[], remove: readonly string[] = []): Promise<SessionLabelsOutcome> {
+      const host = epoch;
+      if (!host) return { ok: false, status: "unavailable", message: null, labels: [] };
+      try {
+        const reply = await api.assignSession({ expectedEpoch: host, sessionId, add, remove }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, labels: reply.labels ?? [] };
+      } catch { return { ok: false, status: "failed", message: null, labels: [] }; }
+    },
   };
 }

@@ -323,6 +323,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
         DesktopSessionRetention? retention = null;
+        DesktopSessionArchivePolicies? archivePolicies = null;
         DesktopBookmarks? bookmarkLife = null;
         Fleet.DesktopFleet? fleet = null;
         // Where the providers reach the model servers (llama.cpp) of this computer and of the paired machines, filled once they run.
@@ -644,6 +645,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // host half closed, its services disposed while the process and its window stay.
                 await CloseStepAsync(closing, "MCP server", async () => { if (mcp is not null) await mcp.DisposeAsync(); }); // No client starts a command on a host that is closing.
                 await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
+                await CloseStepAsync(closing, "session archive policies", async () => { if (archivePolicies is not null) await archivePolicies.DisposeAsync(); }); // A pass archives nothing once the host closes.
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
                 await CloseStepAsync(closing, "placed automations", async () => { if (placement is not null) await placement.DisposeAsync(); }); // What was copied runs on its machines.
                 await CloseStepAsync(closing, "remote children", async () => { if (remoteChildren is not null) await remoteChildren.DisposeAsync(); }); // Their answers wait on their machines.
@@ -1011,6 +1013,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The triggers of CodeAlta, and those the plugins give, as they run now.
                 Automations.AutomationBuiltInSources.AddProjectTrigger(automations, host.ProjectCatalog);
                 automations.Sources.Plugins = () => host.PluginRuntime?.GetAutomationTriggers() ?? [];
+                // The archive policies of sessions, by their labels or by the automation that started them: a policy names an
+                // automation by its id or its name, as the automations are now.
+                var namedAutomations = automations;
+                archivePolicies = new DesktopSessionArchivePolicies(host, _ => Task.FromResult<IReadOnlyDictionary<string, string>>(
+                    namedAutomations.Snapshot.Entries.GroupBy(static entry => entry.Id, StringComparer.Ordinal)
+                        .ToDictionary(static group => group.Key, static group => group.First().Definition.Name, StringComparer.Ordinal)));
                 // An automation of the user can run on a paired machine: it is copied there, and runs there while this
                 // computer is closed. A profile that placed none makes no call and creates no key.
                 var placedFleet = fleet;
@@ -1370,7 +1378,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, options.McpHome, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost, profileRoot: options.Profile)).ReadAsync,
                     });
-                    builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch));
+                    builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch)
+                    {
+                        AssignSession = (sessionId, add, remove, token) => host.RuntimeService.SetSessionLabelsAsync(sessionId, add, remove, token),
+                    });
                     builder.AddSubProjectsService(new SubProjectsService(host.ProjectCatalog, spaceView, epoch));
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch,
                         new Spaces.SpaceIdentityChecks(host.SpaceCatalog.Projects.Options.GlobalRoot, host.Credentials)));

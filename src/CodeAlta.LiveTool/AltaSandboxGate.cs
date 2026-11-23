@@ -28,7 +28,7 @@ internal static class AltaSandboxGate
         "browser list", "browser activate", "browser status", "browser close", "browser deactivate",
         "session current", "session create", "session fork", "session send", "session queue", "session queued", "session unqueue", "session steer", "session unsteer", "session request",
         "session message", "session tail", "session events", "session tool", "session result", "session info", "session status", "session choices",
-        "session abort", "session compact", "session title", "session metrics",
+        "session abort", "session compact", "session title", "session label", "session metrics",
         // The machines its sessions elsewhere run on: what it starts or drives there carries its sandbox as a floor, and a
         // profile without the fleet refuses them in the commands (`SessionRuntimeService.GetFleetFloorAsync`).
         "session machines",
