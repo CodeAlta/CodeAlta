@@ -64,10 +64,10 @@ Deleting a space deletes its labels.
 
 Inside a project, sessions come from very different work: refactoring, bug fixing, and the runs of [automations](automations.md) such as pull request reviews or audits. A label for sessions puts each concern in a group of its own, with its latest sessions on top.
 
-- A session can have several labels. A label for sessions is in one space or in every space, as a label of projects is, and a session gets the labels of its space.
+- A session can have several labels. A label for sessions is in one space or in every space, as a label of projects is: a session gets the labels of its space and those of every space.
 - In the **⋯** menu of a session, **Labels…** checks the labels it has, and makes a new one.
 - Without groups, a session shows its labels as small badges after its title.
-- **Group sessions by labels**, in the **⋯** menu of a project, lists its sessions under their labels: a title for each label one of its sessions has, in the order of the labels, with how many sessions it holds and the sessions that run or wait in it, then **Other sessions**, those of no label. A title folds its sessions. A session with several labels is listed under the first one, and shows the others as badges. **Sessions in one list** goes back to the list. This choice belongs to the window, project by project.
+- **Group sessions by labels**, in the **⋯** menu of a project or of **Chats**, lists its sessions under their labels: a title for each label one of its sessions has, in the order of the labels, with how many sessions it holds and the sessions that run or wait in it, then **Other sessions**, those of no label. A title folds its sessions. A session with several labels is listed under the first one, and shows the others as badges. **Sessions in one list** goes back to one list. This choice belongs to the window, project by project.
 - **Filter sessions**, the [search](workspace/readme.md#search) (`Ctrl+P`) and the [session browser](workspace/readme.md#session-browser) take a word `label:audit`: they keep the sessions with a label whose id starts with `audit`.
 - The sub-agents of a session follow it: they are listed under it, whatever their own labels.
 

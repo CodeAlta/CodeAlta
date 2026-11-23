@@ -259,6 +259,9 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
             { key: "create", label: t("New chat…"), icon: "newSession", disabled: !sessions.canCreate(null), onSelect: () => sessions.create(null) },
             { key: "search", label: `${t("Search sessions")}…`, icon: "search", onSelect: () => sessions.search(null) },
             { key: "browse", label: t("Browse saved sessions"), icon: "browse", onSelect: () => sessions.browse(null) },
+            ...(sessions.labels ? [sessions.labels.grouped(null)
+              ? { key: "sessions-one-list", label: t("Sessions in one list"), icon: "list" as const, onSelect: () => sessions.labels?.setGrouped(null, false) }
+              : { key: "sessions-by-labels", label: t("Group sessions by labels"), icon: "tag" as const, onSelect: () => sessions.labels?.setGrouped(null, true) }] : []),
           ]} />}
         {creating?.id === null && creating.form}
       </li>
