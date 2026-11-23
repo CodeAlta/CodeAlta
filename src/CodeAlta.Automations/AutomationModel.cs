@@ -721,6 +721,16 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// </summary>
     public string? Notify { get; init; }
 
+    /// <summary>
+    /// The label for sessions every session of its runs gets (<c>label</c>): the id or the name of a label for sessions, which
+    /// the first run that needs it creates; null for one of its <see cref="Name"/>. It changes nothing of what the
+    /// automation runs.
+    /// </summary>
+    public string? Label { get; init; }
+
+    /// <summary>The label its runs get: <see cref="Label"/>, else its <see cref="Name"/>.</summary>
+    public string RunLabel => Label ?? Name;
+
     /// <summary>Whether a run that ended with a status tells the user, as <see cref="Notify"/> asks.</summary>
     /// <param name="status">The status the run ended with, one of the constants of <see cref="AutomationRun"/>.</param>
     internal bool NotifiesOn(string status) => Notify switch
