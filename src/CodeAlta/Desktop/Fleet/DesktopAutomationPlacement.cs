@@ -1157,9 +1157,10 @@ internal sealed partial class DesktopAutomationPlacement : IAutomationPlacement,
         };
 
     // What the machine was given: the definition, whether it is enabled, and the repository of its project, as a signed version.
+    // The label of its runs is no part of the fingerprint (it asks for no new approval) and is given again when it changes.
     private static string Key(AutomationDefinition copy, string? repository)
         => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-            "signed\n" + copy.Fingerprint() + "\n" + (copy.Enabled ? "1" : "0") + "\n" + repository)))[..32];
+            "signed\n" + copy.Fingerprint() + "\n" + (copy.Enabled ? "1" : "0") + "\n" + repository + (copy.Label is { } label ? "\nlabel:" + label : string.Empty))))[..32];
 
     // What the machine runs: the definition without where it runs here, its project found there by its repository, and
     // disabled while the automations here are paused.
