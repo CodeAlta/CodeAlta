@@ -63,10 +63,59 @@ public sealed class AutomationRunGuardTests
         Assert.IsNull((await guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default)).BlockMessage, "allowed once by a person");
     }
 
-    // A person approves the complete action: an approval names the digest of the tool and its complete arguments, and a call too
-    // long to be shown whole says that it is shortened, with that digest and where the complete arguments are read.
+    // A tool of an MCP server the agent CLI runs itself (a connector of Claude Code): the CLI asks before each call, and an
+    // allowed one is approved by the guard in place of a person, also when several run at once. What the guard approves goes
+    // through its try, bounds and circuit breaker as a tool of CodeAlta does; a call it does not allow keeps the prompt of the
+    // agent, and a call whose prompt the agent cannot let the hooks answer (ACP, Codex) is left to the agent as before.
     [TestMethod]
-    public async Task AnApproval_IsBoundToTheDigestOfTheCompleteCall_AndALongOneSaysItIsShortened()
+    public async Task AnAllowedToolTheAgentRunsItself_IsApprovedInPlaceOfItsPrompt_WithinItsBoundsAndCircuitBreaker()
+    {
+        const string Slack = "mcp__claude_ai_Slack__slack_read_channel";
+        static AgentToolHookCall AgentCall(string tool, string arguments = """{"channel_id":"C1"}""",
+            AgentToolHookCapabilities capabilities = AgentToolHookCapabilities.Block | AgentToolHookCapabilities.Approve)
+            => AgentToolHookCall.Create(new AgentToolInvocation(new ModelProviderId("claude-code"), "s1", "toolu_1", tool, JsonDocument.Parse(arguments).RootElement.Clone()),
+                null, "/work", capabilities, runByAgent: true);
+        var asker = new Asker { Answer = AgentPermissionDecisionKind.AllowOnce };
+        var autonomy = new AutomationAutonomy
+        {
+            AllowedTools = [Slack, "mcp__claude_ai_Slack__slack_send_message"],
+            Tools = [new AutomationAllowedTool("mcp__claude_ai_Slack__slack_send_message") { Bounds = [new AutomationToolBound("channel_id") { Values = ["C1"] }] }],
+            MaxCallsPerHour = 8,
+        };
+        var guard = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
+
+        var decisions = await Task.WhenAll(Enumerable.Range(0, 7).Select(_ => guard.BeforeToolCallAsync(AgentCall(Slack), default).AsTask()));
+        Assert.IsTrue(decisions.All(static decision => decision is { Approved: true, BlockMessage: null }), "every call is approved, whatever the parallelism");
+        Assert.AreEqual(0, asker.Asked.Count);
+
+        // The agent's prompt answers what the guard does not approve: a tool it does not allow, and a call of an agent whose
+        // prompt the hooks cannot answer, which the circuit breaker does not count either.
+        Assert.AreEqual(AgentToolCallDecision.Allow, await guard.BeforeToolCallAsync(AgentCall("mcp__claude_ai_Slack__slack_delete_message"), default));
+        Assert.AreEqual(AgentToolCallDecision.Allow, await guard.BeforeToolCallAsync(AgentCall(Slack, capabilities: AgentToolHookCapabilities.Block), default));
+        Assert.AreEqual(0, asker.Asked.Count);
+        Assert.IsTrue((await guard.BeforeToolCallAsync(AgentCall(Slack), default)).Approved, "the eighth call of the hour");
+
+        // Beyond its circuit breaker, or out of its bounds, a call waits for a person, whose approval answers the agent's prompt.
+        Assert.IsTrue((await guard.BeforeToolCallAsync(AgentCall(Slack), default)).Approved);
+        StringAssert.Contains(asker.Asked.Single().Reason, "circuit breaker");
+        asker.Answer = AgentPermissionDecisionKind.Deny;
+        var refused = await guard.BeforeToolCallAsync(AgentCall("mcp__claude_ai_Slack__slack_send_message", """{"channel_id":"C2"}"""), default);
+        Assert.IsFalse(refused.Approved);
+        StringAssert.Contains(refused.BlockMessage, "did not allow the call of mcp__claude_ai_Slack__slack_send_message");
+
+        // A try records the call and does not make it.
+        var recorded = new List<string>();
+        var tried = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: true);
+        tried.Recorded += recorded.Add;
+        StringAssert.Contains((await tried.BeforeToolCallAsync(AgentCall(Slack), default)).BlockMessage, "recorded and not made");
+        Assert.AreEqual(Slack + """ {"channel_id":"C1"}""", recorded.Single());
+    }
+
+    // A person approves the complete action: a call too long to be shown whole says that it is shortened, with the digest of
+    // the tool and its complete arguments and where they are read. The request names no approval of a provider, which the
+    // review of a session would refuse to show.
+    [TestMethod]
+    public async Task AnApproval_OfALongCall_SaysItIsShortened_WithTheDigestOfTheCompleteCall()
     {
         var asker = new Asker();
         var guard = new AutomationRunGuard(Entry(new AutomationAutonomy()), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
@@ -76,14 +125,13 @@ public sealed class AutomationRunGuardTests
         var arguments = $$"""{"padding":"{{new string('a', 3000)}}","target":"prod-db"}""";
         await guard.BeforeToolCallAsync(Call("db_drop", arguments), default);
         var asked = asker.Asked.Single();
-        Assert.AreEqual(Digest("db_drop", arguments), asked.ApprovalId, "the approval is bound to the complete call");
+        Assert.IsNull(asked.ApprovalId);
         StringAssert.Contains(asked.Command, "shortened");
         StringAssert.Contains(asked.Command, Digest("db_drop", arguments));
         StringAssert.Contains(asked.Reason, "complete arguments");
 
-        // A short call is shown whole, and bound to its digest as well.
+        // A short call is shown whole.
         await guard.BeforeToolCallAsync(Call("db_drop", """{ "target" : "dev-db" }"""), default);
-        Assert.AreEqual(Digest("db_drop", """{"target":"dev-db"}"""), asker.Asked[1].ApprovalId, "the digest is of the arguments without their spacing");
         Assert.AreEqual("""db_drop { "target" : "dev-db" }""", asker.Asked[1].Command);
     }
 

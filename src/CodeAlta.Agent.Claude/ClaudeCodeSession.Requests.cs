@@ -33,11 +33,16 @@ internal sealed partial class ClaudeCodeSession
 
         AgentProviderRunContext? run;
         Task? runForOwnTurn;
+        bool approvedByHooks;
         var prompt = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         lock (_gate)
         {
             runForOwnTurn = _runForOwnTurn?.Task;
             _permissionPrompts[requestId] = prompt;
+            // The approval is for the call that was checked: another tool, or an input another hook of the CLI changed
+            // since, is asked as usual.
+            approvedByHooks = ClaudeCodeJson.GetString(request, "tool_use_id") is { } toolUseId && _approvedByHooks.Remove(toolUseId, out var approved)
+                && string.Equals(approved.Tool, toolName, StringComparison.Ordinal) && JsonElement.DeepEquals(approved.Input, input);
         }
 
         try
@@ -117,6 +122,12 @@ internal sealed partial class ClaudeCodeSession
                 return Deny("No run of CodeAlta is active for this session.", interrupt: false);
             }
 
+            if (approvedByHooks)
+            {
+                // The tool hooks approved this call for the user (the guard of an automation that allows the tool).
+                return Allow(input, default);
+            }
+
             var decision = await run.OnPermissionRequest(permission, prompt.Token).ConfigureAwait(false);
             if (prompt.IsCancellationRequested)
             {
@@ -183,6 +194,9 @@ internal sealed partial class ClaudeCodeSession
     ]);
 
     private static bool IsFileTool(string toolName) => toolName is "Edit" or "MultiEdit" or "Write" or "NotebookEdit";
+
+    // What starts the name of a tool of an MCP server, as the CLI names it (`mcp__<server>__<tool>`).
+    private const string McpToolNamePrefix = "mcp__";
 
 
     // Why a file tool of a CLI without its shell may not write where it asks, or null when it may.

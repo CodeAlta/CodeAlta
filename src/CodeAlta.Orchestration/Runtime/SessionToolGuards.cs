@@ -208,7 +208,8 @@ public sealed class SessionToolGuards
                 ? AgentToolHookCall.Create(call.Invocation with { Arguments = arguments }, call.Spec, call.WorkingDirectory, call.Capabilities, call.RunByAgent)
                 : call) with { FindTool = name => _tools.TryGetValue(name, out var tool) ? tool : null };
             var guarded = await guard.BeforeToolCallAsync(checkedCall, cancellationToken).ConfigureAwait(false);
-            return guarded.BlockMessage is not null ? guarded : guarded.Arguments is not null ? guarded : decision;
+            // Only the guard approves a call in place of the user: the plugins answer no permission prompt.
+            return guarded.BlockMessage is not null || guarded.Arguments is not null ? guarded : decision with { Approved = guarded.Approved };
         }
 
         public override async ValueTask<AgentToolResult> AfterToolCallAsync(AgentToolHookCall call, AgentToolResult result, CancellationToken cancellationToken)

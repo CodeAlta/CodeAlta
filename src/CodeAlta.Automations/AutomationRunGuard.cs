@@ -55,7 +55,9 @@ internal sealed class AutomationCallBreaker
 /// at every tool call of the session (never only in its prompt):
 /// <list type="bullet">
 /// <item>the tools of the host keep their own guards: commands and edits follow the permission mode, which asks;</item>
-/// <item>a tool the agent runs itself (an agent CLI) keeps the permission prompts of that agent;</item>
+/// <item>a tool the agent runs itself (an agent CLI) keeps the permission prompts of that agent, but one the automation
+/// allows whose prompt the hooks can answer (<see cref="AgentToolHookCapabilities.Approve"/>), which is checked as below and
+/// approved in place of a person;</item>
 /// <item>any other tool (MCP servers, plugins) runs without a person when the automation allows it and its circuit breaker
 /// lets it; otherwise the call waits for a person, as a permission request of the session bound to that call;</item>
 /// <item>in a try, an allowed tool is a fake: the call is recorded on the run and not made.</item>
@@ -192,8 +194,12 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         ArgumentNullException.ThrowIfNull(call);
         var tool = call.Invocation.ToolName;
         Calling?.Invoke(call.Invocation.SessionId);
-        // What the host runs keeps the guards of the host; what an agent CLI runs itself keeps its own prompts.
-        if (call.RunByAgent || AutomationAutonomy.HostTools.Contains(tool, StringComparer.Ordinal)) return AgentToolCallDecision.Allow;
+        // What the host runs keeps the guards of the host. What an agent CLI runs itself keeps its own prompts, except a tool the
+        // automation allows whose prompt the hooks can answer (a tool of an MCP server Claude Code runs): it is checked below.
+        if (AutomationAutonomy.HostTools.Contains(tool, StringComparer.Ordinal)
+            || (call.RunByAgent && (!call.Capabilities.HasFlag(AgentToolHookCapabilities.Approve) || !_autonomy.Allows(tool)))) return AgentToolCallDecision.Allow;
+        // Such a call is approved, not only let through: its prompt would ask a person again, or deny it in a run nobody watches.
+        var allowed = call.RunByAgent ? AgentToolCallDecision.Approve : AgentToolCallDecision.Allow;
         var shown = Shown(tool, call.Invocation.Arguments);
         if (!_autonomy.Allows(tool))
         {
@@ -217,13 +223,13 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         {
             held = _breaker.Take(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow());
             if (held is null)
-                return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } failed ? NotMade(tool, failed) : AgentToolCallDecision.Allow;
+                return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } failed ? NotMade(tool, failed) : allowed;
         }
 
         var decision = await AskAsync(call.Invocation.SessionId, tool, shown, DigestOf(tool, call.Invocation.Arguments), $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
             call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         if (decision.BlockMessage is not null) return decision;
-        return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } stale ? NotMade(tool, stale) : decision;
+        return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } stale ? NotMade(tool, stale) : allowed;
     }
 
     // Calls the preconditions of an allowed tool, each a tool of the session that reads the target: why one does not hold, or null.
@@ -257,13 +263,13 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     private static AgentToolCallDecision NotMade(string tool, string why)
         => AgentToolCallDecision.Block($"The call of {tool} was not made: {why}. Its target is not as it must be to act; say what you found instead.");
 
-    // Asks a person a call, bound to the digest of the complete call (its approval id): a call shortened to be shown says where
-    // the complete arguments are read.
+    // Asks a person a call: a call shortened to be shown names the digest of the complete call, and says where the complete
+    // arguments are read. The request names no approval of a provider: the review of a session shows only such a request.
     private async Task<AgentToolCallDecision> AskAsync(string sessionId, string tool, string shown, string digest, string reason, string? folder, CancellationToken cancellationToken)
     {
         if (shown.Contains(digest, StringComparison.Ordinal)) reason += " The call is shortened here: its complete arguments are in the tool call of the session.";
         var request = new AgentCommandPermissionRequest(new ModelProviderId("automation"), string.Empty, _time.GetUtcNow(), null, "automation-" + Guid.NewGuid().ToString("N"),
-            digest, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
+            null, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
         using var timeout = _autonomy.ApprovalTimeout is { } minutes && _autonomy.OnTimeout == AutomationAutonomy.StopOnTimeout && !TakenOver
             ? new CancellationTokenSource(TimeSpan.FromMinutes(minutes), _time) : new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
