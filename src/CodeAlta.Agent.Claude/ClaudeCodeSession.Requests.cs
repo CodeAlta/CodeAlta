@@ -33,11 +33,13 @@ internal sealed partial class ClaudeCodeSession
 
         AgentProviderRunContext? run;
         Task? runForOwnTurn;
+        bool approvedByHooks;
         var prompt = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         lock (_gate)
         {
             runForOwnTurn = _runForOwnTurn?.Task;
             _permissionPrompts[requestId] = prompt;
+            approvedByHooks = ClaudeCodeJson.GetString(request, "tool_use_id") is { } toolUseId && _approvedByHooks.Remove(toolUseId);
         }
 
         try
@@ -117,6 +119,12 @@ internal sealed partial class ClaudeCodeSession
                 return Deny("No run of CodeAlta is active for this session.", interrupt: false);
             }
 
+            if (approvedByHooks)
+            {
+                // The tool hooks approved this call for the user (the guard of an automation that allows the tool).
+                return Allow(input, default);
+            }
+
             var decision = await run.OnPermissionRequest(permission, prompt.Token).ConfigureAwait(false);
             if (prompt.IsCancellationRequested)
             {
@@ -183,6 +191,9 @@ internal sealed partial class ClaudeCodeSession
     ]);
 
     private static bool IsFileTool(string toolName) => toolName is "Edit" or "MultiEdit" or "Write" or "NotebookEdit";
+
+    // The tools whose permission prompts are asked as commands and file changes: they follow the permission mode.
+    private static bool IsCommandOrEditTool(string toolName) => toolName is "Bash" or "PowerShell" or "Monitor" || IsFileTool(toolName);
 
 
     // Why a file tool of a CLI without its shell may not write where it asks, or null when it may.

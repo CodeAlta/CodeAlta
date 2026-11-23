@@ -102,6 +102,9 @@ internal sealed partial class ClaudeCodeSession
     private readonly Dictionary<string, ToolCallState> _toolCalls = new(StringComparer.Ordinal);
     private readonly List<ToolCallState> _toolCallOrder = [];
     private readonly Dictionary<string, CancellationTokenSource> _permissionPrompts = new(StringComparer.Ordinal);
+    // The tool calls the tool hooks approved for the user, by their tool_use_id: the permission prompt of each is answered
+    // without asking the run, once. Forgotten with the tool calls of a run.
+    private readonly HashSet<string> _approvedByHooks = new(StringComparer.Ordinal);
     private bool _stateEventsSeen;
     private bool _cliRunning;
     private bool _turnActive;
@@ -779,7 +782,9 @@ internal sealed partial class ClaudeCodeSession
 
     // A tool the CLI runs itself, asked of the tool hooks of the session: a block denies the call with the reason the
     // model reads. The hooks cannot change its input here (an input changed through a hook also skips the permissions
-    // of the CLI), and they do not see its result. A tool of CodeAlta runs its hooks when the session runs it.
+    // of the CLI), and they do not see its result. They can approve a tool other than a command or an edit: its
+    // permission prompt is then answered here, after the checks of the host, without asking the run. A tool of CodeAlta
+    // runs its hooks when the session runs it.
     private async Task AnswerToolHookAsync(string requestId, JsonElement request)
     {
         string? refusal = null;
@@ -798,17 +803,30 @@ internal sealed partial class ClaudeCodeSession
                 && !toolName.StartsWith(ClaudeCodeLauncher.McpToolPrefix, StringComparison.Ordinal))
             {
                 var arguments = ClaudeCodeJson.TryGetObject(input, "tool_input", out var toolInput) ? toolInput.Clone() : ClaudeCodeJson.EmptyObject;
-                var callId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? ClaudeCodeJson.GetString(input, "tool_use_id") ?? Guid.NewGuid().ToString("N");
+                var toolUseId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? ClaudeCodeJson.GetString(input, "tool_use_id");
                 var cwd = ClaudeCodeJson.GetString(input, "cwd");
                 var folder = cwd is { Length: > 0 } ? cwd : _launchKey?.WorkingDirectory ?? Environment.CurrentDirectory;
+                // A call is approved by its tool_use_id, which its permission prompt names; a command or an edit never is.
+                var approvable = toolUseId is not null && !IsCommandOrEditTool(toolName);
                 var call = CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(
-                    new AgentToolInvocation(providerId, _sessionId, callId, toolName, arguments),
+                    new AgentToolInvocation(providerId, _sessionId, toolUseId ?? Guid.NewGuid().ToString("N"), toolName, arguments),
                     spec: null,
                     folder,
-                    CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Block,
+                    approvable
+                        ? CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Block | CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Approve
+                        : CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Block,
                     runByAgent: true,
                     commandDirectory: cwd);
-                refusal = (await interceptor.BeforeToolCallAsync(call, _lifetime.Token).ConfigureAwait(false)).BlockMessage;
+                var decision = await interceptor.BeforeToolCallAsync(call, _lifetime.Token).ConfigureAwait(false);
+                refusal = decision.BlockMessage;
+                if (refusal is null && decision.Approved && approvable)
+                {
+                    // Before the hook is answered: the CLI asks for the permission of the call only once it has the answer.
+                    lock (_gate)
+                    {
+                        _approvedByHooks.Add(toolUseId!);
+                    }
+                }
             }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)

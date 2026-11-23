@@ -135,14 +135,18 @@ the one place they run: `AgentSession` wraps each tool of its table with the `Ag
 agent CLI calls over MCP), and `SessionRuntimeService` makes it from `PluginOrchestrationBridge.CreateToolInterceptor`
 for every host. A plugin tool's own wrapper keeps only its checks (`StartsPrograms`, `SafeInSandbox`), so its hooks run
 once. A turn executor whose agent runs its own tools asks the same interceptor before them: Claude Code from a
-`PreToolUse` callback for every tool (block only, the model reads why), an ACP agent when it asks permission (block
-only; the protocol carries no reason). Their results are not hooked.
+`PreToolUse` callback for every tool (block, the model reads why; approve, below), an ACP agent when it asks permission
+(block only; the protocol carries no reason). Their results are not hooked.
 
 The order is an invariant: **plugin before-hooks → host guards (`AgentCommandGuard`, `AgentWriteGuard`, disabled
 tools, `StartsPrograms`) → permission prompt → sandbox router → the tool → plugin after-hooks.** The guards and the
 prompt live in the handlers of the tools, below the interceptor, so arguments a hook replaces go through all of them: a
-plugin can make the policy stricter, never looser. That is also why there is no hook that answers a permission prompt:
-one that could allow would be the only way around the guards.
+plugin can make the policy stricter, never looser. That is also why no plugin hook answers a permission prompt: one that
+could allow would be the only way around the guards. The one decision that answers a prompt,
+`AgentToolCallDecision.Approve`, belongs to the guard of an automation with Autonomy (`SessionToolGuards` keeps it, the
+plugin bridge masks its capability): Claude Code offers it (`AgentToolHookCapabilities.Approve`) for a tool it runs
+itself other than its commands and edits, named by the CLI, and answers that call's `can_use_tool` without asking the
+run, after its own checks (no shell, plan mode). An ACP agent names its tools by a title it writes, so it offers none.
 
 The adapter calls only the plugins that override a hook (read once at activation), one after the other: the first block
 wins, replaced arguments are the next hook's input, each result hook sees the result the one before left, and details a

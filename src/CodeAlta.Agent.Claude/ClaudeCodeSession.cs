@@ -169,6 +169,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 // itself are kept for the run that reads it, which is this one.
                 _toolCalls.Clear();
                 _toolCallOrder.Clear();
+                _approvedByHooks.Clear();
             }
 
             waiting = _runForOwnTurn;
@@ -930,6 +931,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _mcpInitialized = false;
             _toolCalls.Clear();
             _toolCallOrder.Clear();
+            _approvedByHooks.Clear();
             _stateEventsSeen = false;
             _cliRunning = false;
             _turnActive = false;
