@@ -253,6 +253,37 @@ public sealed class CodeAltaSessionSettingsDocument
     /// </summary>
     [JsonPropertyName("claude_code_conversations")]
     public bool? ClaudeCodeConversations { get; set; }
+
+    /// <summary>
+    /// Gets or sets the archive policies: which sessions CodeAlta archives by itself, by their labels or by the automation
+    /// that started them. Read from the user's file, for the sessions of every project and the chats, and from the file of
+    /// a project, for its own sessions, so that a team shares them.
+    /// </summary>
+    [JsonPropertyName("archive_policies")]
+    public List<CodeAltaSessionArchivePolicyDocument>? ArchivePolicies { get; set; }
+}
+
+/// <summary>
+/// Represents one archive policy (<c>[[sessions.archive_policies]]</c>): the sessions it applies to, and when they are
+/// archived. A session is archived, never deleted.
+/// </summary>
+public sealed class CodeAltaSessionArchivePolicyDocument
+{
+    /// <summary>Gets or sets the labels for sessions whose sessions it applies to, by their id; a label under one of them counts too.</summary>
+    [JsonPropertyName("labels")]
+    public List<string>? Labels { get; set; }
+
+    /// <summary>Gets or sets the automations whose runs it applies to, by their id or their name.</summary>
+    [JsonPropertyName("automations")]
+    public List<string>? Automations { get; set; }
+
+    /// <summary>Gets or sets how many days a session stays inactive before it is archived; null for no age.</summary>
+    [JsonPropertyName("older_than_days")]
+    public int? OlderThanDays { get; set; }
+
+    /// <summary>Gets or sets how many of its sessions, the most recently active, are never archived; null for no such number.</summary>
+    [JsonPropertyName("keep_last")]
+    public int? KeepLast { get; set; }
 }
 
 /// <summary>Represents the choices for the reviews of the user.</summary>

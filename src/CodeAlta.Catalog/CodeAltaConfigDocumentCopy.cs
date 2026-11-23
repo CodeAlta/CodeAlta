@@ -55,6 +55,10 @@ internal static class CodeAltaConfigDocumentCopy
             Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument
             {
                 Title = sessions.Title, PromptSuggestions = sessions.PromptSuggestions, ClaudeCodeConversations = sessions.ClaudeCodeConversations,
+                ArchivePolicies = sessions.ArchivePolicies?.Select(static policy => new CodeAltaSessionArchivePolicyDocument
+                {
+                    Labels = Copy(policy.Labels), Automations = Copy(policy.Automations), OlderThanDays = policy.OlderThanDays, KeepLast = policy.KeepLast,
+                }).ToList(),
             } : null,
             Review = document.Review is { } review ? new CodeAltaReviewSettingsDocument { BeforeCommit = review.BeforeCommit } : null,
             Privacy = document.Privacy is { } privacy ? new CodeAltaPrivacySettingsDocument { Pseudonymize = privacy.Pseudonymize } : null,
