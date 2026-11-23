@@ -3141,7 +3141,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const automationState = useSyncExternalStore(automationsHub.subscribe, automationsHub.getSnapshot);
   // An automation starts a session without the window asking: the sessions are read again when its runs change.
   const automationRuns = automationState.runs.map(run => `${run.id}:${run.status}:${run.sessionId ?? ""}`).join("|");
-  useEffect(() => { if (automationRuns) readSessionList.current(); }, [automationRuns]);
+  // Its first run may create the label of its runs: the labels are read again too.
+  useEffect(() => { if (automationRuns) { readSessionList.current(); void labelsHub.refresh(); } }, [automationRuns]);
   const [automationFocus, setAutomationFocus] = useState<string | null>(null);
   function openAutomations(id: string | null = null) {
     if (id) setAutomationFocus(id);
@@ -4600,10 +4601,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     assign={async (id, add, remove) => { const outcome = await labelsHub.assignSession(id, add, remove); if (outcome.ok) readSessionList.current(); return outcome; }}
     create={name => labelsHub.create(name, { space: labelSpace, forSessions: true })} onClose={close} /> : undefined;
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
-    // Grouped, a session is listed under the first of its labels: its badges name the others.
+    // Grouped, a session at the top is listed under the first of its labels: its badges name the others. A session
+    // below another one follows it, whatever its own labels, and shows them all.
     const labels = sessionLabels(session, spaceSessionLabels);
     return <>
-      <LabelBadges labels={isGroupedByLabels(projectTree, scope) ? labels.slice(1) : labels} all={spaceSessionLabels} className="session-label-badges" />
+      <LabelBadges labels={isGroupedByLabels(projectTree, scope) && !session.parentSessionId ? labels.slice(1) : labels} all={spaceSessionLabels} className="session-label-badges" />
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
       <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />

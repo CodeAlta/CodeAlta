@@ -30,7 +30,8 @@ export function groupSessionsByLabels(entries: readonly SessionTreeEntry[], labe
     const named = block.top?.labels;
     const first = named?.length ? labels.find(label => named.includes(label.id)) : undefined;
     if (!first) { other.push(block); continue; }
-    byLabel.set(first.id, [...byLabel.get(first.id) ?? [], block]);
+    const members = byLabel.get(first.id);
+    if (members) members.push(block); else byLabel.set(first.id, [block]);
   }
   if (!byLabel.size) return [...entries];
   const grouped: SessionTreeEntry[] = [];

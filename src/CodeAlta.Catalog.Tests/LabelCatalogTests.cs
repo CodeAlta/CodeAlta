@@ -196,6 +196,11 @@ public sealed class LabelCatalogTests
         Assert.IsTrue((await fixture.Labels.MoveAsync(weekly.Id, null, -1)).Succeeded);
         Assert.IsTrue((await fixture.Labels.GetAsync(weekly.Id))!.IsForSessions, "A sub-label moved to the top stays for sessions.");
         StringAssert.Contains(await File.ReadAllTextAsync(weekly.SourcePath!), "\nfor: sessions\n");
+
+        // A place is counted among the labels of the same tree, as the page that shows one tree counts it.
+        Assert.IsTrue((await fixture.Labels.MoveAsync(weekly.Id, null, 1)).Succeeded);
+        CollectionAssert.AreEqual(new[] { "Audit", "Weekly", "infra" },
+            (await fixture.Labels.LoadAsync()).Where(static label => label.IsForSessions).Select(static label => label.Name).ToArray());
     }
 
     [TestMethod]

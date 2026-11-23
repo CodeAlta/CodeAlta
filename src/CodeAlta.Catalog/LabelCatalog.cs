@@ -333,7 +333,8 @@ public sealed class LabelCatalog
             label.Parent = parent;
             if (above is not null) label.Space = above.Space;
             if (moved && Invalid(label, labels) is { } invalid) return new(LabelChangeStatus.Invalid, Message: invalid);
-            var siblings = labels.Where(value => value.Parent == parent && !ReferenceEquals(value, label)).ToList();
+            // Its place is among the labels for the same things: at the top, the two trees are listed apart.
+            var siblings = labels.Where(value => value.Parent == parent && value.Target == label.Target && !ReferenceEquals(value, label)).ToList();
             siblings.Insert(index < 0 || index > siblings.Count ? siblings.Count : index, label);
             var complete = true;
             for (var place = 0; place < siblings.Count; place++)

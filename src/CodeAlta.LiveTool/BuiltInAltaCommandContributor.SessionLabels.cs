@@ -217,6 +217,10 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces)) return (null, AltaExitCodes.ServiceUnavailable);
         var all = await spaces.Labels.LoadAsync(context.CancellationToken).ConfigureAwait(false);
         var (labels, exitCode) = ResolveSessionLabels(context, all, SessionLabelsIn(all, [spaceId ?? SpaceDescriptor.DefaultId]), references, "alta session create");
-        return labels is null ? (null, exitCode) : ([.. labels.Select(static label => label.Id)], AltaExitCodes.Success);
+        if (labels is null) return (null, exitCode);
+        // Refused before anything is created: the session and its worktree would stay otherwise.
+        return labels.Count > SessionRuntimeService.MaximumSessionLabels
+            ? (null, UsageError(context, "label.invalid", $"A session has at most {SessionRuntimeService.MaximumSessionLabels} labels.", "alta session create"))
+            : ([.. labels.Select(static label => label.Id)], AltaExitCodes.Success);
     }
 }

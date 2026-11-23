@@ -497,6 +497,14 @@ internal sealed partial class WorkspaceService
                 var (all, own) = (true, false);
                 foreach (var word in words)
                 {
+                    // A word `label:audit` asks for a label whose id starts so, as the window reads it.
+                    if (word.StartsWith(LabelWordPrefix, StringComparison.Ordinal))
+                    {
+                        if (ordered[position].ViewState?.Labels?.Any(id => id.StartsWith(word.AsSpan(LabelWordPrefix.Length), StringComparison.OrdinalIgnoreCase)) == true) { own = true; continue; }
+                        all = false;
+                        break;
+                    }
+
                     if (ordered[position].SessionId.Contains(word, StringComparison.OrdinalIgnoreCase)
                         || (text ??= title(position)).Contains(word, StringComparison.OrdinalIgnoreCase)) { own = true; continue; }
                     if ((project ??= projectName(position) ?? string.Empty).Contains(word, StringComparison.OrdinalIgnoreCase)) continue;
@@ -510,6 +518,9 @@ internal sealed partial class WorkspaceService
             }
         }
     }
+
+    // What starts a word of a search that names a label of sessions (`labelWordPrefix` of the page).
+    private const string LabelWordPrefix = "label:";
 
     /// <summary>The most sessions a snapshot lists.</summary>
     internal const int MaximumSessions = 500;

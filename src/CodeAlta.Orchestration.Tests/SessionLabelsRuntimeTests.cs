@@ -65,7 +65,9 @@ public sealed class SessionLabelsRuntimeTests
         var unlabeled = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
         // Nothing is archived before the windows and the bookmarks said what they hold.
         var protection = new SessionRetentionProtection();
-        var service = new SessionArchivePolicyService(host.RuntimeService, new CodeAltaConfigStore(host.CatalogOptions), host.SpaceCatalog, protection);
+        // As the desktop applies them: through the owner of the commands, which refuses what a manual archive refuses.
+        var service = new SessionArchivePolicyService(host.RuntimeService, new CodeAltaConfigStore(host.CatalogOptions), host.SpaceCatalog, protection,
+            archive: host.Commands);
         Assert.AreEqual("skipped", (await service.RunOnceAsync(DateTimeOffset.UtcNow)).Status);
 
         // The first one is shown in a window: it is kept. The last one is the most recent: the policy keeps it.

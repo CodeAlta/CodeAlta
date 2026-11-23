@@ -38,6 +38,7 @@ public sealed class SessionArchivePolicyService
     private readonly SpaceCatalog _spaces;
     private readonly SessionRetentionProtection _protection;
     private readonly Func<CancellationToken, Task<IReadOnlyDictionary<string, string>>>? _automationNames;
+    private readonly ISessionArchive? _archive;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>Initializes a new instance of the <see cref="SessionArchivePolicyService"/> class.</summary>
@@ -46,10 +47,12 @@ public sealed class SessionArchivePolicyService
     /// <param name="spaces">The projects, and the labels whose sub-labels a policy covers.</param>
     /// <param name="protection">What keeps a session shown in a window, bookmarked or claimed by work.</param>
     /// <param name="automationNames">The names of the automations by their id, for a policy that names an automation; null when the host has none.</param>
+    /// <param name="archive">What archives a session for the owner of the host, with its refusals (a send under way, a question of an agent); null for the runtime alone.</param>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
     public SessionArchivePolicyService(SessionRuntimeService runtime, CodeAltaConfigStore config, SpaceCatalog spaces, SessionRetentionProtection protection,
-        Func<CancellationToken, Task<IReadOnlyDictionary<string, string>>>? automationNames = null)
+        Func<CancellationToken, Task<IReadOnlyDictionary<string, string>>>? automationNames = null, ISessionArchive? archive = null)
     {
+        _archive = archive;
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(spaces);
@@ -94,8 +97,9 @@ public sealed class SessionArchivePolicyService
             }
 
             var expired = SelectExpired(candidates, policies, id => LabelCatalog.Subtree(id, labels),
+                // An automation that is gone is still named by its id, which its runs keep.
                 reference => automations.ContainsKey(reference) ? reference
-                    : automations.FirstOrDefault(pair => string.Equals(pair.Value, reference, StringComparison.OrdinalIgnoreCase)).Key,
+                    : automations.FirstOrDefault(pair => string.Equals(pair.Value, reference, StringComparison.OrdinalIgnoreCase)).Key ?? reference,
                 now);
             var below = candidates.Where(static candidate => candidate.ParentSessionId is not null)
                 .ToLookup(static candidate => candidate.ParentSessionId!, StringComparer.OrdinalIgnoreCase);
@@ -110,9 +114,19 @@ public sealed class SessionArchivePolicyService
                     continue;
                 }
 
-                var result = await _runtime.SetSessionArchivedAsync(sessionId, archived: true, withChildren: true, cancellationToken).ConfigureAwait(false);
-                if (result.Status == "ok") archivedNow.Add(sessionId);
-                else kept++;
+                // A session that cannot be archived now is kept, and the pass goes on with the others.
+                try
+                {
+                    var result = _archive is not null
+                        ? await _archive.SetSessionArchivedAsync(sessionId, archived: true, withChildren: true).ConfigureAwait(false)
+                        : await _runtime.SetSessionArchivedAsync(sessionId, archived: true, withChildren: true, cancellationToken).ConfigureAwait(false);
+                    if (result.Status == "ok") archivedNow.Add(sessionId);
+                    else kept++;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+                {
+                    kept++;
+                }
             }
 
             return new("completed", archivedNow, kept);

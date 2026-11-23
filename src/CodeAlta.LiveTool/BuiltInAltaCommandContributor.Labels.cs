@@ -574,14 +574,20 @@ internal sealed partial class BuiltInAltaCommandContributor
             }
 
             if (!root && NormalizeOptionalText(parentRef) is null) parent = beside.Parent;
+            if (beside.Target != label.Target)
+            {
+                return UsageError(context, "label.invalid", $"The label '{beside.Id}' is for {(beside.IsForSessions ? "sessions" : "projects")}, and '{label.Id}' is not: they are never listed together.", CommandPath);
+            }
+
             if (beside.Parent != parent)
             {
                 return UsageError(context, "label.invalid", $"The label '{beside.Id}' is not under the same parent as where '{label.Id}' goes.", CommandPath);
             }
 
-            // The labels of other spaces are among the siblings in the catalog: the place is counted among all of them.
+            // The labels of other spaces are among the siblings in the catalog: the place is counted among all of them, for
+            // the same things (projects or sessions) as the label.
             var siblings = (await spaces.Labels.LoadAsync(context.CancellationToken).ConfigureAwait(false))
-                .Where(value => value.Parent == parent && value.Id != label.Id).Select(static value => value.Id).ToList();
+                .Where(value => value.Parent == parent && value.Target == label.Target && value.Id != label.Id).Select(static value => value.Id).ToList();
             index = siblings.IndexOf(beside.Id) + (NormalizeOptionalText(afterRef) is not null ? 1 : 0);
         }
 

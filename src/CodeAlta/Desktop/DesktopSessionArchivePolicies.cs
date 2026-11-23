@@ -20,7 +20,7 @@ internal sealed class DesktopSessionArchivePolicies : IAsyncDisposable
 
     internal DesktopSessionArchivePolicies(CodeAltaHost host, Func<CancellationToken, Task<IReadOnlyDictionary<string, string>>>? automationNames)
         : this(new SessionArchivePolicyService(host.RuntimeService, new CodeAltaConfigStore(host.CatalogOptions), host.SpaceCatalog, host.RetentionProtection,
-            automationNames), host.RetentionProtection, TimeSpan.FromSeconds(30), Interval)
+            automationNames, host.Commands), host.RetentionProtection, TimeSpan.FromSeconds(30), Interval)
     {
     }
 
