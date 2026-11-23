@@ -285,14 +285,15 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private int _disposeStarted;
     internal const int OwnedExecutionLimit = 64;
     internal const int OwnedPendingLimit = 128;
+    internal const int OwnedPendingPerExecutionLimit = 32;
     internal const int OwnedIdentityLimit = 128;
     internal const int OwnedCommandLimit = 4096;
     internal const int OwnedDirectoryLimit = 1024;
     internal const int OwnedReasonLimit = 1024;
     private readonly Dictionary<Guid, OwnedPermissionExecution> _ownedExecutions = [];
     private readonly HashSet<PendingPermission> _ownedDeliveries = [];
-    // The arrival of the last owned request: the window of a session lists its requests in the order they came, which
-    // the set does not keep once it reuses the places of answered ones.
+    // The arrival of the last owned request or question: the window of a session lists them in the order they came,
+    // which their collections do not keep once they reuse the places of answered ones.
     private long _ownedArrivals;
     private bool _ownedAdmissionClosed;
 
@@ -489,7 +490,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
             unreviewed = !reviewCommands && !AlwaysAsks(request);
             if (unreviewed || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
-                || !HasOwnedDeliveryCapacity()) return null;
+                || !HasOwnedDeliveryCapacity(execution)) return null;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
             var snapshot = OwnedSnapshot(handle, request);
             var pending = new PendingPermission(snapshot,

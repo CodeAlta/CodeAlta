@@ -410,26 +410,34 @@ public sealed class SessionPermissionServiceTests
         try
         {
             var request = Request() with { WorkingDirectory = "Q:\\fixture" };
-            // A runaway send: its requests wait up to the bound of the service, and the next one is denied, of any send.
-            var runaway = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
-            Assert.IsNotNull(runaway);
-            Assert.IsTrue(await service.BindOwnedExecutionAsync(runaway, Guid.NewGuid(), attachment, new ModelProviderId("test")));
-            for (var i = 0; i < SessionPermissionService.OwnedPendingLimit; i++)
-                deliveries.Add(service.HandleOwnedCommandAsync(runaway, request, CancellationToken.None));
+            // A runaway send: its requests wait up to the bound of a send, and its next one is denied. The other sends
+            // keep their places, until the bound of the service.
+            SessionPermissionService.OwnedPermissionExecution? runaway = null;
+            for (var i = 0; i < SessionPermissionService.OwnedPendingLimit / SessionPermissionService.OwnedPendingPerExecutionLimit; i++)
+            {
+                var execution = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
+                Assert.IsNotNull(execution);
+                runaway ??= execution;
+                Assert.IsTrue(await service.BindOwnedExecutionAsync(execution, Guid.NewGuid(), attachment, new ModelProviderId("test")));
+                for (var j = 0; j < SessionPermissionService.OwnedPendingPerExecutionLimit; j++)
+                    deliveries.Add(service.HandleOwnedCommandAsync(execution, request, CancellationToken.None));
+                if (i > 0) continue;
+                var beyond = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
+                deliveries.Add(beyond);
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await beyond.WithinAsync(TestTime.Seconds(5))).Kind);
+            }
             Assert.AreEqual(SessionPermissionService.OwnedPendingLimit, (await service.ListAsync()).Count);
-            var beyond = service.HandleOwnedCommandAsync(runaway, request, CancellationToken.None);
-            deliveries.Add(beyond);
-            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await beyond.WithinAsync(TestTime.Seconds(5))).Kind);
             var extra = await service.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None);
             Assert.IsNotNull(extra);
             Assert.IsTrue(await service.BindOwnedExecutionAsync(extra, Guid.NewGuid(), attachment, new ModelProviderId("test")));
             var denied = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
             deliveries.Add(denied);
             Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WithinAsync(TestTime.Seconds(5))).Kind);
-            await service.CloseOwnedExecutionAsync(runaway);
+            await service.CloseOwnedExecutionAsync(runaway!);
             var reclaimed = service.HandleOwnedCommandAsync(extra, request, CancellationToken.None);
             deliveries.Add(reclaimed);
-            Assert.AreEqual(1, (await service.ListAsync()).Count);
+            Assert.AreEqual(SessionPermissionService.OwnedPendingLimit - SessionPermissionService.OwnedPendingPerExecutionLimit + 1,
+                (await service.ListAsync()).Count);
             await service.CloseOwnedExecutionAsync(extra);
             Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await reclaimed.WithinAsync(TestTime.Seconds(5))).Kind);
             // Individually closed records do not exhaust the live execution cap or need tombstones.
@@ -566,19 +574,24 @@ public sealed class SessionPermissionServiceTests
                 Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await answered.WithinAsync(TestTime.Seconds(5))).Kind);
             }
 
-            var commands = Enumerable.Range(1, 7).Select(static i => $"call {i}").ToArray();
-            var waiting = commands.Select(command => service.HandleOwnedCommandAsync(execution, Command(command), CancellationToken.None)).ToArray();
+            var commands = Enumerable.Range(1, 7).Select(static i => $"call {i}").ToList();
+            var waiting = commands.Select(command => service.HandleOwnedCommandAsync(execution, Command(command), CancellationToken.None)).ToList();
             deliveries.AddRange(waiting);
-            Assert.AreEqual(commands.Length, (await service.ListAsync()).Count, "Every request of the send waits for the user.");
+            Assert.AreEqual(commands.Count, (await service.ListAsync()).Count, "Every request of the send waits for the user.");
             Assert.IsFalse(waiting.Any(static delivery => delivery.IsCompleted));
-            for (var i = 0; i < commands.Length; i++)
+            for (var i = 0; i < commands.Count; i++)
             {
                 var page = await service.ListOwnedCommandsAsync("session", default);
                 CollectionAssert.AreEqual(commands.Skip(i).Take(4).ToArray(), page.Entries.Select(static entry => entry.Request.Command).ToArray());
-                Assert.AreEqual(commands.Length - i > 4, page.HasMore);
+                Assert.AreEqual(commands.Count - i > 4, page.HasMore);
                 var decision = i % 2 == 0 ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny;
                 Assert.IsTrue(await service.ResolveOwnedCommandAsync(page.Entries[0].Handle, decision, default));
                 Assert.AreEqual(decision, (await waiting[i].WithinAsync(TestTime.Seconds(5))).Kind);
+                if (i is not (0 or 2)) continue;
+                // A request that comes while older ones wait takes the place of an answered one, and still comes last.
+                commands.Add($"late call {i}");
+                waiting.Add(service.HandleOwnedCommandAsync(execution, Command(commands[^1]), CancellationToken.None));
+                deliveries.Add(waiting[^1]);
             }
             Assert.AreEqual(0, (await service.ListOwnedCommandsAsync("session", default)).Entries.Count);
         }

@@ -84,7 +84,7 @@ public sealed class OwnedSessionUserInputTests
         var command = f.Keep(() => f.Owner.CreateOwnedCommandHandler(execution)(f.Command(), default));
         var tasks = new List<Task<AgentUserInputResponse>>();
         for (var i = 0; i < 3; i++) tasks.Add(f.Keep(() => f.Owner.CreateOwnedUserInputHandler(execution)(f.Request() with { Form = new([new("q", "choose", Options: [new("Yes"), new("No")], AllowFreeform: false)]) }, default)));
-        // The fifth request of the send waits too: a send has no bound of its own, only the service has one.
+        // The fifth request of the send waits too: the bound of a send is far above what an agent asks at once.
         tasks.Add(f.Keep(() => f.Owner.CreateOwnedUserInputHandler(execution)(f.Request(), default)));
         var page = await f.Page(); Assert.AreEqual(4, page.Entries.Count); Assert.IsFalse(page.HasMore);
         var handle = page.Entries[0].Handle;
