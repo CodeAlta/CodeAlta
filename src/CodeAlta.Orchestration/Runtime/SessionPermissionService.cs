@@ -291,13 +291,16 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private int _disposeStarted;
     internal const int OwnedExecutionLimit = 64;
     internal const int OwnedPendingLimit = 128;
-    internal const int OwnedPendingPerExecutionLimit = 4;
+    internal const int OwnedPendingPerExecutionLimit = 32;
     internal const int OwnedIdentityLimit = 128;
     internal const int OwnedCommandLimit = 4096;
     internal const int OwnedDirectoryLimit = 1024;
     internal const int OwnedReasonLimit = 1024;
     private readonly Dictionary<Guid, OwnedPermissionExecution> _ownedExecutions = [];
     private readonly HashSet<PendingPermission> _ownedDeliveries = [];
+    // The arrival of the last owned request or question: the window of a session lists them in the order they came,
+    // which their collections do not keep once they reuse the places of answered ones.
+    private long _ownedArrivals;
     private bool _ownedAdmissionClosed;
 
     // Immutable host-policy capabilities, not per-send or mutable latest-callback associations.
@@ -497,7 +500,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
             var snapshot = OwnedSnapshot(handle, request);
             var pending = new PendingPermission(snapshot,
-                new(TaskCreationOptions.RunContinuationsAsynchronously), cancellationToken, execution);
+                new(TaskCreationOptions.RunContinuationsAsynchronously), cancellationToken, execution) { Arrival = ++_ownedArrivals };
             _pending.Add(handle, pending);
             execution.Deliveries.Add(pending);
             _ownedDeliveries.Add(pending);
@@ -856,8 +859,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             Array.Empty<string>());
 
     /// <summary>
-    /// Lists at most four complete owned plain-command attempts for an exact session under mailbox authority.
-    /// Legacy trusted registrations are never included. Cancellation or closure invalidates observations, not accepted decisions.
+    /// Lists at most four complete owned plain-command attempts for an exact session under mailbox authority, the oldest
+    /// first: the next one comes into the window when one of them is answered. Legacy trusted registrations are never
+    /// included. Cancellation or closure invalidates observations, not accepted decisions.
     /// Returns an empty window after disposal. This does not create runtime state or wait for user decisions.
     /// </summary>
     /// <exception cref="ArgumentException">The session is not a bounded, canonical UTF-16 identity.</exception>
@@ -871,7 +875,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             var entries = _ownedDeliveries.Where(pending => pending.Snapshot.Handle.SessionId == sessionId
-                && _pending.ContainsKey(pending.Snapshot.Handle) && !IsCanceled(pending)).Take(5)
+                && _pending.ContainsKey(pending.Snapshot.Handle) && !IsCanceled(pending)).OrderBy(static pending => pending.Arrival).Take(5)
                 .Select(pending => new SessionOwnedPermissionSnapshot(
                     new(pending.OwnedExecution!.OperationId, pending.OwnedExecution.RuntimeId,
                         pending.OwnedExecution.AttachmentOrdinal, pending.Snapshot.Handle), pending.Snapshot)).ToArray();
@@ -1098,6 +1102,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         internal TaskCompletionSource<AgentPermissionDecision> Completion { get; } = completion;
         internal CancellationToken CancellationToken { get; } = cancellationToken;
         internal OwnedPermissionExecution? OwnedExecution { get; } = ownedExecution;
+        // The order an owned request came in, among the requests of the service; zero for a legacy registration.
+        internal long Arrival { get; init; }
         internal Task<AgentPermissionDecision>? Delivery { get; set; }
         internal OwnedDeliveryLifetime? Lifetime { get; set; }
     }

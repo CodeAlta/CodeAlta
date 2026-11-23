@@ -11,8 +11,10 @@ namespace CodeAlta.Agent.Runtime.Tools;
 /// <remarks>
 /// The hooks run before the guards of the host (<see cref="AgentCommandGuard"/>, <see cref="AgentWriteGuard"/>, the tools a
 /// session does without), the permission prompt and the sandbox: arguments a hook changes still go through all of them, so
-/// a hook can only make the policy of the host stricter. An implementation answers for its own failures: what it throws
-/// fails the call.
+/// a hook can only make the policy of the host stricter. The one exception is <see cref="AgentToolCallDecision.Approve"/>,
+/// which answers the permission prompt of a call an agent runs itself, where <see cref="AgentToolHookCapabilities.Approve"/>
+/// lets it: the guards of the host and the sandbox still decide. An implementation answers for its own failures: what it
+/// throws fails the call.
 /// </remarks>
 public abstract class AgentToolInterceptor
 {
@@ -100,6 +102,13 @@ public enum AgentToolHookCapabilities
 
     /// <summary>Everything: a tool the session runs itself.</summary>
     All = Block | ModifyArguments | ChangeResult,
+
+    /// <summary>
+    /// A hook can answer the permission prompt of a call an agent runs itself for the user
+    /// (<see cref="AgentToolCallDecision.Approve"/>): an agent offers it where it names the tool by its real name, for the
+    /// tools of the MCP servers it runs, and never for its own commands and edits, which follow the permission mode.
+    /// </summary>
+    Approve = 8,
 }
 
 /// <summary>The shell command of a tool call, read from its arguments.</summary>
@@ -207,6 +216,16 @@ public sealed record AgentToolCallDecision
 {
     /// <summary>Gets the decision that lets the call run as it is.</summary>
     public static AgentToolCallDecision Allow { get; } = new();
+
+    /// <summary>
+    /// Gets the decision that lets the call run as it is and answers its permission prompt for the user: an agent that
+    /// runs the tool itself does not ask. Only a call whose hooks have <see cref="AgentToolHookCapabilities.Approve"/> runs
+    /// so; another runs as with <see cref="Allow"/>.
+    /// </summary>
+    public static AgentToolCallDecision Approve { get; } = new() { Approved = true };
+
+    /// <summary>Gets whether the hooks answered the permission prompt of the call for the user (<see cref="Approve"/>).</summary>
+    public bool Approved { get; init; }
 
     /// <summary>Gets the text the model reads instead of a result when the call is blocked, or <see langword="null"/>.</summary>
     public string? BlockMessage { get; init; }

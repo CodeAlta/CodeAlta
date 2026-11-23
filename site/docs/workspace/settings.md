@@ -161,7 +161,7 @@ Code Mode, on by default, lets agents write scripts that call their tools; each 
 
 ### Answer a request
 
-A request appears on top of the prompt of its session, with the command and its folder, or the folder a change writes under.
+A request appears on top of the prompt of its session, with the command and its folder, or the folder a change writes under. When an agent asks several at once, such as for calls it makes together, they all wait: the oldest shows first, and each answer brings the next.
 
 - `Enter` allows once; `2` or `Esc` denies. Or write what the agent should do instead and press `Enter`, or **Deny**: the agent reads your text with the denial. A denial does not stop the agent: use Stop.
 - A command longer than 4,096 characters is shown cut, with a red warning: deny it unless you know what it does.

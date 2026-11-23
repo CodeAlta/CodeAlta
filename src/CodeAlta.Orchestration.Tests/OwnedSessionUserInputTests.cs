@@ -78,15 +78,15 @@ public sealed class OwnedSessionUserInputTests
     });
 
     [TestMethod]
-    public Task SharedCapacity_AndChoiceValidation() => Fixture.Run(async f =>
+    public Task RequestsOfOneSendBeyondFourWait_AndChoiceValidation() => Fixture.Run(async f =>
     {
         var execution = await f.Execution(true, true); await f.Start(execution);
         var command = f.Keep(() => f.Owner.CreateOwnedCommandHandler(execution)(f.Command(), default));
         var tasks = new List<Task<AgentUserInputResponse>>();
         for (var i = 0; i < 3; i++) tasks.Add(f.Keep(() => f.Owner.CreateOwnedUserInputHandler(execution)(f.Request() with { Form = new([new("q", "choose", Options: [new("Yes"), new("No")], AllowFreeform: false)]) }, default)));
-        var refused = f.Keep(() => f.Owner.CreateOwnedUserInputHandler(execution)(f.Request(), default));
-        await Assert.ThrowsAsync<OperationCanceledException>(() => refused);
-        var page = await f.Page(); Assert.AreEqual(3, page.Entries.Count);
+        // The fifth request of the send waits too: the bound of a send is far above what an agent asks at once.
+        tasks.Add(f.Keep(() => f.Owner.CreateOwnedUserInputHandler(execution)(f.Request(), default)));
+        var page = await f.Page(); Assert.AreEqual(4, page.Entries.Count); Assert.IsFalse(page.HasMore);
         var handle = page.Entries[0].Handle;
         Assert.IsFalse(await f.Keep(() => f.Owner.ResolveOwnedUserInputAsync(handle, [new("q", "yes")], default).AsTask()));
         Assert.IsTrue(await f.Keep(() => f.Owner.ResolveOwnedUserInputAsync(handle, [new("q", "Yes")], default).AsTask()));

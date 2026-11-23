@@ -1185,6 +1185,87 @@ public sealed class ClaudeCodeSessionTests
         CollectionAssert.AreEqual(new[] { Path.Combine(directory.Path, "notes.txt") }, calls[1].ModifiedFiles.ToArray());
     }
 
+    // An automation with Autonomy allows a tool of an MCP server Claude Code runs itself: its guard approves each call in
+    // the hook, and the CLI's permission prompt of that call is answered without asking the run, however many run at once.
+    // The commands and edits of the CLI cannot be approved so: their prompts follow the permission mode.
+    [TestMethod]
+    public async Task ACallTheToolHooksApprove_IsAllowedWithoutAskingTheRun_HoweverManyRunAtOnce()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        const string Slack = "mcp__claude_ai_Slack__slack_read_channel";
+        var answers = new System.Collections.Concurrent.ConcurrentDictionary<string, JsonElement>();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            var calls = Enumerable.Range(1, 7).Select(index => ($"toolu_{index}", Slack, new JsonObject { ["channel_id"] = $"C{index}" }))
+                .Append(("toolu_bash", "Bash", new JsonObject { ["command"] = "ls" }))
+                .Append(("toolu_other", "mcp__claude_ai_Slack__slack_send_message", new JsonObject { ["text"] = "hi" }))
+                .Append(("toolu_changed", Slack, new JsonObject { ["channel_id"] = "C8" }))
+                .Append(("toolu_builtin", "ExitWorktree", new JsonObject()))
+                .ToArray();
+            process.EmitAssistant("msg_1", new JsonArray([.. calls.Select(static call => (JsonNode)ClaudeCodeFakeProcess.ToolUseBlock(call.Item1, call.Item2, (JsonObject)call.Item3.DeepClone()))]));
+            // As the CLI does: the hooks of each call, then its permission prompt, all calls at once.
+            await Task.WhenAll(calls.Select(async call =>
+            {
+                var (id, tool, input) = call;
+                await process.RequestAsync(new JsonObject
+                {
+                    ["subtype"] = "hook_callback",
+                    ["callback_id"] = "codealta_tool_hooks",
+                    ["tool_use_id"] = id,
+                    ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = tool, ["tool_use_id"] = id, ["cwd"] = directory.Path,
+                        ["tool_input"] = input.DeepClone() },
+                }).ConfigureAwait(false);
+                // Another hook of the CLI changed the input of one call after the hooks of CodeAlta checked it.
+                answers[id] = await process.AskPermissionAsync(tool, id == "toolu_changed" ? new JsonObject { ["channel_id"] = "C9" } : input, id).ConfigureAwait(false);
+            })).ConfigureAwait(false);
+            foreach (var (id, _, _) in calls) process.EmitToolResult(id, "Done.", isError: false);
+            process.EmitResult("Done.", user);
+        };
+        var hooks = new ApprovingToolHooks(Slack, "Bash", "ExitWorktree");
+        var asked = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            PermissionMode = "default",
+            OnPermissionRequest = (request, _) =>
+            {
+                asked.Enqueue(request.InteractionId);
+                return Task.FromResult(AgentPermissionDecision.DeniedUnattended("nobody approves here"));
+            },
+            ToolInterceptor = hooks,
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("read the channels") }).WithinAsync(Timeout);
+
+        for (var index = 1; index <= 7; index++)
+            Assert.AreEqual("allow", answers[$"toolu_{index}"].GetProperty("behavior").GetString(), $"call {index} was approved by the hooks");
+        Assert.AreEqual("deny", answers["toolu_bash"].GetProperty("behavior").GetString(), "a command of the CLI follows the permission mode");
+        Assert.AreEqual("deny", answers["toolu_other"].GetProperty("behavior").GetString(), "a call the hooks did not approve asks the run");
+        Assert.AreEqual("deny", answers["toolu_changed"].GetProperty("behavior").GetString(), "an approval is for the input that was checked");
+        Assert.AreEqual("deny", answers["toolu_builtin"].GetProperty("behavior").GetString(), "only a tool of an MCP server is approved by a hook");
+        CollectionAssert.AreEquivalent(new[] { "toolu_bash", "toolu_other", "toolu_changed", "toolu_builtin" }, asked.ToArray());
+        var offered = hooks.Calls.ToDictionary(static call => call.Invocation.ToolCallId, static call => call.Capabilities);
+        Assert.AreEqual(AgentToolHookCapabilities.Block, offered["toolu_bash"], "the commands and edits of the CLI cannot be approved by a hook");
+        Assert.AreEqual(AgentToolHookCapabilities.Block, offered["toolu_builtin"]);
+        Assert.AreEqual(AgentToolHookCapabilities.Block | AgentToolHookCapabilities.Approve, offered["toolu_1"]);
+    }
+
+    // Approves the calls of the tools it names, where the hooks can approve them.
+    private sealed class ApprovingToolHooks(params string[] tools) : AgentToolInterceptor
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<AgentToolHookCall> Calls { get; } = new();
+
+        public override ValueTask<AgentToolCallDecision> BeforeToolCallAsync(AgentToolHookCall call, CancellationToken cancellationToken)
+        {
+            Calls.Enqueue(call);
+            return ValueTask.FromResult(tools.Contains(call.Invocation.ToolName) ? AgentToolCallDecision.Approve : AgentToolCallDecision.Allow);
+        }
+    }
+
     private sealed class BlockingToolHooks : AgentToolInterceptor
     {
         public System.Collections.Concurrent.ConcurrentQueue<AgentToolHookCall> Calls { get; } = new();

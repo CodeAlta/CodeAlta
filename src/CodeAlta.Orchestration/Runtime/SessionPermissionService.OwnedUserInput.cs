@@ -7,6 +7,9 @@ public sealed partial class SessionPermissionService
     private readonly Dictionary<SessionOwnedUserInputHandle, PendingUserInput> _inputs = [];
     private readonly HashSet<PendingUserInput> _inputDeliveries = [];
 
+    // An agent that makes several calls at once has each of them wait, and the window of its session shows them in turn.
+    // Only the bounds against a runaway agent deny a request unseen: the one of a send, a quarter of the one of the
+    // service, so that one send never takes the places of the others.
     private bool HasOwnedDeliveryCapacity(OwnedPermissionExecution execution)
         => _ownedDeliveries.Count + _inputDeliveries.Count < OwnedPendingLimit
             && execution.Deliveries.Count + execution.InputDeliveries.Count < OwnedPendingPerExecutionLimit;
@@ -32,7 +35,7 @@ public sealed partial class SessionPermissionService
             if (form is null) return null;
             var handle = new SessionOwnedUserInputHandle(execution.OperationId, execution.RuntimeId, execution.AttachmentOrdinal,
                 execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
-            var pending = new PendingUserInput(new(handle, execution.ProviderId!, form), execution, token);
+            var pending = new PendingUserInput(new(handle, execution.ProviderId!, form), execution, token) { Arrival = ++_ownedArrivals };
             _inputs.Add(handle, pending); _inputDeliveries.Add(pending); execution.InputDeliveries.Add(pending);
             pending.Delivery = DeliverInputAsync(pending, execution.ExecutionToken, execution.AttachmentToken, execution.RunToken, launch.Task);
             return pending.Delivery;
@@ -79,7 +82,7 @@ public sealed partial class SessionPermissionService
         return live;
     }
 
-    /// <summary>Lists at most four live immutable forms. Detach does not cancel; absence cannot recover a lost decision.</summary>
+    /// <summary>Lists at most four live immutable forms, the oldest first. Detach does not cancel; absence cannot recover a lost decision.</summary>
     /// <exception cref="ArgumentException">The session identity is invalid.</exception>
     /// <exception cref="OperationCanceledException">The query was cancelled before its mailbox observation.</exception>
     public ValueTask<SessionOwnedUserInputPage> ListOwnedUserInputsAsync(string sessionId, CancellationToken cancellationToken)
@@ -89,7 +92,8 @@ public sealed partial class SessionPermissionService
         return ExecuteAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var entries = _inputs.Values.Where(p => p.Snapshot.Handle.SessionId == sessionId && LiveInput(p)).Take(5).Select(p => p.Snapshot).ToArray();
+            var entries = _inputs.Values.Where(p => p.Snapshot.Handle.SessionId == sessionId && LiveInput(p)).OrderBy(static p => p.Arrival).Take(5)
+                .Select(p => p.Snapshot).ToArray();
             return new SessionOwnedUserInputPage(Array.AsReadOnly(entries.Take(4).ToArray()), entries.Length > 4);
         }, new SessionOwnedUserInputPage(Array.Empty<SessionOwnedUserInputSnapshot>(), false));
     }
@@ -124,6 +128,8 @@ public sealed partial class SessionPermissionService
         internal SessionOwnedUserInputSnapshot Snapshot { get; } = snapshot;
         internal OwnedPermissionExecution Execution { get; } = execution;
         internal CancellationToken Token { get; } = token;
+        // The order it came in, among the requests and the questions of the service.
+        internal long Arrival { get; init; }
         internal TaskCompletionSource<AgentUserInputResponse?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task<AgentUserInputResponse?>? Delivery { get; set; }
         internal OwnedDeliveryLifetime? Lifetime { get; set; }

@@ -104,7 +104,7 @@ public sealed partial class PluginOrchestrationBridge
                 ShellCommand = call.ShellCommand is { } shell ? new PluginShellCommand(shell.Command, shell.WorkingDirectory) : null,
                 ModifiedFiles = call.ModifiedFiles,
                 ParentToolCallId = call.Invocation.ParentToolCallId,
-                Capabilities = (PluginToolHookCapabilities)(int)call.Capabilities,
+                Capabilities = CapabilitiesOf(call),
             };
             var result = await bridge._adapter.RunToolCallHooksAsync(activePlugins, template, OptionsOf(call), cancellationToken).ConfigureAwait(false);
             if (result.BlockMessage is { } blocked) return AgentToolCallDecision.Block(blocked);
@@ -133,10 +133,14 @@ public sealed partial class PluginOrchestrationBridge
                 ShellCommand = call.ShellCommand is { } shell ? new PluginShellCommand(shell.Command, shell.WorkingDirectory) : null,
                 ModifiedFiles = call.ModifiedFiles,
                 ParentToolCallId = call.Invocation.ParentToolCallId,
-                Capabilities = (PluginToolHookCapabilities)(int)call.Capabilities,
+                Capabilities = CapabilitiesOf(call),
             };
             return (await bridge._adapter.RunToolResultHooksAsync(activePlugins, template, OptionsOf(call), cancellationToken).ConfigureAwait(false)).Result;
         }
+
+        // Plugins answer no permission prompt: only the guard of an automation approves a call in place of the user.
+        private static PluginToolHookCapabilities CapabilitiesOf(AgentToolHookCall call)
+            => (PluginToolHookCapabilities)(int)(call.Capabilities & AgentToolHookCapabilities.All);
 
         private (PluginToolKind Kind, string? Plugin) KindOf(AgentToolHookCall call)
         {

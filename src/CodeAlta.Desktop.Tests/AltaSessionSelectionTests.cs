@@ -295,6 +295,22 @@ public sealed class AltaSessionSelectionTests
         Assert.IsNull((await later.BeforeToolCallAsync(Call(run.SessionId, "shell_command"), default)).BlockMessage, "a command keeps the guards of the host");
         using (var watched = new CancellationTokenSource(TestTime.Seconds(20)))
             while (!later.Waiting) await Task.Delay(20, watched.Token);
+        // A tool the automation does not allow waits for a person too, on the card of its session, and is not made when denied.
+        var held = later.BeforeToolCallAsync(Call(run.SessionId, "mcp__ops__restart"), default).AsTask();
+        using (var shown = new CancellationTokenSource(TestTime.Seconds(20)))
+        {
+            SessionOwnedPermissionSnapshot? card;
+            while ((card = (await host.RuntimeService.Permissions.ListOwnedCommandsAsync(run.SessionId, shown.Token)).Entries
+                .FirstOrDefault(static entry => entry.Request.Command?.StartsWith("mcp__ops__restart", StringComparison.Ordinal) == true)) is null)
+            {
+                Assert.IsFalse(held.IsCompleted, "the call waits for a person");
+                await Task.Delay(20, shown.Token);
+            }
+
+            Assert.IsTrue(await host.RuntimeService.Permissions.ResolveOwnedCommandAsync(card.Handle, AgentPermissionDecisionKind.Deny, shown.Token));
+        }
+
+        Assert.IsNotNull((await held.WithinAsync(TestTime.Seconds(20))).BlockMessage, "the call a person denied is not made");
         clock.Advance(TimeSpan.FromMinutes(31));
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await approval.WithinAsync(TestTime.Seconds(20))).Kind, "the approval that waited too long is denied");
         // Stopped (aborted), never completed: the provider holds the turn until then.
