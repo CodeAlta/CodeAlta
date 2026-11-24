@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Catalog;
 using CodeAlta.Core.IO;
 using CodeAlta.Desktop.Mcp;
 using CodeAlta.Fleet.Channels;
@@ -61,6 +62,7 @@ internal sealed class DesktopNode : IAsyncDisposable
     private readonly string _settingsPath;
     private readonly string _version;
     private readonly TrustedDeviceStore _trusted;
+    private readonly Lazy<FleetAgentSessions> _agentSessions;
     private readonly SemaphoreSlim _changes = new(1, 1);
     private DesktopNodeSettings _settings;
     private DeviceIdentity? _identity;
@@ -91,6 +93,7 @@ internal sealed class DesktopNode : IAsyncDisposable
         _fleetRoot = fleetRoot;
         _settingsPath = Path.Combine(fleetRoot, SettingsFileName);
         _trusted = new TrustedDeviceStore(fleetRoot, TimeProvider.System);
+        _agentSessions = new(() => new FleetAgentSessions(fleetRoot));
         _settings = ReadSettings(_settingsPath);
         Name = NameOf(machineName);
     }
@@ -372,6 +375,26 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// <returns>The task of its outcome.</returns>
     public Task<FleetPairingOutcome>? CurrentPairing() => Volatile.Read(ref _service)?.Pairing.CurrentOutcome();
 
+    internal async Task<(IReadOnlyList<SpaceDescriptor> Spaces, FleetAgentPolicyInfo Policy)> ReadAgentPolicyAsync(CancellationToken cancellationToken)
+        => (await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false), _agentSessions.Value.ReadPolicy());
+
+    // The local owner can edit the policy even if neither fleet transport is enabled. Order edits from all windows.
+    internal async Task ChangeAgentPolicyAsync(Func<IReadOnlyList<SpaceDescriptor>, FleetAgentPolicyInfo, FleetAgentPolicyInfo> change, CancellationToken cancellationToken)
+    {
+        await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var (spaces, policy) = await ReadAgentPolicyAsync(cancellationToken).ConfigureAwait(false);
+            _agentSessions.Value.WriteValidatedPolicy(change(spaces, policy), spaces, _host.RuntimeService);
+            Log(false, "The owner changed the policy of agents of other machines.");
+        }
+        finally
+        {
+            _changes.Release();
+        }
+    }
+
     /// <summary>Lists the computers paired with this one, revoked ones left out.</summary>
     /// <returns>The devices, in the order they paired.</returns>
     /// <exception cref="IOException">The devices cannot be read.</exception>
@@ -466,7 +489,8 @@ internal sealed class DesktopNode : IAsyncDisposable
         var identity = _identity ??= DeviceIdentity.LoadOrCreate(_fleetRoot);
         var service = new FleetNodeService(new FleetNodeServiceOptions
         {
-            Host = _host, Identity = identity, TrustedDevices = _trusted, Name = Name, Version = _version,
+            Host = _host, Identity = identity, TrustedDevices = _trusted, Name = Name, Version = _version, IsDesktop = true,
+            AgentSessions = _agentSessions.Value,
             PairingAddresses = () => Volatile.Read(ref _addresses),
             PairBack = PairBackAsync,
             ModelServers = ModelServers,

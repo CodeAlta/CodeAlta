@@ -41,27 +41,8 @@ public sealed partial class FleetNodeService
     // Who may change it is who manages the node: an agent never reaches this method (it is no session's to call).
     private async Task<FleetAgentPolicyInfo> SetAgentPolicyAsync(FleetNodeCall call, FleetAgentPolicyInfo parameters, CancellationToken cancellationToken)
     {
-        if (parameters.Spaces is null || parameters.Spaces.Count > 64 || parameters.Spaces.Any(static space => string.IsNullOrWhiteSpace(space) || space.Length > 128))
-            throw new FleetException(FleetErrorCodes.InvalidParams, null, "The policy names at most 64 spaces.");
         var spaces = await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var space in parameters.Spaces)
-        {
-            if (!spaces.Any(known => string.Equals(known.Id, space.Trim(), StringComparison.OrdinalIgnoreCase)))
-                throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The node has no space '{space}'.");
-        }
-
-        if (parameters.Sandbox is { } sandbox && !KnowsSandbox(sandbox.Trim()))
-            throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The node has no sandbox profile '{sandbox}'.");
-        try
-        {
-            _agents.WritePolicy(parameters);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            throw new FleetException(FleetErrorCodes.InternalError, FleetErrorHints.Retry, $"The policy could not be written: {exception.Message}");
-        }
-
-        var policy = _agents.ReadPolicy();
+        var policy = _agents.WriteValidatedPolicy(parameters, spaces, _host.RuntimeService);
         LogInfo($"The policy of agents of other machines changed ({(call.Caller.IsOwner ? "the owner" : call.Caller.DeviceId)}): spaces [{string.Join(", ", policy.Spaces)}], sandbox {policy.Sandbox ?? "as their parent"}, bypass {(policy.AllowBypass ? "allowed" : "never")}.");
         return policy;
     }
@@ -104,8 +85,14 @@ public sealed partial class FleetNodeService
     {
         var policy = _agents.ReadPolicy();
         if (!policy.Spaces.Any(space => string.Equals(space, spaceId, StringComparison.OrdinalIgnoreCase)))
+        {
+            var where = _options.IsDesktop
+                ? "in Settings > Fleet > Machines > This computer on the desktop itself"
+                : $"with `altanode agents allow --space {spaceId}` on the node, or on its page in Settings > Fleet > Machines from another computer that manages it";
             throw new FleetException(FleetNodeErrorCodes.AgentSessionsOff, null,
-                $"{_options.Name} does not accept sessions or prompts from agents of other machines in the space '{spaceId}': its owner turns it on (`altanode agents allow --space {spaceId}`, or Settings > Fleet > Machines).");
+                $"{_options.Name} does not accept sessions or prompts from agents of other machines in the space '{spaceId}': its owner turns it on {where}.");
+        }
+
         return policy;
     }
 
@@ -343,10 +330,6 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, $"{_options.Name} cannot start a sandbox ({availability.Reason}): it does not run the session without one.");
         return sandbox;
     }
-
-    private bool KnowsSandbox(string profile)
-        => SandboxProfiles.BuiltIn.Any(builtIn => string.Equals(builtIn.Name, profile, StringComparison.OrdinalIgnoreCase))
-            || _host.RuntimeService.ReadSandboxSettings().Profiles.Any(own => string.Equals(own.Name, profile, StringComparison.OrdinalIgnoreCase));
 
     // A prompt of an agent: signed for this session and this text, in a space the policy allows, never a change of model
     // or mode, and held for a person when the session bypasses permissions and no agent of the same parent started it.

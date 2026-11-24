@@ -52,8 +52,8 @@ lost acknowledgement or a restart is acknowledged again, not delivered. The rule
   alone, which each machine resolves with its own settings: the target compares its profile with it and refuses a
   weaker one ([security](security-and-privacy.md#remote-execution), rule 8). A prompt to a session elsewhere carries
   the sender's floor the same way;
-- the target machine accepts agent-started sessions for that space (**off** by default: a node owner turns it on,
-  `altanode agents allow --space <id>`), within a rate limit per device;
+- the target machine accepts agent-started sessions for that space (off by default; on a desktop only the local owner
+  changes this policy), within a rate limit per device;
 - the lineage is recorded on both machines, and every such creation is logged with the parent session, the device
   and both machines.
 

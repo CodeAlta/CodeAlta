@@ -1,7 +1,11 @@
 using System.Net;
 using CodeAlta.Desktop.Fleet;
+using CodeAlta.Desktop.Rpc;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.NodeApi;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -42,6 +46,100 @@ public sealed class DesktopNodeTests
             Assert.IsFalse(Directory.Exists(fleetRoot) && Directory.EnumerateFileSystemEntries(fleetRoot).Any(), "nothing is written before the person turns it on");
             Assert.AreEqual(0, node.Devices().Count);
             Assert.ThrowsExactly<InvalidOperationException>(() => node.CreatePairing());
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task TheOwnerCanSetTheAgentPolicyThroughThisComputer_WithoutMakingItReachable()
+    {
+        var token = TestContext.CancellationToken;
+        var root = NewRoot();
+        try
+        {
+            await using var desktop = await Desktop.StartAsync(root, "desk", token);
+            const string epoch = "current";
+            var rpc = new MachinesService(desktop.Fleet, epoch) { Node = desktop.Node };
+            var off = await rpc.AgentsAsync(new(epoch, null), token);
+            Assert.AreEqual("ok", off.Status, off.Message);
+            Assert.IsFalse(off.Spaces.Single(space => space.Id == "default").Allowed);
+            Assert.IsNull(off.Sandbox);
+            Assert.IsFalse(off.AllowBypass);
+
+            Assert.AreEqual("stale_epoch", (await rpc.SetAgentBypassAsync(new("old", null, true), token)).Status);
+            Assert.AreEqual("invalid_params", (await rpc.SetAgentSpaceAsync(new(epoch, null, " ", true), token)).Status);
+            var noSpace = await rpc.SetAgentSpaceAsync(new(epoch, null, "missing-space", true), token);
+            Assert.AreEqual(FleetNodeErrorCodes.Unavailable, noSpace.Status);
+            StringAssert.Contains(noSpace.Message, "missing-space");
+            var noSandbox = await rpc.SetAgentSandboxAsync(new(epoch, null, "missing-sandbox"), token);
+            Assert.AreEqual(FleetNodeErrorCodes.Unavailable, noSandbox.Status);
+            StringAssert.Contains(noSandbox.Message, "missing-sandbox");
+
+            Assert.AreEqual("ok", (await rpc.SetAgentSpaceAsync(new(epoch, null, "default", true), token)).Status);
+            Assert.AreEqual("ok", (await rpc.SetAgentSandboxAsync(new(epoch, null, "strict"), token)).Status);
+            Assert.AreEqual("ok", (await rpc.SetAgentBypassAsync(new(epoch, null, true), token)).Status);
+            var on = await rpc.AgentsAsync(new(epoch, null), token);
+            Assert.IsTrue(on.Spaces.Single(space => space.Id == "default").Allowed);
+            Assert.AreEqual(("strict", true), (on.Sandbox, on.AllowBypass));
+
+            var store = new FleetAgentSessions(Path.Combine(root, "desk-fleet"));
+            var saved = store.ReadPolicy();
+            CollectionAssert.AreEqual(new[] { "default" }, saved.Spaces.ToArray());
+            Assert.AreEqual(("strict", true), (saved.Sandbox, saved.AllowBypass));
+            Assert.IsFalse(desktop.Node.Listening);
+            Assert.IsNull(desktop.Node.Words, "Editing the policy does not create a device key.");
+
+            Assert.AreEqual("ok", (await rpc.SetAgentSpaceAsync(new(epoch, null, "DEFAULT", false), token)).Status);
+            Assert.AreEqual("ok", (await rpc.SetAgentSandboxAsync(new(epoch, null, null), token)).Status);
+            Assert.AreEqual("ok", (await rpc.SetAgentBypassAsync(new(epoch, null, false), token)).Status);
+            var denied = store.ReadPolicy();
+            Assert.IsEmpty(denied.Spaces);
+            Assert.IsNull(denied.Sandbox);
+            Assert.IsFalse(denied.AllowBypass);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task ADesktopRefusesAnAgentWithLocalSettingsGuidance_UntilItsOwnerAllowsTheSpace()
+    {
+        var token = TestContext.CancellationToken;
+        var root = NewRoot();
+        try
+        {
+            await using var desktop = await Desktop.StartAsync(root, "desk", token);
+            const string epoch = "current";
+            var rpc = new MachinesService(desktop.Fleet, epoch) { Node = desktop.Node };
+            await desktop.Node.SetVisibleAsync(true, token);
+            Assert.IsTrue(PairingPayload.TryParse(desktop.Node.CreatePairing().Link, DateTimeOffset.UtcNow, out var offer, out _));
+            using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root, "laptop-fleet"));
+            var machine = await FleetNodeClient.PairAsync(offer, laptop, "laptop", null, token);
+            await using var client = await FleetNodeClient.ConnectAsync(machine, laptop, token);
+            var signed = FleetAgentSigning.Sign(laptop, new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Start,
+                machine.DeviceId, "", "", DateTimeOffset.UtcNow, "", "parent", "laptop", "default", null, null, null,
+                new FleetAgentLimits([], SessionPermissionModes.Bypass, null, true, 1)));
+            var start = new FleetCreateSessionParams(SpaceId: "default") { Agent = signed };
+
+            var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => client.CreateSessionAsync(start, "before", token));
+            Assert.AreEqual(FleetNodeErrorCodes.AgentSessionsOff, refused.Error.Code);
+            StringAssert.Contains(refused.Error.Message, "Settings > Fleet > Machines > This computer");
+            Assert.IsFalse(refused.Error.Message?.Contains("altanode", StringComparison.Ordinal) is true);
+
+            var device = desktop.Node.Devices().Single();
+            Assert.AreEqual("invalid_request", rpc.SetThisComputerDevicePermission(new(epoch, device.DeviceId, "manage", true)).Status);
+            var noRemoteWrite = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SetAgentPolicyAsync(new FleetAgentPolicyInfo(["default"]), token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, noRemoteWrite.Error.Code);
+
+            Assert.AreEqual("ok", (await rpc.SetAgentSpaceAsync(new(epoch, null, "default", true), token)).Status);
+            var child = await client.CreateSessionAsync(start, "after", token);
+            Assert.IsFalse(string.IsNullOrEmpty(child.SessionId), "The running node uses the policy that was saved from This computer.");
+            Assert.AreNotEqual(SessionPermissionModes.Bypass, child.PermissionMode, "Bypass remains off.");
         }
         finally
         {

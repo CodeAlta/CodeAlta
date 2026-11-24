@@ -8,11 +8,9 @@ using NeoAstra.Rpc;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Whether agents of other machines may start sessions on a machine this computer manages and send prompts to its
-/// sessions (<c>doc/fleet/access-control.md</c>, "Agents and access"), on its page: per space, the sandbox their sessions
-/// run in at least, and whether they may bypass permissions, as <c>altanode agents</c> sets them there. Off in every space
-/// until it is turned on; the machine checks at each call that this computer manages it, and that the space or the
-/// sandbox profile is one of its own.
+/// Whether agents of other machines may start sessions and send prompts: per space, the sandbox their sessions
+/// run in at least, and whether they may bypass permissions. The desktop owner edits it under This computer.
+/// A remote machine requires the manage permission on that machine and checks the policy against its own catalog.
 /// </summary>
 internal sealed partial class MachinesService
 {
@@ -21,23 +19,34 @@ internal sealed partial class MachinesService
 
     /// <summary>Reads the policy of a machine for the agents of other machines, with its spaces.</summary>
     [NeoRpcMethod("agents")]
-    public async Task<MachineAgentsView> AgentsAsync(MachineRequest request, CancellationToken cancellationToken)
+    public async Task<MachineAgentsView> AgentsAsync(MachineAgentsRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineAgentsView.Refused(refused);
-        if (request!.MachineId is not { Length: > 0 and <= 64 } id) return MachineAgentsView.Refused("invalid_request");
+        if (request!.MachineId is null)
+        {
+            if (Node is not { } node) return MachineAgentsView.Refused("unavailable");
+            var (spaces, policy) = await node.ReadAgentPolicyAsync(cancellationToken).ConfigureAwait(false);
+            return AgentPolicyView(policy, spaces.Select(static space => (space.Id, space.Name)));
+        }
+
+        if (request.MachineId is not { Length: > 0 and <= 64 } id) return MachineAgentsView.Refused("invalid_request");
         if (_fleet!.Find(id) is not { } host) return MachineAgentsView.Refused("not_found");
         try
         {
             var (info, policy) = await host.ManageAsync(ReadAgentPolicyAsync, changes: false, cancellationToken).ConfigureAwait(false);
-            string[] sandboxes = [SandboxProfiles.Workspace, SandboxProfiles.Strict];
-            if (policy.Sandbox is { } own && !sandboxes.Contains(own, StringComparer.OrdinalIgnoreCase)) sandboxes = [.. sandboxes, own];
-            return new MachineAgentsView("ok", null,
-                [.. info.Spaces.Select(space => new MachineAgentSpaceView(space.Id, space.Name, policy.Spaces.Contains(space.Id, StringComparer.OrdinalIgnoreCase)))],
-                policy.Sandbox, policy.AllowBypass, sandboxes);
+            return AgentPolicyView(policy, info.Spaces.Select(static space => (space.Id, space.Name)));
         }
         catch (ObjectDisposedException) { return MachineAgentsView.Refused(RemoteSessionHost.Describe(host.State)); }
         catch (FleetException exception) { return MachineAgentsView.Refused(Code(exception)) with { Message = exception.Error.Message }; }
         catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineAgentsView.Refused(RemoteSessionHost.MachineOfflineCode) with { Message = exception.Message }; }
+    }
+
+    private static MachineAgentsView AgentPolicyView(FleetAgentPolicyInfo policy, IEnumerable<(string Id, string Name)> spaces)
+    {
+        string[] sandboxes = [SandboxProfiles.Workspace, SandboxProfiles.Strict];
+        if (policy.Sandbox is { } own && !sandboxes.Contains(own, StringComparer.OrdinalIgnoreCase)) sandboxes = [.. sandboxes, own];
+        return new("ok", null, [.. spaces.Select(space => new MachineAgentSpaceView(space.Id, space.Name, policy.Spaces.Contains(space.Id, StringComparer.OrdinalIgnoreCase)))],
+            policy.Sandbox, policy.AllowBypass, sandboxes);
     }
 
     /// <summary>Lets agents of other machines start sessions and send prompts in a space of a machine, or stops them.</summary>
@@ -76,20 +85,41 @@ internal sealed partial class MachinesService
         return (info, policy);
     }
 
-    // One change of the policy as the machine has it now: a space the machine no longer has is dropped, since the machine
-    // refuses a policy that names one.
-    private Task<MachineManageResult> ChangeAgentPolicyAsync(string? expectedEpoch, string? machineId,
+    private async Task<MachineManageResult> ChangeAgentPolicyAsync(string? expectedEpoch, string? machineId,
         Func<FleetAgentPolicyInfo, FleetAgentPolicyInfo> change, CancellationToken cancellationToken)
-        => ManageAsync(expectedEpoch, machineId, async (client, token) =>
+    {
+        if (machineId is not null)
         {
-            var (info, policy) = await ReadAgentPolicyAsync(client, token).ConfigureAwait(false);
-            var changed = change(policy with
+            return await ManageAsync(expectedEpoch, machineId, async (client, token) =>
             {
-                Spaces = [.. policy.Spaces.Where(space => info.Spaces.Any(known => string.Equals(known.Id, space, StringComparison.OrdinalIgnoreCase)))],
-            });
-            return await client.SetAgentPolicyAsync(changed, token).ConfigureAwait(false);
-        }, cancellationToken);
+                var (info, policy) = await ReadAgentPolicyAsync(client, token).ConfigureAwait(false);
+                var changed = change(WithoutRemovedSpaces(policy, info.Spaces.Select(static space => space.Id)));
+                return await client.SetAgentPolicyAsync(changed, token).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (Refuse(expectedEpoch) is { } refused) return new(refused, null);
+        if (Node is not { } node) return new("unavailable", null);
+        try
+        {
+            await node.ChangeAgentPolicyAsync((spaces, policy) => change(WithoutRemovedSpaces(policy, spaces.Select(static space => space.Id))), cancellationToken)
+                .ConfigureAwait(false);
+            Changed();
+            return new("ok", null);
+        }
+        catch (ObjectDisposedException) { return new("unavailable", null); }
+        catch (FleetException exception) { return new(Code(exception), exception.Error.Message); }
+    }
+
+    // Drop spaces deleted from the catalog before applying the edit: the machine refuses an edit naming an unknown space.
+    private static FleetAgentPolicyInfo WithoutRemovedSpaces(FleetAgentPolicyInfo policy, IEnumerable<string> spaces)
+        => policy with { Spaces = [.. policy.Spaces.Where(space => spaces.Contains(space, StringComparer.OrdinalIgnoreCase))] };
 }
+
+/// <summary>Reads the policy for the agents of other machines.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The id of a managed remote machine, or null for this computer.</param>
+internal sealed record MachineAgentsRequest(string ExpectedEpoch, string? MachineId);
 
 /// <summary>The policy of a machine for the agents of other machines, as the person who manages it sees it.</summary>
 /// <param name="Status"><c>ok</c>, <c>not_manager</c>, <c>offline</c>, or the code the machine answered.</param>
@@ -111,19 +141,19 @@ internal sealed record MachineAgentSpaceView(string Id, string Name, bool Allowe
 
 /// <summary>A space of a machine where agents of other machines are let in or kept out.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
-/// <param name="MachineId">The machine.</param>
+/// <param name="MachineId">The id of a managed remote machine, or null for this computer.</param>
 /// <param name="Space">The id of the space.</param>
 /// <param name="Allowed">Whether they may work there.</param>
-internal sealed record MachineAgentSpaceRequest(string ExpectedEpoch, string MachineId, string Space, bool Allowed);
+internal sealed record MachineAgentSpaceRequest(string ExpectedEpoch, string? MachineId, string Space, bool Allowed);
 
 /// <summary>The sandbox the sessions agents of other machines start on a machine run in at least.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
-/// <param name="MachineId">The machine.</param>
+/// <param name="MachineId">The id of a managed remote machine, or null for this computer.</param>
 /// <param name="Sandbox">A sandbox profile of the machine; null for the one their parent has.</param>
-internal sealed record MachineAgentSandboxRequest(string ExpectedEpoch, string MachineId, string? Sandbox);
+internal sealed record MachineAgentSandboxRequest(string ExpectedEpoch, string? MachineId, string? Sandbox);
 
 /// <summary>Whether the sessions agents of other machines start on a machine may bypass permissions.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
-/// <param name="MachineId">The machine.</param>
+/// <param name="MachineId">The id of a managed remote machine, or null for this computer.</param>
 /// <param name="Allowed">Whether they may, when their parent does.</param>
-internal sealed record MachineAgentBypassRequest(string ExpectedEpoch, string MachineId, bool Allowed);
+internal sealed record MachineAgentBypassRequest(string ExpectedEpoch, string? MachineId, bool Allowed);

@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Catalog;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Fleet.NodeApi;
 
@@ -82,7 +85,7 @@ public sealed class FleetAgentSessions : IRemoteParentNotifications
         return policy is null ? new FleetAgentPolicyInfo([]) : policy with { Spaces = [.. (policy.Spaces ?? []).Where(static space => !string.IsNullOrWhiteSpace(space))] };
     }
 
-    /// <summary>Writes the policy of the owner.</summary>
+    /// <summary>Writes the policy of the owner without checking the host's catalog, as when the node is offline.</summary>
     /// <param name="policy">The policy.</param>
     /// <exception cref="ArgumentNullException"><paramref name="policy"/> is null.</exception>
     /// <exception cref="IOException">The file could not be written.</exception>
@@ -99,6 +102,42 @@ public sealed class FleetAgentSessions : IRemoteParentNotifications
             Directory.CreateDirectory(Path.GetDirectoryName(_policyPath)!);
             FleetFiles.WriteAtomically(_policyPath, JsonSerializer.SerializeToUtf8Bytes(normalized, FleetAgentJsonContext.Default.FleetAgentPolicyInfo));
         }
+    }
+
+    /// <summary>Checks the policy against the running host's spaces and sandbox profiles, then saves it.</summary>
+    /// <param name="policy">The policy to save.</param>
+    /// <param name="spaces">The spaces of the host.</param>
+    /// <param name="runtime">The runtime that reads its sandbox profiles.</param>
+    /// <returns>The saved policy, with names normalized.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="FleetException">The policy is invalid, or the file could not be written.</exception>
+    public FleetAgentPolicyInfo WriteValidatedPolicy(FleetAgentPolicyInfo policy, IReadOnlyList<SpaceDescriptor> spaces, SessionRuntimeService runtime)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(spaces);
+        ArgumentNullException.ThrowIfNull(runtime);
+        if (policy.Spaces is null || policy.Spaces.Count > 64 || policy.Spaces.Any(static space => string.IsNullOrWhiteSpace(space) || space.Length > 128))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "The policy names at most 64 spaces.");
+        foreach (var space in policy.Spaces)
+        {
+            if (!spaces.Any(known => string.Equals(known.Id, space.Trim(), StringComparison.OrdinalIgnoreCase)))
+                throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The machine has no space '{space}'.");
+        }
+
+        if (policy.Sandbox is { } sandbox
+            && !SandboxProfiles.BuiltIn.Any(profile => string.Equals(profile.Name, sandbox.Trim(), StringComparison.OrdinalIgnoreCase))
+            && !runtime.ReadSandboxSettings().Profiles.Any(profile => string.Equals(profile.Name, sandbox.Trim(), StringComparison.OrdinalIgnoreCase)))
+            throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The machine has no sandbox profile '{sandbox}'.");
+        try
+        {
+            WritePolicy(policy);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new FleetException(FleetErrorCodes.InternalError, FleetErrorHints.Retry, $"The policy could not be written: {exception.Message}");
+        }
+
+        return ReadPolicy();
     }
 
     /// <summary>Finds the lineage of a session.</summary>

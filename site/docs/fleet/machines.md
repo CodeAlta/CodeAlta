@@ -53,6 +53,7 @@ The link works once and expires after 10 minutes. Each computer is then listed a
 - **While CodeAlta runs.** A desktop is reached while CodeAlta Desktop runs there; once you quit it, the other computers see it **Offline**. A computer that must stay reachable runs [CodeAlta Node](#install-codealta-node-by-hand).
 - **Away from home.** On a computer of a [Tailscale](https://tailscale.com) network, the link names it on the tailnet first, so your laptop reaches it from anywhere. **This computer** shows that name. Without Tailscale, the link names its addresses on your local network.
 - **What each computer may do.** **Computers paired with this one** lists them, with a switch per permission: **View**, **Drive**, **Start** and **Models** (use its [model servers](model-servers.md)) are on after pairing, both ways. Turn on **Move** to let a computer move its sessions here (see [Move a session](sessions.md#move-a-session)). **Revoke** refuses a computer at once, in that direction only; pairing again trusts it again.
+- **Agents of other machines.** Only the owner on the desktop itself can allow agents to start sessions or send prompts here. Set it under **This computer** in **Settings** > **Fleet** > **Machines** ([Let agents start sessions on it](sessions.md#let-agents-start-sessions-on-it)). Other computers cannot manage a desktop.
 - **Off by default.** Until you turn it on, this computer listens on no network and makes no key. It listens on port 2587 of its networks (2585 and 2586 stay free for a node and a server of the same computer); the first time, Windows or macOS may ask whether CodeAlta may accept connections: allow it. Turning it off stops listening; the paired computers stay listed, and reach it again once you turn it back on.
 
 ### Over SSH
@@ -267,7 +268,7 @@ A paired computer may see the sessions of the machine, drive them and start new 
 
 ## Manage a machine from CodeAlta Desktop
 
-In **Settings** > **Fleet** > **Machines**, click the name of a machine to open its page. A computer that manages the machine changes everything there, without a terminal on the machine:
+In **Settings** > **Fleet** > **Machines**, click the name of a CodeAlta Node machine to open its page. A computer that manages the node changes its settings there, without a terminal on the machine:
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-fleet-machine-page.webp" alt="The page of the machine Workstation in Settings > Fleet > Machines, managed from this computer: its devices with a switch per permission, its permissions, the agents of other machines, its people and the start of its machine tags" loading="lazy">
