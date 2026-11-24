@@ -369,10 +369,11 @@ drive the window and run `alta` commands through it.
   it listens. The loopback port is also recorded in `CodeAlta/mcp-ports` of the local application data, shared by
   the instances of the user whatever their profile: the browsers and sandboxes of every instance, and of `altacli`,
   keep away from all of them.
-- **Who is answered.** On loopback, the programs of this computer and no web page: a `Host` that is not loopback, an
-  `Origin` of a remote page or of the server itself, and any request with Fetch Metadata (`Sec-Fetch-*`) are refused,
-  since a page, also one a session's browser opens on the loopback, could otherwise drive the window. A server bound
-  to another address asks for a bearer token (`mcp_token.txt`).
+- **Who is answered.** On loopback, the `Host` and any `Origin` must name a loopback address. On every binding,
+  requests with `Sec-Fetch-Site`, `Sec-Fetch-Dest`, or an `Origin` matching the server are refused as coming from
+  a browser page, so a page opened by a session cannot drive the window. `Sec-Fetch-Mode` alone is not a browser
+  signal. Where a bearer token (`mcp_token.txt`) is required, it is checked before rejecting browser pages.
+  A `403 Forbidden` response and the desktop log give the reason for the refusal.
 - **UI tools** (`Desktop/Ui/`): the tools of Chrome DevTools MCP, with the same names and arguments so a model uses
   them unchanged, built on NeoAstra's in-page automation (`NeoAutomation`), the same on the three engines. Each window
   is a page. Sessions get them on request (`alta ui activate`, built-in plugin `ui`), and never a session whose

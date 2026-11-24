@@ -267,17 +267,17 @@ public sealed class DesktopMcpTests
     public void Guard_RefusesEveryRequestOfAPage_WhateverItsOriginAndPort()
     {
         // Fetch Metadata: every browser of the sessions marks the requests of its pages, and no script removes the marks.
-        Assert.IsTrue(DesktopMcpGuard.FromPage("same-origin", null, null, null, "127.0.0.1:51234", 51234));
-        Assert.IsTrue(DesktopMcpGuard.FromPage(null, "no-cors", null, "http://127.0.0.1:5173", "127.0.0.1:51234", 51234));
-        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, "empty", null, "127.0.0.1:2582", 2582));
+        Assert.IsTrue(DesktopMcpGuard.FromPage("same-origin", null, null, "127.0.0.1:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage("same-site", null, "http://127.0.0.1:5173", "127.0.0.1:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, "empty", null, "127.0.0.1:2582", 2582));
         // An older browser: a page loaded from the address of the server itself, which no program sends.
-        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, null, "http://127.0.0.1:51234", "127.0.0.1:51234", 51234));
-        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, null, "http://localhost:51234", "localhost:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, "http://127.0.0.1:51234", "127.0.0.1:51234", 51234));
+        Assert.IsTrue(DesktopMcpGuard.FromPage(null, null, "http://localhost:51234", "localhost:51234", 51234));
         // The programs of this computer: no mark, no origin, or the origin of a tool of their own.
-        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, null, "127.0.0.1:2582", 2582));
-        Assert.IsFalse(DesktopMcpGuard.FromPage("", "", "", "", "127.0.0.1:2582", 2582));
-        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, "http://localhost:6274", "127.0.0.1:2582", 2582));
-        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, "null", "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, null, "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage("", "", "", "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, "http://localhost:6274", "127.0.0.1:2582", 2582));
+        Assert.IsFalse(DesktopMcpGuard.FromPage(null, null, "null", "127.0.0.1:2582", 2582));
     }
 
     [TestMethod]
@@ -311,6 +311,8 @@ public sealed class DesktopMcpTests
             request.Headers.Add("Sec-Fetch-Mode", "no-cors");
         })).Status);
         Assert.AreEqual(HttpStatusCode.Forbidden, (await PostAsync(client, url, list, request => request.Headers.Add("Origin", origin))).Status, "an older browser");
+        Assert.AreEqual(HttpStatusCode.OK, (await PostAsync(client, url, list,
+            request => request.Headers.Add("Sec-Fetch-Mode", "cors"))).Status, "a Node.js program of this computer");
     }
 
     [TestMethod]
@@ -487,6 +489,49 @@ public sealed class DesktopMcpTests
     }
 
     [TestMethod]
+    [DataRow("Sec-Fetch-Mode", "cors", true, HttpStatusCode.OK)]
+    [DataRow("Sec-Fetch-Mode", "cors", false, HttpStatusCode.Unauthorized)]
+    [DataRow("Sec-Fetch-Site", "cross-site", false, HttpStatusCode.Unauthorized)]
+    [DataRow("Sec-Fetch-Dest", "empty", true, HttpStatusCode.Forbidden)]
+    public async Task TokenProtectedServer_AuthenticatesBeforeCheckingForBrowserPages(string header, string value, bool authorized, HttpStatusCode expected)
+    {
+        using var temp = new TempFolder();
+        // Bind only to loopback in the test, but use the tailnet name to exercise the token check.
+        var node = new DesktopTailnetNode("build-box.tail1234.ts.net", [IPAddress.Loopback]);
+        var tailnet = new DesktopTailnetChoice(true, null, _ => Task.FromResult<DesktopTailnetNode?>(node));
+        await using var server = new DesktopMcpServer(new DesktopMcpEndpoint("127.0.0.1", 0, false), () => [], temp.Path, "1", tailnet: tailnet);
+        await server.StartAsync();
+        var status = server.Status;
+        Assert.AreEqual(DesktopMcpStatus.Running, status.State, status.Error);
+        Assert.IsNotNull(status.Token);
+        var address = new Uri(status.Url!);
+        using var client = new HttpClient();
+        using var response = await SendPostAsync(client, $"http://127.0.0.1:{address.Port}/mcp",
+            """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}""",
+            request =>
+            {
+                request.Headers.Host = address.Authority;
+                request.Headers.Add(header, value);
+                if (authorized) request.Headers.Authorization = new("Bearer", status.Token);
+            });
+
+        Assert.AreEqual(expected, response.StatusCode);
+        switch (expected)
+        {
+            case HttpStatusCode.OK:
+                StringAssert.Contains(await response.Content.ReadAsStringAsync(), "\"serverInfo\"");
+                break;
+            case HttpStatusCode.Unauthorized:
+                Assert.AreEqual("Bearer", response.Headers.WwwAuthenticate.Single().Scheme);
+                break;
+            case HttpStatusCode.Forbidden:
+                Assert.AreEqual("text/plain", response.Content.Headers.ContentType?.MediaType);
+                StringAssert.Contains(await response.Content.ReadAsStringAsync(), "browser pages");
+                break;
+        }
+    }
+
+    [TestMethod]
     public async Task Server_ListensOnTheTailnet_WhenTheUserChoseItAndTheComputerIsOnOne()
     {
         using var temp = new TempFolder();
@@ -612,17 +657,22 @@ public sealed class DesktopMcpTests
     // A request as an MCP client sends it; the answer is JSON, or one message of an event stream.
     private static async Task<(HttpStatusCode Status, JsonDocument? Body)> PostAsync(HttpClient client, string url, string body, Action<HttpRequestMessage>? configure = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
-        request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.Accept.ParseAdd("text/event-stream");
-        request.Headers.Add("MCP-Protocol-Version", "2025-06-18");
-        configure?.Invoke(request);
-        using var response = await client.SendAsync(request);
+        using var response = await SendPostAsync(client, url, body, configure);
         var text = await response.Content.ReadAsStringAsync();
         if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(text)) return (response.StatusCode, null);
         if (response.Content.Headers.ContentType?.MediaType == "text/event-stream")
             text = text.Split('\n').Last(static line => line.StartsWith("data:", StringComparison.Ordinal))["data:".Length..];
         return (response.StatusCode, JsonDocument.Parse(text));
+    }
+
+    private static async Task<HttpResponseMessage> SendPostAsync(HttpClient client, string url, string body, Action<HttpRequestMessage>? configure)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        request.Headers.Add("MCP-Protocol-Version", "2025-06-18");
+        configure?.Invoke(request);
+        return await client.SendAsync(request);
     }
 
     private sealed class TempFolder : IDisposable
