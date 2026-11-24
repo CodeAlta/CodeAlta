@@ -17,7 +17,7 @@ In a sandboxed session:
 - **Skill folders are read-only**: your own (`~/.alta/skills`, `~/.agents/skills`, `~/.copilot/skills`) and the [folders you added](../workspace/settings.md#skill-folders), so that an agent reads the files of a skill it uses. One inside the folder the session works in stays as it is; a folder of secrets, your home folder or a whole disk is never opened this way.
 - **Files that run programs later stay read-only**, even inside the project: `.git/config`, git hooks, the `.alta` settings and plugins, the settings of editors and of other coding agents. On Windows, CodeAlta holds them open while the sandbox runs, so that nothing replaces, deletes or moves them: in that time, git cannot change the configuration of the repository either (`git config`, `git push -u`, a new branch that tracks a remote, a worktree created in a repository with submodules), nor a `git checkout` or `git pull` in the same folder change one of those files. CodeAlta's own settings are saved as usual.
 - **The network** is what the profile says: the package registries only, nothing, or the internet. This computer and its local network are never reached.
-- **The environment** has no secret of yours, unless the profile names it or sets it.
+- **The environment** has no secret of yours, unless the profile names it or sets it, or you limited it to the project of the session (see [Secrets of a project](#secrets-of-a-project)).
 
 It does not protect against what you allow: a command you let run outside the sandbox runs with your rights. The model provider still receives what the session sends it.
 
@@ -108,9 +108,23 @@ The programs of a sandbox start with an environment of their own: the variables 
 
 A profile that extends another gets its variables too, and an entry of the same name replaces the one of its base. While a secret a profile names is not set, or its vault is closed, the sandbox runs no command and says which one is missing.
 
-The secrets and variables a profile names are those of this computer, the same for every session of the profile, not those of a space, a project or an [environment](../secrets/readme.md). A session reads them when it starts and keeps them while it runs: a secret that [asks before use](../secrets/vaults.md) is asked for then, with those of the identity of its space. For a profile chosen while the session runs, nobody is asked: such a secret is given only if its use is still confirmed.
+The secrets and variables a profile names are those of this computer, the same for every session of the profile, not those of a space, a project or an [environment](../secrets/readme.md): a secret [limited to projects](../secrets/readme.md#limit-a-secret-to-projects) is refused there. A session reads them when it starts and keeps them while it runs: a secret that [asks before use](../secrets/vaults.md) is asked for then, with those of the identity of its space. For a profile chosen while the session runs, nobody is asked: such a secret is given only if its use is still confirmed.
 
 The folders of the sandbox (`HOME`, `TEMP`, the caches of the package managers) stay its own, whatever a profile sets.
+
+### Secrets of a project
+
+A sandboxed session also gets the secrets you limited to its project: a variable of the [environment of its project](../secrets/readme.md#project-environment), or of a [command line tool](../spaces.md#command-line-tools) of its space or project, whose value comes from secrets that are all [limited to projects](../secrets/readme.md#limit-a-secret-to-projects) or [given by the fleet for the project](../secrets/machines.md#secrets-of-your-machines-with-a-server). Its name can say a secret, such as `GH_TOKEN`, and its value can be kept in a vault:
+
+```toml
+# .alta/config.toml of acme-web; ACME_GH_TOKEN is limited to acme-web on this computer
+[env]
+GH_TOKEN = "${secret:ACME_GH_TOKEN}"
+```
+
+- **Each repository keeps its own token.** Such a session runs in a home folder and caches of its project, apart from those the other sessions of the profile share: a session of another project cannot leave there a startup file or a package that would read the token later. The caches of the package managers start empty for that project.
+- **A secret every project may use stays out**, whatever the name of the variable a repository gives it: no repository brings one of your secrets into a sandbox by naming it. So does a value that also holds a variable of your environment (`${env:NAME}`). Name such a secret in the **Environment** of the profile instead.
+- **An agent that runs its own tools** writes its own files outside that home folder: Claude Code its account folder and Codex CLI its Codex folder, which its sessions of every project share. A token a command prints can be read there by a later session of another project.
 
 ## Run a command outside
 
@@ -157,7 +171,7 @@ A session moved to another machine keeps its sandbox and its permission mode the
 
 A [machine of the fleet](../fleet/readme.md) runs its sessions in the sandbox by default, where it can run, with the profile `node`: `workspace` and the hosts of GitHub, GitLab, Bitbucket and Azure DevOps. Its agents fetch, push and open pull requests without leaving the sandbox, and the machine needs nobody to allow them.
 
-- Git reaches these hosts over HTTPS: a remote over SSH (`git@github.com:…`) does not go through the sandbox. To push, give the sessions a token: a variable of the environment of the node, such as `GH_TOKEN`, that the profile names in `env`:
+- Git reaches these hosts over HTTPS: a remote over SSH (`git@github.com:…`) does not go through the sandbox. To push, give the sessions a token. For one token per repository, limit a secret to each project and name it in the `[env]` of the repository (see [Secrets of a project](#secrets-of-a-project)). For one token for every session of the machine, name a variable of the environment of the node, such as `GH_TOKEN`, in the `env` of the profile:
 
   ```toml
   [sandbox.profiles.node]
@@ -177,7 +191,7 @@ A sandboxed session runs on the providers whose model CodeAlta drives with its o
 - **Claude Code** runs in the sandbox of the session. It writes in its account folder (its sign-in and its transcripts), so the agent can read its own sign-in, never the ones of CodeAlta. It reaches the hosts of Anthropic, even with a profile without network. On Windows its commands run with the shell of CodeAlta, in the same sandbox.
 - **On macOS**, Claude Code keeps its sign-in in the Keychain, outside the sandbox: give it a token of its own: make one with `claude setup-token` in a terminal, and add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to the **Environment** of the provider (Settings > Providers). Its variables reach the sandbox with their values.
 - **Codex CLI** runs in the sandbox of the session, with its own sandbox off. It writes in the Codex folder of its provider (its sign-in and its threads), not in its settings, and reaches the hosts of OpenAI, even with a profile without network. It is signed in there as outside.
-- **The ACP agents** (Copilot CLI, Cursor, Grok Build and the others) run in the sandbox of the session, in a home folder of their own that each provider keeps between sessions. They are not signed in there at first: give the provider a token or an API key in its **Environment** (Settings > Providers), such as `COPILOT_GITHUB_TOKEN`, `CURSOR_API_KEY` or `XAI_API_KEY`. Its variables reach the sandbox with their values.
+- **The ACP agents** (Copilot CLI, Cursor, Grok Build and the others) run in the sandbox of the session, in a home folder of their own that each provider keeps between sessions, one per project for the sessions that get [secrets of their project](#secrets-of-a-project). They are not signed in there at first: give the provider a token or an API key in its **Environment** (Settings > Providers), such as `COPILOT_GITHUB_TOKEN`, `CURSOR_API_KEY` or `XAI_API_KEY`. Its variables reach the sandbox with their values.
 - **An ACP agent CodeAlta does not know** reaches the hosts its provider lists in **Hosts in a sandbox**, besides those of the profile.
 
 A [fallback](../model-providers/readme.md) never moves a sandboxed session to a provider it cannot run on.

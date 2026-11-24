@@ -161,7 +161,8 @@ both of which choose a program to run, and a setting that is a token names a loc
 
 A sandboxed session gets none of these commands (`AltaSandboxGate` is an allow list), and the session variables of
 vaults never enter its sandbox (`SandboxPolicyBuilder.IsVaultSessionName`), even when its profile names them. Nor does a
-value of a vault given to the shells of the sessions, whatever the variable that carries it (`SandboxHost.WithheldValues`).
+value of a vault given to the shells of the sessions, whatever the variable that carries it (`SandboxHost.WithheldValues`),
+unless that variable holds only secrets limited to the project of the session ([sandbox](sandbox.md#profiles-and-the-policy-of-a-session)).
 An MCP server never gets a secret of a vault in its command line, which other programs read: only in `env` or `headers`. Outside the
 sandbox, `VaultCommandGuard` refuses a shell command of an agent that runs the program of a configured vault, unless
 the user allows it (`agent_vault_commands`): a guardrail against mistakes, not a wall, since a session that is not

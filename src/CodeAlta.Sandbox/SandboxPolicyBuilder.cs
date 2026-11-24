@@ -52,7 +52,10 @@ public static class SandboxPolicyBuilder
     /// <param name="profile">The profile of the session.</param>
     /// <param name="folders">The folders the session works in.</param>
     /// <param name="host">What the computer gives the sandbox.</param>
-    /// <param name="sessionEnvironment">The variables the session gives its processes (its identity, its markers); those named like a secret are dropped unless the profile names them.</param>
+    /// <param name="sessionEnvironment">
+    /// The variables the session gives its processes (its identity, its markers); those named like a secret are dropped unless
+    /// the profile names them or they hold a secret of the project (<see cref="SandboxSessionFolders.ProjectSecrets"/>).
+    /// </param>
     /// <param name="sessionKey">A key of the session, for its private temporary folder.</param>
     /// <returns>The policy.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
@@ -71,7 +74,18 @@ public static class SandboxPolicyBuilder
         var home = Full(host.HomeDirectory);
         var workingDirectory = Full(folders.WorkingDirectory);
         var profileRoot = Path.Combine(Full(host.DataRoot), "profiles", SafeName(profile.Name));
-        var sandboxHome = folders.OwnHome is { } ownHome ? Path.Combine(Full(host.DataRoot), "agents", SafeName(ownHome), "home") : Path.Combine(profileRoot, "home");
+        var ownRoot = folders.OwnHome is { } ownHome ? Path.Combine(Full(host.DataRoot), "agents", SafeName(ownHome)) : null;
+        // A session that gets secrets of its project writes a home folder and caches of that project alone: what a session
+        // of another project leaves in its own (a startup file of a shell, a package in a cache) never runs with them.
+        var projectSecrets = folders.ProjectSecrets is { Variables.Count: > 0 } given ? given : null;
+        if (projectSecrets is not null)
+        {
+            var project = Path.Combine("projects", SafeName(projectSecrets.Project));
+            profileRoot = Path.Combine(profileRoot, project);
+            if (ownRoot is not null) ownRoot = Path.Combine(ownRoot, project);
+        }
+
+        var sandboxHome = Path.Combine(ownRoot ?? profileRoot, "home");
         var caches = Path.Combine(profileRoot, "caches");
         var sessionRoot = Path.Combine(Full(host.DataRoot), "sessions", SafeName(sessionKey));
         var temp = Path.Combine(sessionRoot, "temp");
@@ -170,7 +184,8 @@ public static class SandboxPolicyBuilder
             Network = profile.Network,
             Hosts = profile.Hosts,
             LocalPorts = profile.LocalPorts,
-            Environment = Environment(profile, host, sessionEnvironment, sandboxHome, caches, temp, userGitConfig, userPackages),
+            Environment = Environment(profile, host, sessionEnvironment, projectSecrets?.Variables ?? [], folders.WithheldVariables, sandboxHome, caches, temp, userGitConfig,
+                userPackages),
             Temp = temp,
             Home = sandboxHome,
             DataRoot = Full(host.DataRoot),
@@ -213,9 +228,11 @@ public static class SandboxPolicyBuilder
     }
 
     private static IReadOnlyDictionary<string, string> Environment(ResolvedSandboxProfile profile, SandboxHost host,
-        IEnumerable<KeyValuePair<string, string>> sessionEnvironment, string sandboxHome, string caches, string temp, string userGitConfig, string userPackages)
+        IEnumerable<KeyValuePair<string, string>> sessionEnvironment, IReadOnlyList<string> projectSecrets, IReadOnlyList<string> withheldVariables, string sandboxHome,
+        string caches, string temp, string userGitConfig, string userPackages)
     {
-        var environment = new Dictionary<string, string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var names = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var environment = new Dictionary<string, string>(names);
         foreach (var name in OperatingSystem.IsWindows() ? WindowsPassedVariables : UnixPassedVariables)
         {
             if (Lookup(host.Environment, name) is { } value) environment[name] = value;
@@ -223,13 +240,18 @@ public static class SandboxPolicyBuilder
 
         // The session's own variables (its identity, CODEALTA_SESSION_ID...), but none named like a secret, nor one that
         // carries a secret of the application under another name (an identity that sets `LEAK = "${env:OPENAI_API_KEY}"`),
-        // nor one that carries a secret kept in a vault, whatever its name (`LEAK = "${secret:DEPLOY_KEY}"`).
+        // nor one that carries a secret of the machine, whatever its name (`LEAK = "${secret:DEPLOY_KEY}"`): the runtime
+        // names those its identity assigns from a secret, and the host the values of the secrets kept in vaults.
+        // A variable that holds a secret of the project passes, whatever its name and wherever the secret is kept: the user
+        // limited that secret to the project. It never carries the session of a vault, nor code into the worker.
         var secretValues = host.Environment.Where(static pair => IsSecretName(pair.Key) && pair.Value.Length >= 6).Select(static pair => pair.Value).ToList();
         var withheld = host.WithheldValues.Where(static value => value.Length > 0).ToList();
         foreach (var (name, value) in sessionEnvironment)
         {
-            if (!IsSecretName(name) && !IsLoaderName(name) && !secretValues.Any(secret => value.Contains(secret, StringComparison.Ordinal))
-                && !withheld.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
+            if (IsLoaderName(name) || withheldVariables.Contains(name, names)) continue;
+            if (projectSecrets.Contains(name, names) ? !IsVaultSessionName(name)
+                : !IsSecretName(name) && !secretValues.Any(secret => value.Contains(secret, StringComparison.Ordinal))
+                  && !withheld.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
         }
 
         // What the profile passes on by name, secrets included, and what it sets (`NAME=value`): the user named them. A

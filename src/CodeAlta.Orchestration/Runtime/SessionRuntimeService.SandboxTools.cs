@@ -345,9 +345,22 @@ public sealed partial class SessionRuntimeService
             Scratchpad = SandboxScratchpadOf(sessionId),
             Readable = await ToolOutputGrantAsync(sessionId, cancellationToken).ConfigureAwait(false),
             SkillFolders = await SkillFoldersOfAsync(sessionId, cancellationToken).ConfigureAwait(false),
+            ProjectSecrets = await SandboxProjectSecretsAsync(sessionId, cancellationToken).ConfigureAwait(false),
+            WithheldVariables = _entries.TryGetValue(sessionId, out var attached) ? attached.Identity.SharedSecretVariables : [],
         };
         var (withValues, problem) = await SandboxVariablesOfAsync(sessionId, profile, cancellationToken).ConfigureAwait(false);
         return new SessionSandboxStart(sessionId, providerId, withValues, folders, environment?.Variables ?? [], commandGuard) { VariableProblem = problem };
+    }
+
+    // The secrets the project of an attached session gives its sandbox: the variables whose secrets only the project gets, as
+    // its identity read them when it attached. The session's own project names the home folder they are used in: a sub-project
+    // that gets a secret of its repository keeps a home of its own, since it may get others the repository does not.
+    private async Task<SandboxProjectSecrets?> SandboxProjectSecretsAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated || entry.Identity.ProjectSecretVariables is not { Count: > 0 } variables) return null;
+        return await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is { ProjectId: { Length: > 0 } projectId }
+            ? new SandboxProjectSecrets(projectId, variables)
+            : null;
     }
 
     // What the project of a session adds to its sandbox: the folder of the repository a sub-project writes when the session

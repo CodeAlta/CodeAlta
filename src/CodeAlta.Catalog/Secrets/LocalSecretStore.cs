@@ -35,6 +35,15 @@ public interface ISecretLookup
     IReadOnlyCollection<string> GetSecretValues();
 }
 
+/// <summary>A source of secrets that knows which of them only the project of the work gets.</summary>
+internal interface IProjectSecretLookup
+{
+    /// <summary>Gets whether a secret this source gives is given to the project of the work alone, never to every work of the machine.</summary>
+    /// <param name="name">The name of the secret.</param>
+    /// <returns>True for a secret limited to projects that the project of the work is one of, or given for that project.</returns>
+    bool IsGivenToProjectAlone(string name);
+}
+
 /// <summary>What is known of a secret, never its value.</summary>
 /// <param name="Name">Its name, such as <c>GRAFANA_TOKEN</c>.</param>
 /// <param name="Version">Its version: 1 when set, one more at each rotation.</param>
@@ -78,7 +87,7 @@ public sealed record VariableInfo(string Name, string Value, int Version, string
 /// The desktop, the terminal application, the command line and the node of one profile share the store: each change
 /// reads the file again and writes it back while it holds the lock of the file, and each read follows the file.
 /// </remarks>
-public sealed partial class LocalSecretStore : ISecretLookup
+public sealed partial class LocalSecretStore : ISecretLookup, IProjectSecretLookup
 {
     /// <summary>The scope of the values of a machine.</summary>
     public const string MachineScope = "machine";
@@ -366,6 +375,9 @@ public sealed partial class LocalSecretStore : ISecretLookup
         if (Bindings.ChangeStamp != policyStamp) CheckProjectRestriction(name);
         return true;
     }
+
+    bool IProjectSecretLookup.IsGivenToProjectAlone(string name)
+        => ProjectScope is { } scope && Bindings.ProjectsOf(name) is { Count: > 0 } projects && SecretProject.Refusal(name, projects, scope) is null;
 
     private void CheckProjectRestriction(string name)
     {

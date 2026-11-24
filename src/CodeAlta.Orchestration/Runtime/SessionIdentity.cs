@@ -30,6 +30,19 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
     public IReadOnlyList<string> ProjectEnvironmentNames { get; init; } = [];
 
     /// <summary>
+    /// Gets the names of the variables of <see cref="Environment"/> assigned from secrets that only the project of the session
+    /// gets: each secret of their value is limited to projects on this machine, or given by the fleet for the project. A sandbox
+    /// passes them on, whatever their name, in a home folder of the project.
+    /// </summary>
+    public IReadOnlyList<string> ProjectSecretVariables { get; init; } = [];
+
+    /// <summary>
+    /// Gets the names of the other variables of <see cref="Environment"/> assigned from a secret: one every project gets, which no
+    /// sandbox gets from the identity of a session, whatever the name of the variable. Its profile names the secrets a sandbox gets.
+    /// </summary>
+    public IReadOnlyList<string> SharedSecretVariables { get; init; } = [];
+
+    /// <summary>
     /// Gets what the processes of the session start without: project variables with unresolved references and secrets
     /// the user did not confirm when the session attached. Empty when nothing is missing.
     /// </summary>
@@ -421,38 +434,57 @@ public sealed class SessionIdentityResolver
         var identity = (space.Settings.Identity ?? new SpaceIdentity()).WithProjectCli(projectProfiles);
         if (identity.IsEmpty && projectVariables.Count == 0) return new SessionIdentity(space.Id, null, AgentProcessEnvironment.Empty);
         IReadOnlyList<string> problems = [];
+        IReadOnlyList<string> projectSecrets = [];
+        IReadOnlyList<string> sharedSecrets = [];
         var environment = _references is { } references
-            ? ResolveEnvironment(identity, projectVariables, references(scope), out problems)
+            ? ResolveEnvironment(identity, projectVariables, references(scope), out problems, out projectSecrets, out sharedSecrets)
             : _environment(identity, scope);
         return new SessionIdentity(space.Id, identity.IsEmpty ? null : identity, environment)
         {
             ProjectProfiles = [.. projectProfiles.Select(static profile => profile.Name)],
             ProjectEnvironmentNames = [.. projectVariables.Select(static variable => variable.Key)],
+            ProjectSecretVariables = projectSecrets,
+            SharedSecretVariables = sharedSecrets,
             SecretProblems = problems,
         };
     }
 
     private static AgentProcessEnvironment ResolveEnvironment(SpaceIdentity identity, IReadOnlyList<KeyValuePair<string, string>> projectVariables, SecretReferenceResolver references,
-        out IReadOnlyList<string> problems)
+        out IReadOnlyList<string> problems, out IReadOnlyList<string> projectSecrets, out IReadOnlyList<string> sharedSecrets)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var windows = OperatingSystem.IsWindows();
-        if (projectVariables.Count == 0)
-        {
-            problems = [];
-            return SpaceIdentityEnvironment.Create(identity, references.Read, home, windows);
-        }
-
         var failures = new Dictionary<string, string>(StringComparer.Ordinal);
         var missing = new List<KeyValuePair<string, string>>();
+        // The secrets read that only the project gets, by the key they were read with.
+        var projectOnlySecrets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var environment = SpaceIdentityEnvironment.Create(identity, projectVariables, key =>
         {
-            var value = references.Read(key, out var problem);
+            var value = references.Read(key, out var problem, out var projectOnly);
             if (problem is not null) failures[key.Contains(':', StringComparison.Ordinal) ? $"${{{key}}}" : key] = problem;
+            if (projectOnly) projectOnlySecrets.Add(key);
             return value;
         }, home, windows, missing);
         problems = [.. missing.Select(pair =>
             $"The project environment variable {pair.Key} was left out: {failures.GetValueOrDefault(pair.Value) ?? $"{pair.Value} is not set."}")];
+
+        // Each variable as the one that sets it wrote it: a variable of the project over the one of a CLI profile, which is not read.
+        var written = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in (identity.Cli ?? []).SelectMany(static profile => profile.Environment).Concat(projectVariables)) written[name] = value;
+        var project = new List<string>();
+        var shared = new List<string>();
+        foreach (var (name, value) in written)
+        {
+            var named = SecretReferences.Find(value);
+            if (environment.Get(name) is null || !named.Any(static reference => reference.Kind == SecretReferenceKind.Secret)) continue;
+            // A secret every project gets, or a variable of the application beside a secret of the project, keeps the value out of a sandbox.
+            var projectAlone = named.All(reference => reference.Kind == SecretReferenceKind.Variable
+                || (reference.Kind == SecretReferenceKind.Secret && projectOnlySecrets.Contains("secret:" + reference.Name)));
+            (projectAlone ? project : shared).Add(name);
+        }
+
+        projectSecrets = project;
+        sharedSecrets = shared;
         return environment;
     }
 }

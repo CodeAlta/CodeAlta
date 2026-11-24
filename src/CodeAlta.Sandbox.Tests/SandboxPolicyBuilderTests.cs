@@ -504,6 +504,71 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void TheSecretsOfAProject_EnterTheSandboxOfItsSessions_InAHomeAndCachesOfTheProjectAlone()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var data = temp.Folder("data");
+        SandboxPolicy Build(SandboxProjectSecrets? secrets, string? ownHome = null) => SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("workspace", []),
+            new SandboxSessionFolders { WorkingDirectory = project, ProjectSecrets = secrets, OwnHome = ownHome, WithheldVariables = ["DEPLOY_AUTH"] },
+            new SandboxHost
+            {
+                DataRoot = data,
+                HomeDirectory = temp.Folder("home"),
+                Environment = new Dictionary<string, string> { ["PATH"] = "/bin" },
+                // ACME_GH_TOKEN is kept in a vault.
+                WithheldValues = ["acme-token-value"],
+            },
+            new Dictionary<string, string>
+            {
+                ["GH_TOKEN"] = "acme-token-value",
+                ["REGISTRY_URL"] = "https://ci:acme-token-value@registry.example",
+                // A secret of the machine that every project gets, which the repository names too.
+                ["NPM_TOKEN"] = "shared-token-value",
+                // The same, kept on this computer, under a name that does not say a secret.
+                ["DEPLOY_AUTH"] = "shared-token-value",
+                ["OP_SERVICE_ACCOUNT_TOKEN"] = "opens-the-vault",
+                ["NODE_OPTIONS"] = "--require ./hook.js",
+                ["NODE_ENV"] = "development",
+            }, "session-1");
+
+        var acme = Build(new("acme", ["GH_TOKEN", "REGISTRY_URL", "OP_SERVICE_ACCOUNT_TOKEN", "NODE_OPTIONS"]));
+        Assert.AreEqual("acme-token-value", acme.Environment["GH_TOKEN"], "the secret the user limited to the project, though its name says a secret and a vault keeps it");
+        Assert.AreEqual("https://ci:acme-token-value@registry.example", acme.Environment["REGISTRY_URL"]);
+        Assert.AreEqual("development", acme.Environment["NODE_ENV"]);
+        Assert.IsFalse(acme.Environment.ContainsKey("NPM_TOKEN"), "a secret every project gets enters only when the profile names it");
+        Assert.IsFalse(acme.Environment.ContainsKey("DEPLOY_AUTH"), "whatever the name of its variable");
+        Assert.IsFalse(acme.Environment.ContainsKey("OP_SERVICE_ACCOUNT_TOKEN"), "the session of a vault never enters a sandbox");
+        Assert.IsFalse(acme.Environment.ContainsKey("NODE_OPTIONS"), "nor what loads code into the worker");
+
+        // Where a session of another project could leave what runs later with the secrets, the project has its own.
+        var acmeRoot = Path.Combine(data, "profiles", "workspace", "projects", "acme");
+        Assert.AreEqual(Path.Combine(acmeRoot, "home"), acme.Home);
+        Assert.AreEqual(acme.Home, acme.Environment["HOME"]);
+        Assert.AreEqual(Path.Combine(acmeRoot, "caches", "nuget"), acme.Environment["NUGET_PACKAGES"]);
+        Assert.AreEqual(Path.Combine(acmeRoot, "caches", "npm"), acme.Environment["npm_config_cache"]);
+        var contoso = Build(new("contoso", ["GH_TOKEN"]));
+        Assert.AreEqual(Path.Combine(data, "profiles", "workspace", "projects", "contoso", "home"), contoso.Home);
+        Assert.IsFalse(contoso.ReadWrite.Concat(contoso.ReadOnly).Any(path => SandboxPolicyBuilder.IsInside(path, acmeRoot) || SandboxPolicyBuilder.IsInside(acmeRoot, path)),
+            "a session of another project reaches neither");
+
+        // A session without a secret of its project keeps the home of its profile, and gets none.
+        foreach (var none in new[] { Build(null), Build(new("acme", [])) })
+        {
+            Assert.AreEqual(Path.Combine(data, "profiles", "workspace", "home"), none.Home);
+            Assert.IsFalse(none.Environment.ContainsKey("GH_TOKEN"));
+            Assert.IsFalse(none.Environment.ContainsKey("REGISTRY_URL"), "a value of a vault under an innocuous name");
+            Assert.IsFalse(none.ReadWrite.Concat(none.ReadOnly).Any(path => SandboxPolicyBuilder.IsInside(path, acmeRoot) || SandboxPolicyBuilder.IsInside(acmeRoot, path)),
+                "nor the home of a project");
+        }
+
+        // An agent with a home of its own keeps one per project too.
+        var agent = Build(new("acme", ["GH_TOKEN"]), ownHome: "grok-build");
+        Assert.AreEqual(Path.Combine(data, "agents", "grok-build", "projects", "acme", "home"), agent.Home);
+        Assert.AreEqual(Path.Combine(data, "agents", "grok-build", "home"), Build(null, ownHome: "grok-build").Home);
+    }
+
+    [TestMethod]
     public void TheCommandsOfAHomebrewPrefix_GetTheFoldersTheyLinkTo_ButNotTheDataOfItsServices()
     {
         if (OperatingSystem.IsWindows()) Assert.Inconclusive("Homebrew runs on macOS and Linux.");

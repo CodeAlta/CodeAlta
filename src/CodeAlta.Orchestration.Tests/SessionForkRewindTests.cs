@@ -769,6 +769,89 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ASandboxedSession_GetsTheSecretsLimitedToItsProject_InAHomeOfItsProject_AndNoOtherSecretItsRepositoryNames()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        var sandbox = new RefusingSandbox();
+        await File.WriteAllTextAsync(Path.Combine(temp.GlobalRoot, "config.toml"), "[sandbox]\nall_sessions = \"workspace\"\n");
+        await using var host = await CreateHostAsync(temp, provider, identities: true, sandbox);
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(temp.GlobalRoot);
+        store.SetSecret("ACME_GH_TOKEN", "acme-token-value", "test");
+        store.Bindings.SetProjects("ACME_GH_TOKEN", [new(host.CurrentProject.Id, host.CurrentProject.Slug)]);
+        store.SetSecret("SHARED_TOKEN", "shared-token-value", "test");
+        store.SetVariable("REGISTRY_HOST", "registry.example", "test");
+        Directory.CreateDirectory(Path.Combine(temp.ProjectRoot, ".alta"));
+        var config = Path.Combine(temp.ProjectRoot, ".alta", "config.toml");
+        await File.WriteAllTextAsync(config, """
+            [env]
+            GH_TOKEN = "${secret:ACME_GH_TOKEN}"
+            NPM_TOKEN = "${secret:SHARED_TOKEN}"
+            REGISTRY_URL = "https://ci:${secret:ACME_GH_TOKEN}@${var:REGISTRY_HOST}"
+            DEPLOY_AUTH = "${secret:SHARED_TOKEN}"
+            BOTH = "${secret:ACME_GH_TOKEN}:${secret:SHARED_TOKEN}"
+            WITH_PATH = "${env:PATH}:${secret:ACME_GH_TOKEN}"
+            NODE_ENV = "development"
+            """);
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Release", CancellationToken.None);
+        await SendAsync(host, session, options, "one");
+
+        var identity = await host.RuntimeService.GetSessionIdentityAsync(session.SessionId);
+        Assert.IsEmpty(identity.SecretProblems);
+        CollectionAssert.AreEquivalent(new[] { "GH_TOKEN", "REGISTRY_URL" }, identity.ProjectSecretVariables.ToArray(), "the variables whose secrets are all limited to the project");
+        CollectionAssert.AreEquivalent(new[] { "NPM_TOKEN", "DEPLOY_AUTH", "BOTH", "WITH_PATH" }, identity.SharedSecretVariables.ToArray(),
+            "one that holds a secret every project gets, or a variable of the application beside a secret, is not");
+        Assert.AreEqual("shared-token-value", provider.Requests.Last(value => value.SessionId == session.SessionId).Environment!.Get("DEPLOY_AUTH"),
+            "outside a sandbox, the session gets them all");
+
+        // The worker of the session is started with its policy: the sandbox of the test records it and starts nothing.
+        async Task<CodeAlta.Sandbox.SandboxPolicy> PolicyAsync()
+        {
+            sandbox.Policies.Clear();
+            var (starter, _, refusal) = await host.RuntimeService.GetJobStarterAsync(session.SessionId);
+            Assert.IsNull(starter);
+            Assert.Contains("refused by the test", refusal!);
+            return sandbox.Policies.Single();
+        }
+
+        var policy = await PolicyAsync();
+        Assert.AreEqual("acme-token-value", policy.Environment["GH_TOKEN"]);
+        Assert.AreEqual("https://ci:acme-token-value@registry.example", policy.Environment["REGISTRY_URL"]);
+        Assert.AreEqual("development", policy.Environment["NODE_ENV"]);
+        Assert.IsFalse(policy.Environment.ContainsKey("NPM_TOKEN"), "a secret every project gets does not enter the sandbox because a repository names it");
+        Assert.IsFalse(policy.Environment.Values.Any(static value => value.Contains("shared-token-value", StringComparison.Ordinal)), "whatever the name of its variable");
+        Assert.IsFalse(policy.Environment.ContainsKey("WITH_PATH"));
+        var projectHome = Path.Combine("profiles", "workspace", "projects", host.CurrentProject.Id, "home");
+        Assert.IsTrue(policy.Home.EndsWith(projectHome, StringComparison.OrdinalIgnoreCase), policy.Home);
+
+        // Without a secret of its project, the session is in the home of its profile, as the sessions of the other projects are.
+        await File.WriteAllTextAsync(config, "[env]\nNODE_ENV = \"development\"\nDEPLOY_AUTH = \"${secret:SHARED_TOKEN}\"\n");
+        await host.RuntimeService.DetachRuntimeSessionAsync(session.SessionId);
+        await SendAsync(host, session, options, "two");
+        policy = await PolicyAsync();
+        Assert.IsTrue(policy.Home.EndsWith(Path.Combine("profiles", "workspace", "home"), StringComparison.OrdinalIgnoreCase), policy.Home);
+        Assert.IsFalse(policy.Environment.ContainsKey("GH_TOKEN"));
+        Assert.IsFalse(policy.Environment.ContainsKey("DEPLOY_AUTH"));
+        Assert.AreEqual("development", policy.Environment["NODE_ENV"]);
+    }
+
+    // A sandbox that can run, records the policy of each start and starts nothing.
+    private sealed class RefusingSandbox : CodeAlta.Sandbox.ISandboxBackend
+    {
+        public ConcurrentQueue<CodeAlta.Sandbox.SandboxPolicy> Policies { get; } = new();
+
+        public CodeAlta.Sandbox.SandboxAvailability GetAvailability() => new(true, "test", null, null,
+            new HashSet<CodeAlta.Sandbox.SandboxNetwork> { CodeAlta.Sandbox.SandboxNetwork.Off, CodeAlta.Sandbox.SandboxNetwork.Hosts, CodeAlta.Sandbox.SandboxNetwork.On });
+
+        public Task<CodeAlta.Sandbox.ISandboxProcess> StartAsync(CodeAlta.Sandbox.SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
+        {
+            Policies.Enqueue(policy);
+            throw new CodeAlta.Sandbox.SandboxUnavailableException("refused by the test.");
+        }
+    }
+
+    [TestMethod]
     public async Task AHostThatDoesNotApplyIdentities_KeepsTheUsualSettingsForEverySession()
     {
         // The terminal application shows no spaces: its sessions keep the user's usual Git and GitHub settings.
@@ -966,7 +1049,7 @@ public sealed class SessionForkRewindTests
         }
     }
 
-    private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider, bool identities = false)
+    private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider, bool identities = false, CodeAlta.Sandbox.ISandboxBackend? sandbox = null)
         => CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
             {
@@ -976,6 +1059,7 @@ public sealed class SessionForkRewindTests
                 HasInteractiveUi = false,
                 StartPlugins = false,
                 AppliesSpaceIdentities = identities,
+                SandboxBackend = sandbox,
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             },
             CancellationToken.None);

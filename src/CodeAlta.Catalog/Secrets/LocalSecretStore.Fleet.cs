@@ -233,9 +233,11 @@ public sealed partial class LocalSecretStore
 
     private static string Key(string id, string scope, string? scopeId, int version) => $"{id}\n{scope}\n{scopeId}\n{version}";
 
-    private sealed class FleetLookup(LocalSecretStore store, string scopeKind, string? scopeId, bool shell, Action<FleetSecretCopyInfo>? used) : ISecretLookup
+    private sealed class FleetLookup(LocalSecretStore store, string scopeKind, string? scopeId, bool shell, Action<FleetSecretCopyInfo>? used) : ISecretLookup, IProjectSecretLookup
     {
         public string Scope => scopeKind;
+
+        public bool IsGivenToProjectAlone(string name) => scopeKind == FleetSecretScopes.Project;
 
         public bool TryGetSecret(string name, [NotNullWhen(true)] out string? value) => Get(FleetSecretValue.SecretKind, name, out value);
 
