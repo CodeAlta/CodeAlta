@@ -182,6 +182,8 @@ A session can do without some built-in tools, such as `shell_command` when you g
 
 Click **Turn off a tool** to choose a built-in tool, or type the name of another. A change applies from the next turn.
 
+For tools that Claude Code runs itself, including claude.ai connectors, use the tool's Claude Code name (such as `mcp__claude_ai_Slack__slack_send_message`). Turning off a tool takes precedence over an automation's allowed tools.
+
 Without `shell_command`, a session runs no program of its choice:
 
 - no jobs, terminals, plugin builds, new MCP servers or automations that run commands, no UI tools, and plugin tools that run programs (`gh`, `glab`, `az`) refuse;

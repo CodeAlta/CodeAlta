@@ -2457,6 +2457,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
             DisabledTools = _options.DisabledBuiltInTools,
+            DisabledToolPatterns = _options.DisabledToolPatterns,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
             ToolInterceptor = _options.ToolInterceptor,

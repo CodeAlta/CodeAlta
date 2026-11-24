@@ -1254,6 +1254,82 @@ public sealed class ClaudeCodeSessionTests
         Assert.AreEqual(AgentToolHookCapabilities.Block | AgentToolHookCapabilities.Approve, offered["toolu_1"]);
     }
 
+    [TestMethod]
+    [DataRow(false, DisplayName = "Disabled by name")]
+    [DataRow(true, DisplayName = "Disabled by pattern")]
+    public async Task AConnectorTheSessionTurnsOff_IsDeniedBeforeTheAutomationCanApproveIt(bool usePattern)
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        const string SendMessage = "mcp__claude_ai_Slack__slack_send_message";
+        const string ReadChannel = "mcp__claude_ai_Slack__slack_read_channel";
+        var decisions = new Dictionary<string, (string? Hook, string? Permission)>();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            foreach (var (id, tool, hasHook) in new[]
+            {
+                ("toolu_off", SendMessage, true),
+                ("toolu_on", ReadChannel, true),
+                ("toolu_permission_only", SendMessage, false),
+            })
+            {
+                var input = new JsonObject { ["channel_id"] = "C1" };
+                process.EmitAssistant("msg_" + id, new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock(id, tool, (JsonObject)input.DeepClone())));
+                string? hook = null;
+                if (hasHook)
+                {
+                    var answer = await process.RequestAsync(new JsonObject
+                    {
+                        ["subtype"] = "hook_callback",
+                        ["callback_id"] = "codealta_tool_hooks",
+                        ["tool_use_id"] = id,
+                        ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = tool, ["tool_input"] = input.DeepClone() },
+                    });
+                    if (answer.GetProperty("response") is { ValueKind: JsonValueKind.Object } response &&
+                        response.TryGetProperty("hookSpecificOutput", out var output))
+                    {
+                        hook = output.GetProperty("permissionDecision").GetString();
+                    }
+                }
+
+                // The CLI asks for permission only when the hook did not decide. Also check a permission request on its own.
+                var permission = hook == "deny" ? null : (await process.AskPermissionAsync(tool, input, id)).GetProperty("behavior").GetString();
+                decisions.Add(id, (hook, permission));
+                var denied = hook == "deny" || permission == "deny";
+                process.EmitToolResult(id, denied ? "Denied." : "Done.", isError: denied);
+            }
+
+            process.EmitResult("Done.", user);
+        };
+        // The automation would approve either connector call if asked.
+        var hooks = new ApprovingToolHooks(SendMessage, ReadChannel);
+        var asked = 0;
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            PermissionMode = "default",
+            DisabledBuiltInTools = usePattern ? null : new HashSet<string>(StringComparer.Ordinal) { SendMessage },
+            DisabledToolPatterns = usePattern ? ["MCP__CLAUDE_AI_*__SLACK_SEND_*"] : null,
+            OnPermissionRequest = (_, _) =>
+            {
+                Interlocked.Increment(ref asked);
+                return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+            },
+            ToolInterceptor = hooks,
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("work in Slack") }).WithinAsync(Timeout);
+
+        Assert.AreEqual(("deny", (string?)null), decisions["toolu_off"], "a disabled tool is denied in PreToolUse");
+        Assert.AreEqual(((string?)null, "allow"), decisions["toolu_on"], "a tool that is not disabled can still be approved by the automation");
+        Assert.AreEqual(((string?)null, "deny"), decisions["toolu_permission_only"], "a permission prompt cannot allow a disabled tool");
+        CollectionAssert.AreEqual(new[] { ReadChannel }, hooks.Calls.Select(static call => call.Invocation.ToolName).ToArray());
+        Assert.AreEqual(0, asked, "none of the calls need a user permission prompt");
+    }
+
     // Approves the calls of the tools it names, where the hooks can approve them.
     private sealed class ApprovingToolHooks(params string[] tools) : AgentToolInterceptor
     {

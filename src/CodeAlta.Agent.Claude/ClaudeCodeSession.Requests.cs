@@ -34,9 +34,11 @@ internal sealed partial class ClaudeCodeSession
         AgentProviderRunContext? run;
         Task? runForOwnTurn;
         bool approvedByHooks;
+        string? disabledToolRefusal;
         var prompt = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         lock (_gate)
         {
+            disabledToolRefusal = DisabledToolRefusal(toolName);
             runForOwnTurn = _runForOwnTurn?.Task;
             _permissionPrompts[requestId] = prompt;
             // The approval is for the call that was checked: another tool, or an input another hook of the CLI changed
@@ -47,6 +49,9 @@ internal sealed partial class ClaudeCodeSession
 
         try
         {
+            // A permission request without a PreToolUse decision still cannot allow a disabled tool.
+            if (disabledToolRefusal is not null) return Deny(disabledToolRefusal, interrupt: false);
+
             if (runForOwnTurn is not null)
             {
                 // The CLI asks in a turn it started by itself: the run that shows the turn answers, not the one
