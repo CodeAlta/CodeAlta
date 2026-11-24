@@ -165,23 +165,19 @@ internal static class DesktopMcpGuard
     }
 
     /// <summary>
-    /// Whether a request comes from a page of a web browser, which is never answered, whatever its origin and its
-    /// token: the browser a session drives (or a page it opens) reaches any port of the loopback, the free one of an
-    /// instance on another profile too, and a page of the loopback had its origin allowed. A browser marks each request of
-    /// a page with Fetch Metadata (<c>Sec-Fetch-Site</c>, <c>Sec-Fetch-Mode</c>, <c>Sec-Fetch-Dest</c>), which no script
-    /// can remove; an older one is told by an <c>Origin</c> that is the address of the server itself, which no program but
-    /// a page loaded from that address sends. A page cannot read an answer of the server anyway (it serves no CORS): the
-    /// requests of pages could only act blind.
+    /// Whether a request looks like it came from a browser page. A page opened by a session could otherwise reach
+    /// the free loopback port of an instance on another profile. Page scripts cannot remove <c>Sec-Fetch-Site</c>
+    /// or <c>Sec-Fetch-Dest</c>; <c>Sec-Fetch-Mode</c> alone is not enough because Node.js sends it too. An
+    /// <c>Origin</c> matching the server still identifies pages of older browsers without Fetch Metadata.
     /// </summary>
     /// <param name="site">The <c>Sec-Fetch-Site</c> header, if any.</param>
-    /// <param name="mode">The <c>Sec-Fetch-Mode</c> header, if any.</param>
     /// <param name="destination">The <c>Sec-Fetch-Dest</c> header, if any.</param>
     /// <param name="origin">The <c>Origin</c> header, if any.</param>
     /// <param name="host">The <c>Host</c> header of the request, with its port.</param>
     /// <param name="port">The port the request came in on.</param>
-    internal static bool FromPage(string? site, string? mode, string? destination, string? origin, string? host, int port)
+    internal static bool FromPage(string? site, string? destination, string? origin, string? host, int port)
     {
-        if (!string.IsNullOrEmpty(site) || !string.IsNullOrEmpty(mode) || !string.IsNullOrEmpty(destination)) return true;
+        if (!string.IsNullOrEmpty(site) || !string.IsNullOrEmpty(destination)) return true;
         if (string.IsNullOrEmpty(origin) || !Uri.TryCreate(origin, UriKind.Absolute, out var page) || page.Scheme is not ("http" or "https")) return false;
         if (page.Port == port) return true;
         return !string.IsNullOrEmpty(host) && Uri.TryCreate("http://" + host, UriKind.Absolute, out var server) && server.Port == page.Port

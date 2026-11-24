@@ -1,27 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { machines, type MachineDeviceView, type ThisComputerPairingLink, type ThisComputerView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
+import { AgentsSection, type MachineAgentsApi } from "./AgentsSection";
 import { DeviceTable } from "./MachinePage";
 import { pairingWords } from "./machines";
 import type { DevicePermission } from "./machineManagement";
 
 /** The calls of the This computer section. */
 export type ThisComputerApi = Pick<typeof machines, "thisComputer" | "setVisible" | "setReachableThroughServers" | "setPairBothWays" | "createPairingLink" | "waitPairing"
-  | "setThisComputerDevicePermission" | "revokeThisComputerDevice">;
+  | "setThisComputerDevicePermission" | "revokeThisComputerDevice"> & MachineAgentsApi;
 
 /** What a computer paired with this one may be given here: what a desktop serves. */
 export const thisComputerPermissions: readonly DevicePermission[] = ["view", "drive", "start", "move"];
 
 /**
- * This computer as a machine of the person's other computers, at the top of Settings > Fleet > Machines: a switch lets
+ * This computer as a machine of the person's other computers, in Settings > Fleet > Machines: a switch lets
  * them pair with it, Pair another computer… shows the link and the six words to give the other computer, and the
  * computers paired with it are listed with what each may do here. A pairing goes both ways unless the person turns it off:
  * the computer that pairs is listed with the machines of this one too. Once it is linked to a server, another switch lets the
- * person's other devices of that organization reach it through the server, without pairing.
+ * person's other devices of that organization reach it through the server, without pairing. Only the owner edits the
+ * policy for agents of other machines here.
  */
 export function ThisComputerSection({ epoch, api = machines, generation }: { epoch: string; api?: ThisComputerApi; generation: number }) {
   const [view, setView] = useState<ThisComputerView | null>(null);
@@ -52,7 +54,9 @@ export function ThisComputerSection({ epoch, api = machines, generation }: { epo
       onPairBothWays={bothWays => void change(() => api.setPairBothWays({ expectedEpoch: epoch, bothWays }))}
       onPair={() => setPairing(true)}
       onPermission={(device, permission, allowed) => void change(() => api.setThisComputerDevicePermission({ expectedEpoch: epoch, deviceId: device.id, permission, allowed }))}
-      onRevoke={device => void change(() => api.revokeThisComputerDevice({ expectedEpoch: epoch, deviceId: device.id }))} />
+      onRevoke={device => void change(() => api.revokeThisComputerDevice({ expectedEpoch: epoch, deviceId: device.id }))}>
+      <AgentsSection epoch={epoch} machineId={null} name={view.name} api={api} refreshGeneration={generation} />
+    </ThisComputerBody>
     {pairing && <PairThisComputerDialog epoch={epoch} api={api} name={view.name ?? ""} onClose={() => {
       setPairing(false);
       void api.thisComputer({ expectedEpoch: epoch }).then(setView, () => { });
@@ -61,10 +65,11 @@ export function ThisComputerSection({ epoch, api = machines, generation }: { epo
 }
 
 /** What the This computer section shows, from what the host said: the switch, where it is reached, and its paired computers. */
-export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, onPairBothWays, onPair, onPermission, onRevoke }: {
+export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, onPairBothWays, onPair, onPermission, onRevoke, children }: {
   view: ThisComputerView; busy: boolean; problem?: MessageKey | null; onVisible: (visible: boolean) => void; onReachable: (reachable: boolean) => void;
   onPairBothWays: (bothWays: boolean) => void; onPair: () => void;
   onPermission: (device: MachineDeviceView, permission: DevicePermission, allowed: boolean) => void; onRevoke: (device: MachineDeviceView) => void;
+  children?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   return <section className="machine-section this-computer" aria-label={t("This computer")}>
@@ -97,6 +102,7 @@ export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, 
       <h3>{t("Computers paired with this one")}</h3>
       <DeviceTable devices={view.devices} permissions={thisComputerPermissions} busy={busy} subject={view.name ?? ""} here onPermission={onPermission} onRevoke={onRevoke} />
     </> : view.visible && <p className="muted-text">{t("No other computer is paired with this one yet.")}</p>}
+    {children}
   </section>;
 }
 

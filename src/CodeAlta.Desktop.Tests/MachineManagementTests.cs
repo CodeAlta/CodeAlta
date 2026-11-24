@@ -149,7 +149,7 @@ public sealed class MachineManagementTests
         var firstMachine = first.Hosts.Single().MachineId!;
         var secondMachine = second.Hosts.Single().MachineId!;
 
-        var off = await firstService.AgentsAsync(new MachineRequest(firstEpoch, firstMachine), token);
+        var off = await firstService.AgentsAsync(new(firstEpoch, firstMachine), token);
         Assert.AreEqual("ok", off.Status, off.Message);
         Assert.IsTrue(off.Spaces.Length > 0 && off.Spaces.All(static space => !space.Allowed), "agents are let in no space until the owner allows one");
         Assert.AreEqual((null, false), (off.Sandbox, off.AllowBypass));
@@ -161,7 +161,7 @@ public sealed class MachineManagementTests
         var policy = fixture.Service.AgentSessions.ReadPolicy();
         CollectionAssert.AreEqual(new[] { "default" }, policy.Spaces.ToArray(), "each change keeps the others");
         Assert.AreEqual(("strict", true), (policy.Sandbox, policy.AllowBypass));
-        var on = await firstService.AgentsAsync(new MachineRequest(firstEpoch, firstMachine), token);
+        var on = await firstService.AgentsAsync(new(firstEpoch, firstMachine), token);
         Assert.IsTrue(on.Spaces.Single(static space => space.Id == "default").Allowed);
         Assert.AreEqual(("strict", true), (on.Sandbox, on.AllowBypass));
 
@@ -172,11 +172,11 @@ public sealed class MachineManagementTests
         Assert.AreEqual(CodeAlta.Fleet.NodeApi.FleetNodeErrorCodes.Unavailable,
             (await firstService.SetAgentSandboxAsync(new MachineAgentSandboxRequest(firstEpoch, firstMachine, "missing"), token)).Status);
         Assert.AreEqual("invalid_params", (await firstService.SetAgentSpaceAsync(new MachineAgentSpaceRequest(firstEpoch, firstMachine, " ", true), token)).Status);
-        Assert.AreEqual("stale_epoch", (await firstService.AgentsAsync(new MachineRequest("other", firstMachine), token)).Status);
+        Assert.AreEqual("stale_epoch", (await firstService.AgentsAsync(new("other", firstMachine), token)).Status);
         Assert.AreEqual(("strict", true), (fixture.Service.AgentSessions.ReadPolicy().Sandbox, fixture.Service.AgentSessions.ReadPolicy().AllowBypass));
 
         // A computer that does not manage the machine reads and changes nothing there.
-        Assert.AreEqual("not_manager", (await secondService.AgentsAsync(new MachineRequest(secondEpoch, secondMachine), token)).Status);
+        Assert.AreEqual("not_manager", (await secondService.AgentsAsync(new(secondEpoch, secondMachine), token)).Status);
         Assert.AreEqual("not_manager", (await secondService.SetAgentSpaceAsync(new MachineAgentSpaceRequest(secondEpoch, secondMachine, "default", false), token)).Status);
         Assert.AreEqual("not_manager", (await secondService.SetAgentBypassAsync(new MachineAgentBypassRequest(secondEpoch, secondMachine, false), token)).Status);
         Assert.IsTrue(fixture.Service.AgentSessions.ReadPolicy().AllowBypass);

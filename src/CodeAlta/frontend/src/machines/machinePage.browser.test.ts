@@ -349,6 +349,34 @@ test("the computer that manages a machine lets agents of other machines in, spac
     }, options);
   });
 
+test("This computer lets its owner set the agent policy without turning on pairing", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.machineFixture.show('this-computer')`);
+    const section = ".this-computer .machine-agents";
+    const work = `${section} .machine-agent-spaces label:nth-child(2) input`;
+    const bypass = `${section} input[aria-label="Bypass permissions"]`;
+    await page.until(`document.querySelector('${work}')`, "the agent policy of This computer");
+    const tag = `${section} .machine-section-head .bp6-tag`;
+    assert.equal(await page.evaluate(`document.querySelector('${tag}').textContent`), "Off");
+    assert.equal(await page.evaluate(`document.querySelector('.this-computer > .bp6-switch input').checked`), false);
+    assert.ok(await page.evaluate(`(() => { const section = document.querySelector('${section}'); return section.scrollWidth <= section.clientWidth; })()`));
+
+    await page.evaluate(`document.querySelector('${work}').click()`);
+    await page.until(`document.querySelector('${tag}')?.textContent === 'On'`, "the local space allowed");
+    await page.evaluate(choose(`${section} select`, "strict"));
+    await page.until(`document.querySelector('${section} select')?.value === 'strict' && !document.querySelector('${section} select').disabled`, "the local sandbox set");
+    await page.evaluate(`document.querySelector('${bypass}').click()`);
+    await page.until(`document.querySelector('.machine-bypass-confirm')`, "the local bypass confirmation");
+    assert.equal(await page.evaluate(`document.querySelector('${bypass}').checked`), false);
+    const changes = [{ agentSpace: ["work", true], machineId: null }, { agentSandbox: "strict", machineId: null }];
+    assert.deepEqual(await calls(page), changes);
+    await page.clickText(".machine-bypass-confirm .bp6-button", "Allow");
+    await page.until(`document.querySelector('${bypass}')?.checked === true`, "local bypass allowed");
+    assert.deepEqual(await calls(page), [...changes, { agentBypass: true, machineId: null }]);
+    assert.deepEqual(page.problems, []);
+  }, { ...options, width: 430 });
+});
+
 test("giving up managing a machine asks first, and a machine this computer does not manage says how to be given it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('input[aria-label="Manage — desktop"]')`, "this computer's switch");

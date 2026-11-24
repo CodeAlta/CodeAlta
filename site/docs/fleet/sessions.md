@@ -68,7 +68,9 @@ A machine runs agents for you while nobody sits at it, so its sessions bypass pe
 
 An agent of a session on this computer can hand part of its work to a session on a machine ("run the iOS tests on the Mac"), and get its final answer back as it does from a session of this computer.
 
-1. Allow it for the spaces you want: on the page of the machine in **Settings** > **Fleet** > **Machines**, turn on the space under **Agents of other machines** (or, on the machine, `altanode agents allow --space default`). It is off until you do, and `altanode agents` shows what is allowed.
+1. Under **Agents of other machines**, turn on the spaces you want. It is off in every space by default.
+   - **CodeAlta Desktop:** On the target computer, open **Settings** > **Fleet** > **Machines** > **This computer**.
+   - **CodeAlta Node:** From another computer that manages the node, open its page in **Settings** > **Fleet** > **Machines**. Or run `altanode agents allow --space <id>` on the node itself; `altanode agents` shows what is allowed.
 2. Ask the agent to do it. It runs `alta session create --machine <name> --stdin` (or, in a script, `agent(prompt, { machine: "<name>" })`). `alta fleet machine list` lists the machines, with which ones take a session now ([Let agents use the fleet](#let-agents-use-the-fleet)).
 
 The session starts in the project of the same repository on the machine, as a child of the session of the agent: it shows under it in the Explorer and among its child sessions, with the name of the machine, and opens like any session of the machine. With `alta session create`, the answer or failure comes back as a message to the parent, even if this computer was closed meanwhile. The agent can send more prompts with `alta session send`. With `agent()`, the script gets the final answer after the child and its background work finish. Stopping the script, or reaching the timeout it set for the child, asks the machine to stop that work.
@@ -76,11 +78,11 @@ The session starts in the project of the same repository on the machine, as a ch
 What the session may do:
 
 - At most what the session of the agent has: its space, the tools it does without, its permission mode and its sandbox. The agent cannot give it more. A sandbox goes with what it allows on this computer: the machine runs the session in a profile at least as strict, or refuses it, even when its own profile of that name allows more (see [sandbox](../sessions/sandbox.md#on-other-machines)).
-- It never bypasses permissions on the machine unless you allow it there: **Bypass permissions** under **Agents of other machines**, which asks first (or `altanode agents allow --bypass`). When it asks before a command, or asks a question, its parent and its row show that it waits for you, with a notice.
-- **Sandbox** under **Agents of other machines** (or `altanode agents allow --sandbox strict`) makes the sessions of agents run in that sandbox at least; the machine refuses one it cannot sandbox.
+- It never bypasses permissions on the machine unless you allow it there: **Bypass permissions** under **Agents of other machines**, which asks first (on a node, `altanode agents allow --bypass` also sets it). When a session asks before a command, or asks a question, its parent and its row show that it waits for you, with a notice.
+- **Sandbox** under **Agents of other machines** makes the sessions of agents run in that sandbox at least; the machine refuses one it cannot sandbox. On a node you can also set it with `altanode agents allow --sandbox strict`.
 - Each request is signed by this computer: neither a server nor anyone else can start a session in its name. The machine limits how many sessions and prompts agents send it, and logs each one with the session and the computer that asked.
 
-Turning the space off, or `altanode agents deny --space <id>` (or `--all`), turns it off again. A Private session never starts a session on another machine.
+Turn the space off to stop agents from starting sessions or sending prompts there. On a node you can also run `altanode agents deny --space <id>` or use `--all` to turn off every space. A Private session never starts a session on another machine.
 
 ## Run your automations on it
 

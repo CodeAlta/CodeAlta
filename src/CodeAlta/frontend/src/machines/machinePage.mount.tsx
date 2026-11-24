@@ -1,10 +1,11 @@
-// Disposable page: the page of a paired machine this computer manages, then of one it does not. Driven by
+// Disposable page: This computer and the pages of paired machines this computer manages or does not. Driven by
 // machinePage.browser.test.ts through `machineFixture`: what the page asks is recorded.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { MachineDeviceView, MachineManagement, MachineProviderStatusView, MachineServerLinkView, MachineView, SecretView, VariableView } from "#neoastra";
+import { machines, type MachineDeviceView, type MachineManagement, type MachineProviderStatusView, type MachineServerLinkView, type MachineView, type SecretView, type VariableView, type ThisComputerView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
+import { MachinesSettings } from "./MachinesSettings";
 import { localSecret, noCredentials } from "../secrets/credentials";
 
 document.documentElement.classList.add("bp6-dark");
@@ -22,6 +23,7 @@ let devices: MachineDeviceView[] = [
 let sessionMode = "bypassPermissions";
 // The policy of the machine for agents of other machines: off in every space, as a machine starts.
 const agentPolicy = { spaces: [] as string[], sandbox: null as string | null, allowBypass: false };
+const agentTarget = (machineId: string | null | undefined) => machineId === "managed" ? {} : { machineId };
 // The people of the organization the machine names, and one who asked to use it.
 const machinePeople = {
   people: [{ personId: "bea", name: "Bea", permissions: ["view", "drive"] }],
@@ -97,17 +99,17 @@ const api: MachinePageApi = {
   agents: async () => ({ status: "ok", message: null, sandbox: agentPolicy.sandbox, allowBypass: agentPolicy.allowBypass, sandboxes: ["workspace", "strict"],
     spaces: [{ id: "default", name: "Default" }, { id: "work", name: "Work" }].map(space => ({ ...space, allowed: agentPolicy.spaces.includes(space.id) })) }),
   setAgentSpace: async request => {
-    calls.push(JSON.stringify({ agentSpace: [request.space, request.allowed] }));
+    calls.push(JSON.stringify({ agentSpace: [request.space, request.allowed], ...agentTarget(request.machineId) }));
     agentPolicy.spaces = request.allowed ? [...agentPolicy.spaces, request.space] : agentPolicy.spaces.filter(space => space !== request.space);
     return { status: "ok", message: null };
   },
-  setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
+  setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox, ...agentTarget(request.machineId) })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
   people: async () => ({ status: "ok", message: null, people: machinePeople.people, asks: machinePeople.asks, others: machinePeople.others, owner: null }),
   setMachinePerson: async request => {
     calls.push(JSON.stringify({ person: { personId: request.personId, permissions: request.permissions, refuse: request.refuse } }));
     return { status: "ok", message: null };
   },
-  setAgentBypass: async request => { calls.push(JSON.stringify({ agentBypass: request.allowed })); agentPolicy.allowBypass = request.allowed; return { status: "ok", message: null }; },
+  setAgentBypass: async request => { calls.push(JSON.stringify({ agentBypass: request.allowed, ...agentTarget(request.machineId) })); agentPolicy.allowBypass = request.allowed; return { status: "ok", message: null }; },
   // The providers of the machine: Codex ready, OpenAI skipped for its key, Copilot not signed in. A key typed on the page makes OpenAI ready;
   // the sign-in of Copilot gives a code, and ends at the second wait.
   providers: async () => ({ status: "ok", message: null, providers: [...providerList], secretProtection: "libsecret",
@@ -253,6 +255,11 @@ function setSecret(name: string, value: string) {
   secrets.set(name, { ...localSecret({ name, version: (secrets.get(name)?.version ?? 0) + 1, setBy: "desktop (manage)", setAt: "2026-11-03T09:00:00Z" }), value });
 }
 
+const epoch = "12345678-1234-1234-1234-123456789abc";
+const thisComputerApi = { ...machines, ...api, list: async () => ({ status: "ok", hostEpoch: epoch, machines: [] }),
+  thisComputer: async (): Promise<ThisComputerView> => ({ status: "ok", visible: false, listening: false, name: "desktop", words: null,
+    port: 2587, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], network: null, pairBothWays: true }) };
+
 function Fixture() {
   const [shown, setShown] = useState("managed");
   Object.assign(window, { machineFixture: { calls, show: setShown, oldNode: () => { oldNode = true; },
@@ -263,7 +270,8 @@ function Fixture() {
   // A node whose connection to a server it joined fails after its .NET runtime was replaced under it: only the node knows why.
   managedServers = shown === "joinable" ? [{ name: "Work", state: "disconnected",
     message: "transport_error Could not load file or assembly 'System.Net.WebSockets.Client, Version=10.0.0.0'." }] : [];
-  return <MachinePage key={shown} epoch="12345678-1234-1234-1234-123456789abc" api={api}
+  if (shown === "this-computer") return <MachinesSettings epoch={epoch} api={thisComputerApi} />;
+  return <MachinePage key={shown} epoch={epoch} api={api}
     machine={shown === "managed" ? machine("managed", "build-box", ["view", "drive", "start", "manage"])
       // Paired before this computer had a server: not on it yet, so the person's other computers do not see it.
       : shown === "joinable" ? { ...machine("managed", "build-box", ["view", "drive", "start", "manage"]), serversToJoin: [{ linkId: "home", name: "Home" }] }

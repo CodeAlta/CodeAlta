@@ -44,6 +44,8 @@ public sealed class RemoteChildSessionsTests
         var refused = await two.Children.CreateAsync(Request(parent.SessionId, "Run the iOS tests."), token);
         Assert.AreEqual(("refused", "agent_sessions_off"), (refused.Status, refused.Code), refused.Message);
         StringAssert.Contains(refused.Message, "altanode agents allow --space default");
+        StringAssert.Contains(refused.Message, "Settings > Fleet > Machines from another computer");
+        Assert.IsFalse(refused.Message?.Contains("This computer", StringComparison.Ordinal) is true);
         Assert.AreEqual(0, two.Node.Service.AgentSessions.Children.Count, "Nothing was started.");
 
         two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));

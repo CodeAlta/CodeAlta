@@ -31,6 +31,12 @@ public sealed class FleetNodeServiceOptions
     /// <summary>Gets the version of CodeAlta the node runs.</summary>
     public string Version { get; init; } = "0.0.0";
 
+    /// <summary>Gets whether this is a CodeAlta Desktop host, whose agent policy is changed on the computer itself.</summary>
+    public bool IsDesktop { get; init; }
+
+    /// <summary>Gets the host's agent session store, if it has one independent of this listener's lifetime.</summary>
+    public FleetAgentSessions? AgentSessions { get; init; }
+
     /// <summary>Gets what tells whether the node accepts new work (false once it stops).</summary>
     public Func<bool> AcceptsWork { get; init; } = static () => true;
 
@@ -200,7 +206,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         _receipts = new FleetRetryReceipts(options.Host.CatalogOptions.FleetRoot, options.TimeProvider, options.RetryReceiptCapacity,
             Math.Max(options.RetryReceiptCapacity, FleetRetryReceipts.DefaultKeyCapacity), LogWarn);
         // What the sessions agents of other machines started here say to their parents waits in the outbox of the node.
-        _agents = new FleetAgentSessions(options.Host.CatalogOptions.FleetRoot, options.TimeProvider);
+        _agents = options.AgentSessions ?? new FleetAgentSessions(options.Host.CatalogOptions.FleetRoot, options.TimeProvider);
         options.Host.RuntimeService.RemoteParents = _agents;
         Seats = CreateSeats();
         // A queued prompt starts its turn later: the budgets and the seats of the machine admit it then, as a send.
@@ -532,7 +538,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // Its providers are read by any device that manages it; a key or a sign-in, a credential of the machine, by a paired one only.
         RegisterProviders(caller, Access.Manage, Access.ManagePaired);
         RegisterSignIns(caller, Access.Manage, Access.ManagePaired);
-        RegisterAgentPolicy(caller, Access.Manage);
+        RegisterAgentPolicy(caller, _options.IsDesktop ? Access.Owner : Access.Manage);
         RegisterSessionDefaults(caller, Access.Manage);
         RegisterLabels(caller, Access.Manage);
         RegisterLimits(caller, Access.Manage);

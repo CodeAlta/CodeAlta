@@ -61,10 +61,13 @@ public sealed partial class AltaLiveToolTests
         Assert.IsFalse(remote.Created[^1].SubSessions);
 
         // The machine decides: its refusal is the agent's error.
-        remote.Refusal = "agent_sessions_off";
+        const string desktopRefusal = "Its owner turns it on in Settings > Fleet > Machines > This computer.";
+        remote.Refusal = ("agent_sessions_off", desktopRefusal);
         var off = await dispatcher.InvokeAsync(["session", "create", "--machine", "mac-mini", "--message", "x"], caller: agent);
-        Assert.AreEqual(AltaExitCodes.PolicyDenied, off.ExitCode);
-        StringAssert.Contains(off.Transcript, "machine.policyDenied");
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, off.ExitCode, off.Transcript);
+        var error = ReadJsonLines(off.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error");
+        Assert.AreEqual("machine.policyDenied", error.GetProperty("code").GetString());
+        StringAssert.Contains(error.GetProperty("message").GetString(), desktopRefusal);
         remote.Refusal = null;
 
         // Only an agent, as the child of its own session, starts one; and nothing of this computer's worktrees or tiers goes there.
@@ -99,7 +102,7 @@ public sealed partial class AltaLiveToolTests
 
         public List<RemoteMessageRequest> Sent { get; } = [];
 
-        public string? Refusal { get; set; }
+        public (string Code, string Message)? Refusal { get; set; }
 
         public IReadOnlyList<RemoteMachine> ListMachines() => [new("m1", "mac-mini", "online")];
 
@@ -109,7 +112,7 @@ public sealed partial class AltaLiveToolTests
 
         public Task<RemoteChildResult> CreateAsync(RemoteChildRequest request, CancellationToken cancellationToken)
         {
-            if (Refusal is { } code) return Task.FromResult(new RemoteChildResult("refused", code, "The owner did not allow it.") { MachineName = "mac-mini" });
+            if (Refusal is { } refusal) return Task.FromResult(new RemoteChildResult("refused", refusal.Code, refusal.Message) { MachineName = "mac-mini" });
             Created.Add(request);
             return Task.FromResult(new RemoteChildResult("created", null, null)
             {

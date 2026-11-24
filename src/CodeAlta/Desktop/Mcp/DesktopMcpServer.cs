@@ -315,14 +315,26 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         application.Use(async (context, next) =>
         {
             var headers = context.Request.Headers;
-            var status = DesktopMcpGuard.FromPage(headers["Sec-Fetch-Site"], headers["Sec-Fetch-Mode"], headers["Sec-Fetch-Dest"], headers.Origin,
-                context.Request.Host.Value, context.Connection.LocalPort)
-                ? StatusCodes.Status403Forbidden
-                : DesktopMcpGuard.Check(context.Request.Host.Host, headers.Origin, headers.Authorization, token, context.Connection.RemoteIpAddress);
-            if (status != DesktopMcpGuard.Allowed)
+            var host = context.Request.Host;
+            var status = DesktopMcpGuard.Check(host.Host, headers.Origin, headers.Authorization, token, context.Connection.RemoteIpAddress);
+            if (status == StatusCodes.Status401Unauthorized)
             {
                 context.Response.StatusCode = status;
-                if (status == StatusCodes.Status401Unauthorized) context.Response.Headers.WWWAuthenticate = "Bearer";
+                context.Response.Headers.WWWAuthenticate = "Bearer";
+                return;
+            }
+
+            // A protected connection gets its bearer challenge first, but a valid token does not exempt a page.
+            var fromPage = DesktopMcpGuard.FromPage(headers["Sec-Fetch-Site"], headers["Sec-Fetch-Dest"], headers.Origin, host.Value, context.Connection.LocalPort);
+            if (fromPage || status != DesktopMcpGuard.Allowed)
+            {
+                var reason = fromPage
+                    ? "The Desktop MCP server does not accept requests from browser pages."
+                    : "The Host or Origin header is not allowed on the loopback MCP server.";
+                Warn($"The MCP server refused a request (403): {reason}");
+                context.Response.StatusCode = fromPage ? StatusCodes.Status403Forbidden : status;
+                context.Response.ContentType = "text/plain; charset=utf-8";
+                await context.Response.WriteAsync(reason, context.RequestAborted).ConfigureAwait(false);
                 return;
             }
 

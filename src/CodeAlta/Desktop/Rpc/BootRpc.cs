@@ -607,6 +607,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(MachineSecretWriteRequest))]
 [JsonSerializable(typeof(MachineSecretNameRequest))]
 [JsonSerializable(typeof(MachineAgentsView))]
+[JsonSerializable(typeof(MachineAgentsRequest))]
 [JsonSerializable(typeof(MachineMobileView))]
 [JsonSerializable(typeof(MachineMobileEnableRequest))]
 [JsonSerializable(typeof(MachineMobileInvokeRequest))]

@@ -25,7 +25,7 @@
 .machine-section > p { margin: 0; }
 /* A heading with the action of its section at the end of the line (Secrets: Add a secret…). */
 .machine-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.machine-section-head > h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
+.machine-section-head > h2, .machine-agents .machine-section-head > h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 .machine-devices { display: grid; gap: 2px; overflow-x: auto; }
 .machine-device { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(var(--machine-permission-columns, 6), 72px) 36px; align-items: center; gap: 4px; padding: 4px 2px;
   border-radius: 6px; min-width: 660px; }
@@ -181,6 +181,7 @@
 .this-computer .machine-section-head > h2 .muted-text { font-weight: 400; }
 .this-computer .bp6-switch { margin: 0; }
 .this-computer > h3 { margin: 6px 0 0; font-size: 13px; font-weight: 600; }
+.this-computer > .machine-agents { margin: 4px 0 0; padding: 12px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 .this-computer-reach { display: grid; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
 .this-computer-servers { display: grid; gap: 4px; margin-top: 6px; }
 .this-computer-servers > p { margin: 0; overflow-wrap: anywhere; }

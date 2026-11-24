@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineServerLinkView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type MachineSeatsView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineSandboxView, type MachineServerLinkView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type MachineSeatsView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -13,17 +13,18 @@ import { MachineProviders } from "./MachineProviders";
 import { MachineModelServers } from "../modelServers/MachineModelServers";
 import { MachineSignIns } from "./MachineSignIns";
 import { MachineMobile } from "./MachineMobile";
+import { AgentsSection, type MachineAgentsApi } from "./AgentsSection";
 import { formatSize } from "../search/SearchSettings";
 import { loadParts, maxSessionLimit, parseSessionLimit, queuedSince } from "./seats";
-import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
+import { confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   serverLinkIntent, serverLinkLabel, updateSummary, type DevicePermission } from "./machineManagement";
 
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "limits" | "setLimits" | "seats" | "startSeat" | "cancelSeat" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
+  | "sessionDefaults" | "setSessionPermissionMode" | "people" | "setMachinePerson" | "labels" | "setLabels" | "limits" | "setLimits" | "seats" | "startSeat" | "cancelSeat" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
   | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut" | "joinServer" | "providerOffers" | "addProvider" | "updateProvider"
-  | "providerOperationWait" | "mobile" | "mobileEnable" | "mobileInvoke"> & Partial<Pick<typeof machines, "openSignInPage">>;
+  | "providerOperationWait" | "mobile" | "mobileEnable" | "mobileInvoke"> & MachineAgentsApi & Partial<Pick<typeof machines, "openSignInPage">>;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -96,7 +97,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
         onPermission={(device, permission, allowed) => void change(() => api.setDevicePermission({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id, permission, allowed }))}
         onRevoke={device => void change(() => api.revokeDevice({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id }))} />
       <PermissionsSection epoch={epoch} machine={machine} api={api} sandbox={view.sandbox} />
-      <AgentsSection epoch={epoch} machine={machine} api={api} />
+      <AgentsSection epoch={epoch} machineId={machine.id} name={machine.name} api={api} />
       <PeopleSection epoch={epoch} machine={machine} api={api} />
       <LabelsSection epoch={epoch} machine={machine} api={api} />
       <LimitsSection epoch={epoch} machine={machine} api={api} />
@@ -384,77 +385,6 @@ function ServiceSection({ machine, service }: { machine: MachineView; service: M
 }
 
 /**
- * Whether agents of other machines may start sessions on the machine and send prompts to its sessions, per space; the
- * sandbox their sessions run in at least; and whether those may bypass permissions, as `altanode agents` sets it there.
- * Off until a space is turned on; turning on the bypass asks first, beside its switch.
- */
-function AgentsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
-  const { t } = useShellLanguage();
-  const [view, setView] = useState<MachineAgentsView | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<Problem>(null);
-  const [generation, setGeneration] = useState(0);
-  useEffect(() => {
-    const abort = new AbortController();
-    api.agents({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
-      if (abort.signal.aborted) return;
-      const failed = managementProblem(value.status);
-      if (failed) setProblem({ key: failed, detail: value.message }); else setView(value);
-    }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
-    return () => abort.abort();
-  }, [api, epoch, machine.id, generation]);
-  // One change of the policy on the machine, then the policy read again; what went wrong stays above it.
-  const run = async (call: () => Promise<{ status: string; message?: string | null }>) => {
-    setBusy(true);
-    setProblem(null);
-    try {
-      const result = await call();
-      const failed = managementProblem(result.status);
-      if (failed) setProblem({ key: failed, detail: result.message });
-    } catch {
-      setProblem({ key: "The machine does not answer: it is offline." });
-    } finally {
-      setBusy(false);
-      setGeneration(value => value + 1);
-    }
-  };
-  const target = { expectedEpoch: epoch, machineId: machine.id };
-  const allowed = view ? agentsAllowed(view) : false;
-  const sandboxes = view ? agentSandboxChoices(view) : [];
-  return <section className="machine-section machine-agents" aria-label={t("Agents of other machines")}>
-    <div className="machine-section-head">
-      <h2>{t("Agents of other machines")}</h2>
-      {view && <Tag minimal round intent={allowed ? "success" : "none"}>{t(allowed ? "On" : "Off")}</Tag>}
-    </div>
-    <p className="muted-text">{t("Agents of other computers may start sessions on {name} and send prompts to its sessions, in the spaces turned on here.", { name: machine.name })}</p>
-    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
-    {view && <div className="machine-agents-settings">
-      <div className="machine-agent-row" role="group" aria-label={t("Spaces")}>
-        <span className="machine-agent-label">{t("Spaces")}</span>
-        <span className="machine-agent-spaces">{view.spaces.map(space => <Switch key={space.id} className="machine-permission" inline label={space.name}
-          checked={space.allowed} disabled={busy} onChange={event => {
-            const on = event.currentTarget.checked;
-            void run(() => api.setAgentSpace({ ...target, space: space.id, allowed: on }));
-          }} />)}</span>
-      </div>
-      <label className="machine-agent-row">
-        <span className="machine-agent-label">{t("Sandbox")}</span>
-        <HTMLSelect value={sandboxes.find(value => value.toLowerCase() === (view.sandbox ?? "").toLowerCase()) ?? ""} disabled={busy} aria-label={t("Sandbox")}
-          options={sandboxes.map(value => ({ value, label: value || t("As their parent") }))}
-          onChange={event => {
-            const sandbox = event.currentTarget.value || null;
-            void run(() => api.setAgentSandbox({ ...target, sandbox }));
-          }} />
-      </label>
-      <div className="machine-agent-row">
-        <span className="machine-agent-label">{t("Bypass permissions")}</span>
-        <BypassSwitch allowed={view.allowBypass} disabled={busy} onChange={value => void run(() => api.setAgentBypass({ ...target, allowed: value }))} />
-      </div>
-    </div>}
-  </section>;
-}
-
-/**
  * The tags of the machine, as `altanode tags` sets them there: it publishes them to its servers, an environment of the fleet
  * runs only on the machines with one of its tags, and an automation that runs on tags on the machines with all of them. Added
  * from the field, removed from their chip. The node API still names them labels, their name before 4.2.
@@ -582,21 +512,6 @@ function LimitsSection({ epoch, machine, api }: { epoch: string; machine: Machin
       </div>; })}
     </div>}
   </section>;
-}
-
-/** Whether the sessions of agents may bypass permissions: turned off at once, turned on from a small confirmation beside it. */
-function BypassSwitch({ allowed, disabled, onChange }: { allowed: boolean; disabled: boolean; onChange: (allowed: boolean) => void }) {
-  const { t } = useShellLanguage();
-  const label = t("Bypass permissions");
-  if (confirmsBypass(!allowed)) {
-    return <PopoverNext placement="right" content={<div className="machine-confirm machine-bypass-confirm">
-      <p>{t("Let their sessions bypass permissions when their parent does?")}</p>
-      <Button className="bp6-popover-dismiss" intent="danger" disabled={disabled} onClick={() => onChange(true)}>{t("Allow")}</Button></div>}>
-      <Switch className="machine-permission" checked={false} aria-label={label} disabled={disabled} onChange={() => { }} />
-    </PopoverNext>;
-  }
-
-  return <Switch className="machine-permission" checked aria-label={label} disabled={disabled} onChange={() => onChange(false)} />;
 }
 
 function ProjectsSection({ view, busy, machine, onAdd, onRemove }: {
