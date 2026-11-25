@@ -67,6 +67,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const [view, setView] = useState(readWorkView);
   const changeView = (change: Partial<WorkView>) => setView(current => { const next = { ...current, ...change }; writeWorkView(next); return next; });
   const [selected, setSelected] = useState<string | null>(null);
+  // The item a focus asked for, to bring into view once the list shows it (a new object for each ask).
+  const [reveal, setReveal] = useState<Readonly<{ key: string }> | null>(null);
+  const list = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [removing, setRemoving] = useState<WorkItem | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
@@ -99,10 +102,17 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
     if (!focus || !state.loaded) return;
     setScope(focus.projectId);
     const item = focus.key ? all.find(candidate => workItemKey(candidate) === focus.key) : null;
-    if (item) { setStage(item.stage); setKind("all"); setQuery(""); setTagFilter(new Set()); setSelected(focus.key!); }
+    if (item) { setStage(item.stage); setKind("all"); setQuery(""); setTagFilter(new Set()); setSelected(focus.key!); setReveal({ key: focus.key! }); }
     else if (focus.kind) { setKind(focus.kind); setStage("todo"); setQuery(""); setTagFilter(new Set()); }
     onFocused?.();
   }, [focus, state.loaded]);
+  // The list shows the item after the filters of the focus apply; a tab that is not shown yet keeps the ask until it is.
+  useEffect(() => {
+    if (!reveal || !visible) return;
+    const row = [...list.current?.querySelectorAll<HTMLElement>(".work-row") ?? []].find(candidate => candidate.dataset.key === reveal.key);
+    if (row) row.scrollIntoView({ block: "nearest" });
+    setReveal(null);
+  }, [reveal, visible]);
 
   const during = async (item: WorkItem, work: () => Promise<boolean>) => {
     const key = workItemKey(item);
@@ -168,7 +178,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           {workFilters.map(filter => <Tab key={filter} id={filter} disabled={false} title={<>{t(workFilterLabel(filter))}<span className="work-count" data-zero={counts[filter] === 0 || undefined}>{counts[filter]}</span></>} />)}
         </Tabs>
         <div className="work-body">
-          <div className="work-list" role="listbox" aria-label={t(workFilterLabel(stage))}>
+          <div className="work-list" role="listbox" aria-label={t(workFilterLabel(stage))} ref={list}>
             {shown.length === 0 && <p className="work-empty">{t(query.trim() || chosenTags.size ? "No work item matches." : stage === "todo" ? "Nothing waits for a decision." : stage === "running" ? "Nothing is in progress."
               : stage === "later" ? "Nothing is set aside for later." : "Nothing here. The settings say whether closed tasks and completed plans are kept.")}</p>}
             {groups.map(group => <section key={group.key} className="work-group" data-group={group.key}>
@@ -178,7 +188,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 const runner = item.runner ? sessionById.get(item.runner) : undefined;
                 const day = createdDay(item.created);
                 const tone = workItemTone(item);
-                return <button type="button" key={key} role="option" aria-selected={current !== null && workItemKey(current) === key} className="work-row" data-kind={item.kind}
+                return <button type="button" key={key} role="option" aria-selected={current !== null && workItemKey(current) === key} className="work-row" data-kind={item.kind} data-key={key}
                   data-selected={current !== null && workItemKey(current) === key || undefined} onClick={() => setSelected(key)}>
                   <span className="work-row-badge"><span className="work-row-glyph" data-tone={tone}>
                     <AppIcon name={item.kind === "task" ? taskCategoryIcon(item.category) : workKindIcon(item.kind)} size={16} /></span>
