@@ -290,7 +290,8 @@ import { managedPolicy } from "#neoastra";
 import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsRequest } from "./windows/windowsHub";
 import { fileTabRef, readTransfer, sessionTabRef, spaceBound, transferOf } from "./windows/tabRefs";
-import { WindowBadge, WindowIcon, windowName } from "./windows/WindowBadge";
+import { SessionWindowMark, WindowBadge, WindowIcon, windowName } from "./windows/WindowBadge";
+import { dockTab, flashElement, rowsOfSession } from "./windows/focusFlash";
 import { WindowSettings } from "./windows/WindowSettings";
 import { SpeechContext } from "./speech/speech";
 import { SpeechSettings } from "./speech/SpeechSettings";
@@ -1533,6 +1534,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // what it showed.
     if (selection && !tabs.open.some(tab => tab.sessionId === selection.sessionId) && windowsHub.heldElsewhere(sessionTabRef(selection.sessionId))) {
       windowsHub.focusTab(sessionTabRef(selection.sessionId));
+      // Nothing else changes here, and the other window may already be in view: the row says the click was heard.
+      if (sessionRail.current) for (const row of rowsOfSession(sessionRail.current, selection.sessionId)) flashElement(row);
       const front = shownFront.current;
       if (front && "file" in front && fileTabs.open.some(tab => sameFileTab(tab, front.file))) {
         if (valid.active) applyTabState(valid); else selectProject(projectId);
@@ -2298,6 +2301,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const focus = "file" in tab && isWorkItemsTab(tab.file) ? readWorkItemsFocus(payload) : null;
     if (focus) setWorkFocus(focus);
     tabFocusPending.current = true;
+    // The tab is shown once the dock has drawn the selection: the mark says which tab the click was for.
+    requestAnimationFrame(() => requestAnimationFrame(() => flashElement(dockTab(document, "session" in tab ? sessionNodeId(tab.session) : fileNodeId(tab.file)))));
   }
   // The window is asked to close (its close button, Close window, `alta window close`): its tabs close as each would,
   // the editors with unsaved edits asking first; the last tab that leaves closes the window.
@@ -4587,6 +4592,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
       <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />
+      <SessionWindowMark window={windowsState.windows.find(window => window.id === windowsState.sessionWindows.get(session.id))} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} />

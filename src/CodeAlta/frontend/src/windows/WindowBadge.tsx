@@ -23,6 +23,14 @@ export function WindowIcon({ window, size = 16 }: { window: Readonly<{ icon: str
   return <span className="window-icon"><Logo brand={spaceBrand(window)} size={size} fallback="window" /></span>;
 }
 
+/** The mark of a session whose tab another window holds, on its row of the Explorer: that window's icon, in its color. */
+export function SessionWindowMark({ window }: { window: WindowsWindow | undefined }) {
+  const { t } = useShellLanguage();
+  if (!window) return null;
+  const label = t("Window: {name}", { name: windowName(t, window) });
+  return <span className="session-window-mark" role="img" aria-label={label} title={label}><WindowIcon window={window} size={13} /></span>;
+}
+
 /**
  * The badge of a secondary window, at the left of its tab strip: its icon, its name and its space, and what changes
  * them (name, icon, color, whether it is kept when it is closed) and closes it.

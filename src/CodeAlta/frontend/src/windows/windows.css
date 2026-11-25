@@ -24,3 +24,13 @@
 .window-monitors { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .window-monitors > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .window-monitor-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+
+/* The session of a row is open in another window: that window's icon, in its color, beside the other marks. */
+.session-window-mark { display: inline-flex; align-items: center; flex: none; margin-inline-start: 4px; line-height: 0; }
+/* A click that another window answers: the row or the tab is pointed out for a moment. */
+@keyframes window-flash {
+  0%, 30% { box-shadow: 0 0 0 2px var(--accent); background-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+[data-window-flash="true"] { animation: window-flash 1.5s ease-out; }
+@media (prefers-reduced-motion: reduce) { [data-window-flash="true"] { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
