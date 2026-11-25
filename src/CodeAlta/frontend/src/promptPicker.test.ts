@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { activeIssueReference } from "./issueReferences";
 import { activeProjectReference } from "./projectReferences";
-import { dismissPromptTrigger, isPromptPickerReopenKey, promptTriggerDismissalHolds, typedTrigger } from "./promptPicker";
+import { dismissPromptTrigger, isPromptPickerReopenKey, promptTriggerDismissalHolds, typedTrigger, typesPromptTrigger } from "./promptPicker";
 import { activeSkillReference } from "./skillMentions";
 
 // What the picker hook does on each key: open for a token at the caret unless that token was dismissed.
@@ -59,4 +59,15 @@ test("a picker that opens only on its typed trigger stays closed when a deletion
   assert.equal(opens(null, "ask /grilling"), false, "the space after a chosen skill deleted");
   assert.equal(opens(null, "ask /"), false, "deleted back to the trigger, or a click after it");
   assert.equal(opens(0, "ask /"), false, "a trigger typed elsewhere");
+});
+
+test("a key types the trigger of a picker, with AltGr too", () => {
+  const key = { key: "@", ctrlKey: false, altKey: false, metaKey: false };
+  assert.equal(typesPromptTrigger(key, "@"), true, "Shift+2 or a key of its own");
+  assert.equal(typesPromptTrigger({ ...key, ctrlKey: true, altKey: true }, "@"), true, "AltGr, which Windows reports as Ctrl+Alt");
+  assert.equal(typesPromptTrigger({ ...key, altKey: true }, "@"), true, "Option on a Mac");
+  assert.equal(typesPromptTrigger({ ...key, ctrlKey: true }, "@"), false, "Ctrl alone is a shortcut");
+  assert.equal(typesPromptTrigger({ ...key, metaKey: true }, "@"), false, "so is the Command key");
+  assert.equal(typesPromptTrigger({ ...key, key: "#" }, "@"), false, "another character");
+  assert.equal(typesPromptTrigger(key, undefined), false, "a picker that opens at any token");
 });
