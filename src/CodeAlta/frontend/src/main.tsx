@@ -89,7 +89,7 @@ import { OpenFileDialog } from "./editor/OpenFileDialog";
 import { ProjectEditor, type EditorRequest } from "./editor/ProjectEditor";
 import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
 import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
-import { changeKeyKept } from "./changes/projectChanges";
+import { changeKeyKept, readChangesFocus, type ChangesFocus } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { inHiddenPane } from "./keptPanes";
 import { createSideQuestions, type SideQuestions } from "./sideQuestion/sideQuestions";
@@ -776,7 +776,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [fileClosing, setFileClosing] = useState<{ tab: FileTab; busy: boolean } | null>(null);
   // What was last asked of a changes tab, by project: the file an `alta diff show` asked it to select, the
   // checkout a session that works in a worktree asked it to show.
-  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null; worktree?: string | null; review?: "changes" | "branch" | null }>>>(() => new Map());
+  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, ChangesFocus>>(() => new Map());
   // Where the next session of each project works: the folder of the project unless a new worktree was chosen.
   const [workPlaces, setWorkPlaces] = useState(() => restoreWorkPlaces(() => localStorage.getItem(workPlacesKey)));
   // A command asked where the next session works: the choice of its prompt opens.
@@ -1930,10 +1930,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A tab is brought to the front by what happens in it while it is shown. A focus that lands in a tab that is not
   // shown, as the one a closing popover gives back to its button once another tab was pressed, leaves it behind.
   function activateShown(tab: FileTab, visible: boolean) { return () => { if (visible) activateFile(tab); }; }
+  // Whether another window holds the tab: the tab is shown there, not here.
+  const heldElsewhere = (tab: FileTab) => !fileTabs.open.some(value => sameFileTab(value, tab)) && windowsHub.heldElsewhere(fileTabRef(tab));
   function openFile(tab: FileTab) {
     // A tab that another window holds is shown there: that window comes to the front, on it.
-    const ref = fileTabRef(tab);
-    if (!fileTabs.open.some(value => sameFileTab(value, tab)) && windowsHub.heldElsewhere(ref)) { windowsHub.focusTab(ref); return; }
+    if (heldElsewhere(tab)) { windowsHub.focusTab(fileTabRef(tab)); return; }
     openFileHere(tab);
   }
   // Open run on the card of a run, or a run of the Workflows tab: the tab of that run.
@@ -1946,8 +1947,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // Opens the changes of a project's repository in their tab, beside the tab that is shown: the ones of the
   // folder of the project, or of the worktree a session works in.
   function showChanges(project: Readonly<{ id: string; path: string }>, path: string | null = null, worktree?: string | null, review: "changes" | "branch" | null = null) {
-    if (path !== null || worktree !== undefined || review) setChangeRequests(current => new Map(current).set(project.id, { path, worktree, review }));
-    openFile(changesTab(project));
+    const tab = changesTab(project);
+    if (path !== null || worktree !== undefined || review) {
+      const request = { path, worktree, review };
+      // The window that holds the tab shows what was asked: it is told what, and comes to the front.
+      if (heldElsewhere(tab)) { windowsHub.focusTab(fileTabRef(tab), JSON.stringify(request)); return; }
+      setChangeRequests(current => new Map(current).set(project.id, request));
+    }
+    openFile(tab);
   }
   const showChangesLatest = useRef(showChanges); showChangesLatest.current = showChanges;
   // Opens the code editor of a project in its tab: on a file, at a place in it, or with the files of the project.
@@ -2297,9 +2304,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const tab = tabOfRef(ref);
     if (!tab) return;
     if ("session" in tab) selectSessionTab(tab.session, "preview"); else activateFile(tab.file);
-    // What the other window asked the tab to show: the item of the Work items list.
-    const focus = "file" in tab && isWorkItemsTab(tab.file) ? readWorkItemsFocus(payload) : null;
-    if (focus) setWorkFocus(focus);
+    // What the other window asked the tab to show: the item of the Work items list, or the file of the changes.
+    if ("file" in tab) {
+      const file = tab.file;
+      const work = isWorkItemsTab(file) ? readWorkItemsFocus(payload) : null;
+      if (work) setWorkFocus(work);
+      const changes = isChangesTab(file) ? readChangesFocus(payload) : null;
+      if (changes) setChangeRequests(current => new Map(current).set(file.projectId, changes));
+    }
     tabFocusPending.current = true;
     // The tab is shown once the dock has drawn the selection: the mark says which tab the click was for.
     requestAnimationFrame(() => requestAnimationFrame(() => flashElement(dockTab(document, "session" in tab ? sessionNodeId(tab.session) : fileNodeId(tab.file)))));
@@ -3303,8 +3315,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
   function openWorkItems(focus: WorkItemsFocus | null = null) {
     // The window that holds the tab shows the item: it is told which, and comes to the front.
-    const ref = fileTabRef(workItemsTab);
-    if (focus && !fileTabs.open.some(value => sameFileTab(value, workItemsTab)) && windowsHub.heldElsewhere(ref)) { windowsHub.focusTab(ref, JSON.stringify(focus)); return; }
+    if (focus && heldElsewhere(workItemsTab)) { windowsHub.focusTab(fileTabRef(workItemsTab), JSON.stringify(focus)); return; }
     if (focus) setWorkFocus(focus);
     openFile(workItemsTab);
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeDiffLimit, changeHistoryHeight, changeKeyKept, changeKeysAttribute, changeLetter, changeLineHeight,
-  changeListReply, changeStep,
+  changeListReply, changeStep, readChangesFocus,
   changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, defaultChangesPreferences, estimatedDiffHeight, filterChanges,
   fittedDiffHeight, orderChanges, openablePath, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, sectionAt, selectedChange,
   type ChangedFile } from "./projectChanges";
@@ -198,4 +198,13 @@ test("Alt+Down and Alt+Up alone are the keys of a Changes tab; every other key i
   assert.equal(changeKeyKept(down, null), false);
   assert.equal(changeKeyKept({ ...down, key: "ArrowRight" }, inside), false);
   assert.equal(changeKeyKept({ ...down, altKey: false }, inside), false);
+});
+
+test("the changes another window is asked to show are read back, and what is not a request is refused", () => {
+  assert.deepEqual(readChangesFocus(JSON.stringify({ path: "src/a.ts", worktree: "C:/w", review: "branch" })), { path: "src/a.ts", worktree: "C:/w", review: "branch" });
+  // A null checkout is the folder of the project; an absent one keeps the checkout that is shown.
+  assert.deepEqual(readChangesFocus(JSON.stringify({ path: null, worktree: null })), { path: null, worktree: null });
+  assert.deepEqual(readChangesFocus(JSON.stringify({ path: null, review: "changes" })), { path: null, review: "changes" });
+  assert.deepEqual(readChangesFocus(JSON.stringify({ path: "a", worktree: 3, review: "bogus" })), { path: "a" });
+  for (const text of [null, undefined, "", "not json", "null", "3", "{}", JSON.stringify({ path: 3 })]) assert.equal(readChangesFocus(text), null, String(text));
 });

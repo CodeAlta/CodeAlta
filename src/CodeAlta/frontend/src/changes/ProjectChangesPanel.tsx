@@ -14,7 +14,7 @@ import { useChangesPreferences } from "./changesPreferences";
 import { changeCommitsReply, changeContent, changeKeysAttribute, changeStep, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
   changeListReply, changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, commitLimitMaximum, commitPageSize, filterChanges,
   openablePath, orderChanges, selectedChange, type ChangeCommit, type ChangeCommits,
-  type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope } from "./projectChanges";
+  type ChangeContent, type ChangedFile, type ChangesFocus, type ChangeList, type ChangeRow, type ChangeScope } from "./projectChanges";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { ExternalEditorIcon, useExternalOpener } from "../externalEditors/externalEditors";
@@ -132,9 +132,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
    * The file an `alta diff show` asked for, and the checkout to show when one is named (null is the folder of
    * the project); a new object for each request.
    */
-  request?: Readonly<{ path: string | null; worktree?: string | null;
-    /** Opens the review of the uncommitted changes (`changes`) or of the branch since its base (`branch`). */
-    review?: "changes" | "branch" | null }> | null;
+  request?: ChangesFocus | null;
   /** Opens a session, the one a review was sent to. */
   onOpenSession?: (sessionId: string) => void;
   /** The sessions of the window: a worktree shows how many work in it. */
