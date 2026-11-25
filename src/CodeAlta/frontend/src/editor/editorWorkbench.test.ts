@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { activateEditorFile, adoptLegacyFiles, closeEditorFile, closeEditorFiles, defaultEditorPreferences, editorFileLimit, editorSideWidth, editorStorageKey, editorTabNames,
   emptyEditorFiles, emptyStoredEditor, moveEditorFile, movedPath, openEditorFile, pinEditorFile, removeEditorPath, renameEditorPath, restoreEditorStorage, storedEditor,
-  underPath, updateEditorStorage, type EditorFiles } from "./editorWorkbench";
+  underPath, updateEditorStorage, readEditorRequest, type EditorFiles } from "./editorWorkbench";
 
 const paths = (state: EditorFiles) => state.open.map(file => file.preview ? `${file.path}?` : file.path);
 const open = (...names: string[]) => names.reduce((state, name) => openEditorFile(state, name), emptyEditorFiles);
@@ -146,4 +146,11 @@ test("a new file is named Untitled on its tab, and is not told apart by a folder
   const names = editorTabNames([{ path: "untitled:1", preview: false }, { path: "untitled:2", preview: false }, { path: "src/a.ts", preview: false }, { path: "test/a.ts", preview: false }]);
   assert.deepEqual([...names].map(([path, shown]) => [path, shown.name, shown.folder]),
     [["untitled:1", "Untitled-1", null], ["untitled:2", "Untitled-2", null], ["src/a.ts", "a.ts", "src"], ["test/a.ts", "a.ts", "test"]]);
+});
+
+test("the editor request another window sent is read back, and what is not a request is refused", () => {
+  assert.deepEqual(readEditorRequest(JSON.stringify({ path: "a.md", line: 3, column: 0, explorer: false, view: "preview" })), { path: "a.md", line: 3, column: 0, explorer: false, view: "preview" });
+  assert.deepEqual(readEditorRequest(JSON.stringify({ path: null, line: null, column: null, explorer: true })), { path: null, line: null, column: null, explorer: true });
+  assert.deepEqual(readEditorRequest(JSON.stringify({ path: "a", line: -1, column: 1.5, explorer: "yes", view: "bogus" })), { path: "a", line: null, column: null, explorer: null });
+  for (const text of [null, undefined, "", "not json", "null", "3", "{}", JSON.stringify({ path: 3 })]) assert.equal(readEditorRequest(text), null, String(text));
 });

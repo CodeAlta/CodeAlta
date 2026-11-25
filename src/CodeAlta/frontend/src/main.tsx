@@ -86,7 +86,8 @@ import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
-import { ProjectEditor, type EditorRequest } from "./editor/ProjectEditor";
+import { ProjectEditor } from "./editor/ProjectEditor";
+import { readEditorRequest, type EditorRequest } from "./editor/editorWorkbench";
 import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
 import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
 import { changeKeyKept, readChangesFocus, type ChangesFocus } from "./changes/projectChanges";
@@ -1959,8 +1960,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const showChangesLatest = useRef(showChanges); showChangesLatest.current = showChanges;
   // Opens the code editor of a project in its tab: on a file, at a place in it, or with the files of the project.
   function openEditor(project: Readonly<{ id: string; path: string }>, request: EditorRequest) {
-    setEditorRequests(current => new Map(current).set(project.id, request));
-    openFile(editorTab(project));
+    askEditor(editorTab(project), request);
+  }
+  // Shows what is asked of the editor in its tab. The window that holds the tab shows it: it is told what, and comes to the front.
+  function askEditor(tab: FileTab, request: EditorRequest) {
+    if (heldElsewhere(tab)) { windowsHub.focusTab(fileTabRef(tab), JSON.stringify(request)); return; }
+    setEditorRequests(current => new Map(current).set(tab.projectId, request));
+    openFile(tab);
   }
   const openEditorLatest = useRef(openEditor); openEditorLatest.current = openEditor;
   // A review is done where its target is shown: a file of the project folder in the editor, rendered when it is a
@@ -1975,20 +1981,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [reviewOpener] = useState(() => (scope: ReviewScope, target: ReviewTarget) => openReviewLatest.current(scope, target));
   // The code editor on the folder of a source plugin: from Settings, or asked by an agent with `alta plugin open`.
   function openPluginEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
-    setEditorRequests(current => new Map(current).set(folder.id, request));
-    openFile(pluginEditorTab(folder));
+    askEditor(pluginEditorTab(folder), request);
   }
   const openPluginEditorLatest = useRef(openPluginEditor); openPluginEditorLatest.current = openPluginEditor;
   // The code editor on a folder of the disk that is no project: the folder of a file that a link named.
   function openDiskEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
-    setEditorRequests(current => new Map(current).set(folder.id, request));
-    openFile(diskEditorTab(folder));
+    askEditor(diskEditorTab(folder), request);
   }
   const openDiskEditorLatest = useRef(openDiskEditor); openDiskEditorLatest.current = openDiskEditor;
   // The code editor on the folder of a skill, from Settings: its files, with its SKILL.md shown.
   function openSkillEditor(folder: Readonly<{ id: string; path: string; name: string }>) {
-    setEditorRequests(current => new Map(current).set(folder.id, { path: "SKILL.md", line: null, column: null, explorer: true }));
-    openFile(skillEditorTab(folder));
+    askEditor(skillEditorTab(folder), { path: "SKILL.md", line: null, column: null, explorer: true });
   }
   // What an agent or a link asks to show of a project: at once when the shown space has the project. For a project
   // of another space the window stays where the user is, and a message offers that space, where it is then shown.
@@ -2304,13 +2307,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const tab = tabOfRef(ref);
     if (!tab) return;
     if ("session" in tab) selectSessionTab(tab.session, "preview"); else activateFile(tab.file);
-    // What the other window asked the tab to show: the item of the Work items list, or the file of the changes.
+    // What the other window asked the tab to show: the item of the Work items list, the file of the changes or of the editor.
     if ("file" in tab) {
       const file = tab.file;
       const work = isWorkItemsTab(file) ? readWorkItemsFocus(payload) : null;
       if (work) setWorkFocus(work);
       const changes = isChangesTab(file) ? readChangesFocus(payload) : null;
       if (changes) setChangeRequests(current => new Map(current).set(file.projectId, changes));
+      const editing = isEditorTab(file) ? readEditorRequest(payload) : null;
+      if (editing) setEditorRequests(current => new Map(current).set(file.projectId, editing));
     }
     tabFocusPending.current = true;
     // The tab is shown once the dock has drawn the selection: the mark says which tab the click was for.

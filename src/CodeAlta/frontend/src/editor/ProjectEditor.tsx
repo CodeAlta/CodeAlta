@@ -29,7 +29,7 @@ import { EditorSearch, type SearchHandle } from "./EditorSearch";
 import { EditorSurface, type EditorSurfaceHandle, type SurfaceCursor, type SurfaceInfo } from "./EditorSurface";
 import { EditorTabs } from "./EditorTabs";
 import { activateEditorFile, closeEditorFiles, editorSideWidth, editorTabNames, editorStorageKey, moveEditorFile, movedPath, openEditorFile, pinEditorFile, removeEditorPath,
-  renameEditorPath, restoreEditorStorage, storedEditor, underPath, updateEditorStorage, type EditorFiles, type EditorPreferences, type EditorSide } from "./editorWorkbench";
+  renameEditorPath, restoreEditorStorage, storedEditor, underPath, updateEditorStorage, type EditorFiles, type EditorPreferences, type EditorRequest, type EditorSide } from "./editorWorkbench";
 import { fileReadFailure } from "./fileEditorState";
 import type { FileEditors } from "./fileEditors";
 import { emptySearchOptions, searchable, searchEvent, searchKey, startSearch, type SearchMatch, type SearchOptions, type SearchResults } from "./fileSearch";
@@ -52,13 +52,6 @@ import type { monaco } from "../monaco/monacoEnvironment";
  * the user was in first), and how to open one. The editor of a folder that is not a project takes no comments.
  */
 export type EditorReview = Readonly<{ sessions: readonly ReviewSessionChoice[]; current: string | null; openSession: (sessionId: string) => void }>;
-
-/** What the shell asks of a project's editor: a file to open, a place in it, and whether its files are shown. */
-export type EditorRequest = Readonly<{ path: string | null; line: number | null; column: number | null;
-  /** True shows the files of the project; false leaves them hidden when the editor is first opened; null changes nothing. */
-  explorer: boolean | null;
-  /** The view the file opens in, for a file that has a preview (a review opens a plan rendered); none keeps the last one. */
-  view?: "preview" | "source" }>;
 
 type EditorApi = Pick<typeof projectFiles, "read" | "write" | "list" | "stat" | "create" | "rename" | "delete" | "image" | "reveal" | "search">;
 type Point = Readonly<{ x: number; y: number }>;
