@@ -13,16 +13,13 @@ import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
 import { NewTagQuestion, TagChips, TagFilter, TagManagerDialog, TagProposalBanners, TagProposalDialog, TaskTagField, type ShownTagProposal } from "./WorkItemTagViews";
 import type { WorkItemTagRow } from "#neoastra";
 import { createdDay, filterWorkItems, shownTags, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
-  workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
+  workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkItemsFocus, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { PlanReview } from "./PlanReview";
 import { reviewSessions } from "../review/reviewSessions";
 import { ReviewOpenerContext, useReviewsHub } from "../review/useReviews";
 import { sessionTime } from "../sessionTime";
 import { checkoutName, isReviewItem, plansUnderReview, reviewCountsText, reviewItems, type ReviewWorkItem } from "./reviewItems";
-
-/** What another part of the window asks the tab to show: the items of a project, or one item. */
-export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string | null; kind?: WorkKind | "all" }>;
 
 /**
  * The Work items tab: the follow-up tasks agents proposed and the plans, of one project or of all. What waits

@@ -18,7 +18,7 @@ internal sealed record DesktopWindowServices(NeoEnvironment Environment, Desktop
 /// <param name="Kind">
 /// <c>changed</c> (the windows, their names or their tabs changed: the page reads them again), <c>open</c> (open the tab
 /// that <paramref name="Payload"/> describes, at the point <paramref name="X"/>, <paramref name="Y"/> when a drag dropped
-/// it), <c>focus</c> (bring the tab <paramref name="Tab"/> to the front), <c>move</c> (move the tab to the window
+/// it), <c>focus</c> (bring the tab <paramref name="Tab"/> to the front, and show <paramref name="Payload"/> in it when given), <c>move</c> (move the tab to the window
 /// <paramref name="Target"/>, <c>new</c> for a new one, and answer <paramref name="RequestId"/>), <c>close</c> (close the
 /// tabs of the window, then the window), <c>drag-over</c> (a tab dragged from another window is over this one at
 /// <paramref name="X"/>, <paramref name="Y"/>; without a point it left).
@@ -434,14 +434,16 @@ internal sealed class DesktopWindows : IAsyncDisposable
     }
 
     /// <summary>Brings the window that holds a tab to the front, on that tab.</summary>
+    /// <param name="tab">The tab, as the windows report it.</param>
+    /// <param name="payload">What the page of that window shows in the tab, such as the item of a list; null for the tab alone.</param>
     /// <returns>The window, or null when no window holds the tab.</returns>
-    internal string? FocusTab(string tab)
+    internal string? FocusTab(string tab, string? payload = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tab);
         Entry? owner;
         lock (_gate) owner = _owners.TryGetValue(tab, out var id) ? Find(id) : null;
         if (owner?.Window is null) return null;
-        Deliver(owner, new WindowsEvent("focus", tab), queue: false);
+        Deliver(owner, new WindowsEvent("focus", tab, payload), queue: false);
         Post(() => { if (owner.Window is { IsClosed: false } window) Activate(owner, window); });
         return owner.Id;
     }

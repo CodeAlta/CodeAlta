@@ -18,6 +18,20 @@ export const defaultWorkSettings: WorkItemsSettings = { propose: true, notify: t
 /** The key of an item among all the items of the window. */
 export const workItemKey = (item: Readonly<{ projectId: string; kind: string; id: string }>) => `${item.projectId}\n${item.kind}\n${item.id}`;
 
+/** What another part of the window asks the Work items tab to show: the items of a project, or one item. */
+export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string | null; kind?: WorkKind | "all" }>;
+
+/** The focus another window sent as text (`JSON.stringify` of a focus); null when the text is not one. */
+export function readWorkItemsFocus(text: string | null | undefined): WorkItemsFocus | null {
+  try {
+    const value: unknown = text ? JSON.parse(text) : null;
+    if (!value || typeof value !== "object") return null;
+    const { projectId, key, kind } = value as { projectId?: unknown; key?: unknown; kind?: unknown };
+    if (projectId !== null && typeof projectId !== "string") return null;
+    return { projectId, ...(typeof key === "string" ? { key } : {}), ...(kind === "task" || kind === "plan" || kind === "review" || kind === "all" ? { kind } : {}) };
+  } catch { return null; }
+}
+
 /**
  * The stage of an item. A session carries it out while that session exists: the link to a session that was
  * deleted says nothing. A plan that says it is in progress is, whoever carries it out.

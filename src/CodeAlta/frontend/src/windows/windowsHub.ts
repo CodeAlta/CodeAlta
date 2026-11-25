@@ -198,8 +198,8 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
     },
     /** Says that a move the host asked for cannot be done. */
     refuseMove(requestId: string, status: string) { void api.refuseMove({ requestId, status }, { timeoutMilliseconds: 15_000 }).catch(() => { }); },
-    /** Brings the window that holds a tab to the front, on that tab. */
-    focusTab(tab: string) { void api.focusTab({ tab }, { timeoutMilliseconds: 15_000 }).catch(() => { }); },
+    /** Brings the window that holds a tab to the front, on that tab; `payload` is what it is asked to show there, as text the tab reads. */
+    focusTab(tab: string, payload: string | null = null) { void api.focusTab({ tab, payload }, { timeoutMilliseconds: 15_000 }).catch(() => { }); },
     focus(windowId: string) { void api.focus({ windowId }, { timeoutMilliseconds: 15_000 }).catch(() => { }); },
     /** This secondary window closed its tabs: the window closes. */
     closeSelf() { void api.close({ windowId: null }, { timeoutMilliseconds: 15_000 }).catch(() => { }); },

@@ -230,7 +230,7 @@ import { ReviewOpenerContext, ReviewsHubContext, ReviewsListOpenerContext } from
 import { ReviewComposerStatus } from "./review/ReviewComposerStatus";
 import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
 import { reviewSessions, sessionCheckout } from "./review/reviewSessions";
-import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
+import { WorkItemsPanel } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
 import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
@@ -242,7 +242,7 @@ import { sessionSettingsApi } from "./sessionSettings/sessionSettingsApi";
 import { SessionSettingsChip, useSessionSettingsChoices } from "./sessionSettings/SessionSettingsChip";
 import { machineRunProviders, onMachine } from "./machines/machineProviderNames";
 import { startWorkItem, type WorkStartSession } from "./workItems/startWorkItem";
-import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workItems, type WorkItem, type WorkStart } from "./workItems/workItems";
+import { carriedBy, readingOrder, sessionCards, workCounts, readWorkItemsFocus, workItemKey, workItems, type WorkItem, type WorkItemsFocus, type WorkStart } from "./workItems/workItems";
 import { SessionWorkMark } from "./workItems/SessionWorkMark";
 import { findTaskReference, taskReferenceIndex, TaskReferencesContext, type TaskReferences } from "./workItems/taskReferences";
 import { TerminalList } from "./terminal/TerminalList";
@@ -2290,10 +2290,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     for (const request of waiting) receiveTab(request);
   });
   // Brings a tab of this window to the front: another window asked for it.
-  function focusTabRef(ref: string) {
+  function focusTabRef(ref: string, payload: string | null) {
     const tab = tabOfRef(ref);
     if (!tab) return;
     if ("session" in tab) selectSessionTab(tab.session, "preview"); else activateFile(tab.file);
+    // What the other window asked the tab to show: the item of the Work items list.
+    const focus = "file" in tab && isWorkItemsTab(tab.file) ? readWorkItemsFocus(payload) : null;
+    if (focus) setWorkFocus(focus);
     tabFocusPending.current = true;
   }
   // The window is asked to close (its close button, Close window, `alta window close`): its tabs close as each would,
@@ -2306,7 +2309,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const windowRequest = useRef<(request: WindowsRequest) => void>(() => { });
   windowRequest.current = request => {
     if (request.kind === "open") receiveTab(request);
-    else if (request.kind === "focus" && request.tab) focusTabRef(request.tab);
+    else if (request.kind === "focus" && request.tab) focusTabRef(request.tab, request.payload);
     else if (request.kind === "move" && request.tab && request.requestId) {
       const tab = tabOfRef(request.tab);
       if (tab) void moveTabLatest.current(tab, request.target === "new" ? null : request.target, request.requestId);
@@ -3294,6 +3297,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [workFocus, setWorkFocus] = useState<WorkItemsFocus | null>(null);
   const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
   function openWorkItems(focus: WorkItemsFocus | null = null) {
+    // The window that holds the tab shows the item: it is told which, and comes to the front.
+    const ref = fileTabRef(workItemsTab);
+    if (focus && !fileTabs.open.some(value => sameFileTab(value, workItemsTab)) && windowsHub.heldElsewhere(ref)) { windowsHub.focusTab(ref, JSON.stringify(focus)); return; }
     if (focus) setWorkFocus(focus);
     openFile(workItemsTab);
   }

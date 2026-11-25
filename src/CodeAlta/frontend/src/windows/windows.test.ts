@@ -102,6 +102,15 @@ test("a page that is no window of the host is the main one, and asks nothing", (
   assert.equal(hub.handles("terminal:t1"), true);
 });
 
+test("a tab is brought to the front with what the window is asked to show in it", async () => {
+  const { api, calls } = fakeApi(() => []);
+  const hub = createWindowsHub(api, current(window("main")));
+  hub.focusTab("workItems:", "{\"projectId\":\"p1\"}");
+  hub.focusTab("session:s2");
+  await settle();
+  assert.deepEqual(calls, [["focusTab", { tab: "workItems:", payload: "{\"projectId\":\"p1\"}" }], ["focusTab", { tab: "session:s2", payload: null }]]);
+});
+
 test("a tab that another window holds is shown there; a request that reaches every window is the holder's, else the main one's", async () => {
   let windows = [window("main", { tabs: ["session:s1"] }), window("w2", { tabs: ["session:s2", "terminal:t2"] })];
   const main = fakeApi(() => windows);
