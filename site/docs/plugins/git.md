@@ -30,7 +30,7 @@ Type `#` in the prompt to search the issues of the project's repository, most re
 ```
 
 - In CodeAlta Desktop the open issues are listed; **Include closed** (`Ctrl+I`) adds the closed ones. More issues load as you scroll the list. In CodeAlta TUI closed issues are listed too, and **Include closed** hides them.
-- In CodeAlta Desktop, typing only digits and then a space, `.`, `,`, `;`, `:`, `!`, `?`, `)`, `]` or `}` closes the picker and leaves `#18` and that character in the prompt as typed. Pasted text never opens the picker.
+- In CodeAlta Desktop, typing only digits and then a space, `.`, `,`, `;`, `:`, `!`, `?`, `)`, `]` or `}` closes the picker and leaves `#18` and that character in the prompt as typed. Only a typed `#` opens it: a `#18` that arrives by pasting, by taking a suggestion with `Tab`, or by moving the caret after it is plain text, and `Ctrl+Space` opens the picker there.
 - In CodeAlta Desktop the picker also lists pull requests and merge requests, with their own icon.
 - On Azure DevOps it lists the work items of the project that owns the repository, of any type, matched by title.
 - In CodeAlta Desktop the same list also has the tasks, plans and sessions of the project: see [Insert a reference](../workspace/prompt.md#insert-a-reference).
