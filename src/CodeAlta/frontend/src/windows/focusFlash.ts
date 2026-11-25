@@ -1,7 +1,7 @@
 // The short mark of a row or a tab that a click sent to another window, or that another window asked to bring forward: it
 // says the click was heard even where nothing else changes on screen.
 
-const flashMilliseconds = 1600;
+const flashMilliseconds = 1700;
 
 /**
  * Points an element out for a moment (`data-window-flash`, drawn by windows.css). Asked again while it is pointed out, the
