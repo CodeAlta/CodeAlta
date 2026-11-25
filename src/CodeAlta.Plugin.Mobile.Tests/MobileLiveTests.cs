@@ -167,8 +167,30 @@ public sealed class MobileLiveTests
 
         live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, null, AgentSessionUpdateKind.Shutdown, null));
         live.Flush();
-        Assert.IsTrue(phone.Reader.TryRead(out var shut));
-        Assert.IsNull(Data(shut)["suggestion"], "A session that ends suggests nothing.");
+        Assert.IsFalse(phone.Reader.TryRead(out _), "A session the host detached once idle goes on suggesting: its journal keeps it.");
+        Assert.AreEqual("commit", Suggestion(live));
+    }
+
+    [TestMethod]
+    public void TheSuggestionOfAStatus_IsTakenByAnIdleSessionThatToldNone()
+    {
+        var live = new MobileLive();
+        var phone = live.Subscribe();
+        live.Adopt("s1", "p1", "two\nlines");
+        Assert.IsNull(live.Describe("s1"), "What is not one line is not a suggestion.");
+
+        live.Adopt("s1", "p1", "  go ahead ");
+        Assert.AreEqual("go ahead", Suggestion(live), "A session the plugin never saw suggests what its status says.");
+        live.Flush();
+        Assert.IsTrue(phone.Reader.TryRead(out var pushed));
+        Assert.AreEqual("go ahead", (string?)Data(pushed)["suggestion"]);
+
+        live.Adopt("s1", "p1", "run the tests");
+        Assert.AreEqual("go ahead", Suggestion(live), "What the session told is kept.");
+
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-2"), "p1");
+        live.Adopt("s1", "p1", "late");
+        Assert.IsNull(Suggestion(live), "A session seen running suggests nothing.");
     }
 
     private static AgentPromptSuggestionEvent Suggested(string text) => new(Provider, "s1", At, text);

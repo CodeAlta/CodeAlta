@@ -535,6 +535,8 @@ internal static class AltaScriptAnnotations
           queueDrainInProgress?: boolean;
           /** The other process that holds the session (altacli, another instance), when one does. */
           heldElsewhere?: { ownerKind?: string; processId?: number };
+          /** What its model suggested as the next prompt once its last turn ended; absent once another turn started. */
+          promptSuggestion?: string;
         }
 
         interface SessionSummary extends AltaRecord { type: "alta.session.summary"; count: number; truncated: boolean; }
