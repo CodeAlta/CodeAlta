@@ -89,7 +89,9 @@ export function ReferencePicker({ edit, input, openRequest = 0, onAttach }: { ed
   const [checked, setChecked] = useState<ReadonlyMap<string, Readonly<{ number: number; url: string; title: string }>>>(new Map());
   // Opened by the attach menu: the chosen issues go to `onAttach`, not into the text.
   const [attaching, setAttaching] = useState(false);
-  const { trigger, dialog, close, openAt } = usePromptPicker({ input, edit, enabled: !!scope, detect: activeIssueReference, focus: search,
+  // Only typing `#` opens it by itself: a `#123` that arrives otherwise (a suggestion taken, a draft shown, a deletion or a click
+  // that puts the caret after it) is text.
+  const { trigger, dialog, close, openAt } = usePromptPicker({ input, edit, enabled: !!scope, detect: activeIssueReference, focus: search, typedOnly: "#",
     onOpen: value => { setQuery(value.query); setSelected(0); kept.current = null; setFailed(false);
       setListing(current => current && current.projectId === latest.current.scope?.projectId ? current : null); setChecked(new Map()); } });
   const open = !!trigger;

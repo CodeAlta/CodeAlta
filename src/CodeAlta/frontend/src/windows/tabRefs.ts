@@ -6,6 +6,9 @@ import type { SessionTab } from "../sessionTabs";
 /** The reference of the tab of a session. */
 export const sessionTabRef = (sessionId: string) => `session:${sessionId}`;
 
+/** The session a reference names; null for the reference of another tab. */
+export const sessionIdOfRef = (ref: string) => ref.startsWith("session:") && ref.length > 8 ? ref.slice(8) : null;
+
 /** The reference of a tab of the dock that is no session: its view and what it shows. */
 export function fileTabRef(tab: FileTab): string {
   if (isTerminalTab(tab)) return `terminal:${tab.terminalId ?? ""}`;

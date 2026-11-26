@@ -82,10 +82,10 @@ test("Ctrl+X still cuts in the prompt after a picker opened over it closes", { s
     assert.equal(await wait("clipboardFixture.state.value === ''"), true, "Ctrl+X cuts before the picker opens");
 
     // `#` opens the picker, Escape closes it, and the caret is back in the prompt.
-    await command("Input.insertText", { text: "fix #" });
-    // The picker looks at the token when a key is released, as after typing.
-    await command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "End", code: "End", windowsVirtualKeyCode: 35 });
-    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "End", code: "End", windowsVirtualKeyCode: 35 });
+    await command("Input.insertText", { text: "fix " });
+    // Typed as the keyboard does (Shift+3): the picker opens for a `#` that is typed, not for one that is inserted.
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "#", code: "Digit3", windowsVirtualKeyCode: 51, modifiers: 8, text: "#" });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "#", code: "Digit3", windowsVirtualKeyCode: 51, modifiers: 8 });
     assert.equal(await wait("clipboardFixture.pickerOpen()"), true, "# opens the picker");
     await command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });

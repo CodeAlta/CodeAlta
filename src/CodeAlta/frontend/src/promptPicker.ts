@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { PromptInput } from "./PromptEditor";
+import { promptTypeEvent } from "./promptTyping";
 
 /** The token at the caret that opened a picker, with the prompt text it was found in. */
 export type PromptTrigger = Readonly<{ text: string; start: number; end: number; query: string }>;
@@ -29,6 +30,14 @@ export function typedTrigger(typedAt: number | null, span: Readonly<{ start: num
   return typedAt === span.start;
 }
 
+/**
+ * Whether a key types the trigger character of a picker. AltGr, which types `@` and `#` on many layouts, reaches the page as
+ * Ctrl+Alt on Windows; Ctrl or the Command key alone is a shortcut.
+ */
+export function typesPromptTrigger(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">, trigger: string | undefined) {
+  return trigger !== undefined && event.key === trigger && !event.metaKey && (!event.ctrlKey || event.altKey);
+}
+
 // The keys that do not end a trigger just typed: they type nothing themselves, or change the next character.
 const typingModifiers: ReadonlySet<string> = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock", "Dead", "Process"]);
 
@@ -38,7 +47,7 @@ export function isPromptPickerReopenKey(event: Pick<KeyboardEvent, "key" | "ctrl
 }
 
 /**
- * Shared behavior of the prompt pickers (`@` files, `#` issues): watches the prompt editor, opens a modal
+ * Shared behavior of the prompt pickers (`@` files, `#` issues and tasks, `/` skills): watches the prompt editor, opens a modal
  * dialog when the caret sits in a trigger token, and on close either applies the replacement text or
  * leaves the text as typed; the caret then returns to the editor. A token closed without a choice stays
  * closed while typing goes on, until Ctrl+Space opens it again with the text after the trigger as query. With
@@ -115,8 +124,13 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
     // A key or a click in the prompt: before the editor, so that the caret is still where the key types.
     const pressed = (event: Event) => {
       if (!(event instanceof KeyboardEvent)) typedAt = null;
-      else if (event.key === latest.current.typedOnly && !event.ctrlKey && !event.metaKey) typedAt = Math.min(element.selectionStart, element.selectionEnd);
+      else if (typesPromptTrigger(event, latest.current.typedOnly)) typedAt = Math.min(element.selectionStart, element.selectionEnd);
       else if (event.key.length > 1 && !typingModifiers.has(event.key)) typedAt = null;
+    };
+    // A key pressed outside the prompt and given to it (the timeline had the focus) types as one pressed in it: the prompt
+    // sees no key then, only this request, before the editor types the character at the caret.
+    const redirected = (event: Event) => {
+      if ((event as CustomEvent<unknown>).detail === latest.current.typedOnly) typedAt = Math.min(element.selectionStart, element.selectionEnd);
     };
     // Captured before the editor, which would otherwise show its own suggestions for Ctrl+Space.
     const reopen = (event: Event) => {
@@ -130,6 +144,7 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
     element.addEventListener("paste", paste, true); element.addEventListener("drop", paste, true);
     element.addEventListener("input", inspect); element.addEventListener("keyup", inspect); element.addEventListener("click", inspect);
     element.addEventListener("keydown", pressed, true); element.addEventListener("pointerdown", pressed, true); element.addEventListener("keydown", reopen, true);
+    element.addEventListener(promptTypeEvent, redirected, true);
     element.addEventListener("compositionstart", begin); element.addEventListener("compositionend", end);
     return () => {
       gone = true;
@@ -137,6 +152,7 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
       element.removeEventListener("paste", paste, true); element.removeEventListener("drop", paste, true);
       element.removeEventListener("input", inspect); element.removeEventListener("keyup", inspect); element.removeEventListener("click", inspect);
       element.removeEventListener("keydown", pressed, true); element.removeEventListener("pointerdown", pressed, true); element.removeEventListener("keydown", reopen, true);
+      element.removeEventListener(promptTypeEvent, redirected, true);
       element.removeEventListener("compositionstart", begin); element.removeEventListener("compositionend", end);
     };
   }, [input]);

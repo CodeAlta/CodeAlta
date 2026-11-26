@@ -146,6 +146,11 @@ public sealed class AltaSearchCommandsTests
         var load = Records(result).Single(static record => Type(record) == "alta.search.load");
         Assert.AreEqual("now", load.GetProperty("toolsAvailable").GetString());
         Assert.AreEqual(1, load.GetProperty("loadedCount").GetInt32());
+        // What the server of a loaded tool says of its tools to the model comes with the tool.
+        var instructions = load.GetProperty("serverInstructions").EnumerateArray().Single();
+        Assert.AreEqual("slack", instructions.GetProperty("server").GetString());
+        Assert.AreEqual("Post in threads.", instructions.GetProperty("instructions").GetString());
+        Assert.AreEqual("Read `serverInstructions` first.", load.GetProperty("serverInstructionsNote").GetString());
         var items = load.GetProperty("items").EnumerateArray().ToDictionary(static item => item.GetProperty("ref").GetString()!, static item => item);
         Assert.AreEqual("loaded", items["mcp:slack/post_message"].GetProperty("status").GetString());
         Assert.AreEqual("mcp__slack__post_message", items["mcp:slack/post_message"].GetProperty("alias").GetString());
@@ -194,6 +199,8 @@ public sealed class AltaSearchCommandsTests
                 context.Invocation.Stdout.WriteLine(JsonSerializer.Serialize(new
                 {
                     type = "alta.mcp.activate", toolsAvailable = "now", tools = ids.Select(static id => "mcp__" + id.Replace("/", "__", StringComparison.Ordinal)).ToArray(),
+                    serverInstructions = new[] { new { server = "slack", instructions = "Post in threads." } },
+                    serverInstructionsNote = "Read `serverInstructions` first.",
                 }));
                 return ValueTask.FromResult(0);
             });

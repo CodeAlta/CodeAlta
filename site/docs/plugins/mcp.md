@@ -278,7 +278,8 @@ Activate the memory and docs MCP servers.
 - The tools join the running turn, and every later turn of the session.
 - An agent can activate one tool, `alta mcp activate github/create_issue`, or load tools it found with `alta search load` in CodeAlta Desktop.
 - Activations stay with the session, also after a restart.
-- With a Claude API model that loads tools on demand (Claude 4.5 or later), no activation is needed: the tools of enabled servers already listed are found with `tool_search`, and a server starts at its first call. **Test** in Settings lists a server never listed.
+- A server can publish instructions for the model on the use of its tools. The agent gets them with the activation and in its later turns, marked as coming from the server; over 16,000 characters, they are cut.
+- With a Claude API model that loads tools on demand (Claude 4.5 or later), no activation is needed: the tools of enabled servers already listed are found with `tool_search`, and a server starts at its first call. The agent has the instructions of these servers from the start. **Test** in Settings lists a server never listed.
 - Tools are named `mcp__<server>__<tool>`, with other characters than ASCII letters and digits replaced by `_`.
 - An image returned by a tool (a screenshot) reaches models that accept images. CodeAlta Desktop shows it in an **Image read** card.
 - A stdio server gets the Git and GitHub identity of the session's [space](../spaces.md#identity); sessions of two identities each start their own server.

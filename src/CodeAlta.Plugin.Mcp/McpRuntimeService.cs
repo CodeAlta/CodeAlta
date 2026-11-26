@@ -109,11 +109,19 @@ internal sealed record McpRuntimeToolSearchResult
     public IReadOnlyList<McpRuntimeTool> Tools { get; init; } = [];
 
     public IReadOnlyList<McpRuntimeDiagnostic> Diagnostics { get; init; } = [];
+
+    // The instructions of the servers that gave some, by server (McpServerInstructions): only a listing for servers has them.
+    public IReadOnlyDictionary<string, string> Instructions { get; init; } = McpServerInstructions.None;
 }
 
 // The tools of the servers as CodeAlta last listed them, for a provider that defers tools: those the policy keeps loaded and
 // those that are deferred.
-internal sealed record McpCachedToolsResult(IReadOnlyList<McpRuntimeTool> Loaded, IReadOnlyList<McpRuntimeTool> Deferred);
+internal sealed record McpCachedToolsResult(IReadOnlyList<McpRuntimeTool> Loaded, IReadOnlyList<McpRuntimeTool> Deferred)
+{
+    // The instructions the servers of these tools gave when they were listed for the project and the identity of the
+    // request, by server; none when the policy keeps the servers out of the prompt (discover_in_prompt).
+    public IReadOnlyDictionary<string, string> Instructions { get; init; } = McpServerInstructions.None;
+}
 
 internal sealed record McpRuntimeServerTestResult
 {
@@ -361,6 +369,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         var context = LoadContext(request);
         var diagnostics = new List<McpRuntimeDiagnostic>();
         var tools = new List<McpRuntimeTool>();
+        Dictionary<string, string>? instructions = null;
         foreach (var server in context.Config.EffectiveServers)
         {
             if (!requestedServers.Remove(server.Definition.Key))
@@ -376,7 +385,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 continue;
             }
 
+            var listed = tools.Count;
             tools.AddRange(state.Tools.Where(static tool => tool.Enabled && McpApps.IsVisibleToModel(tool.Visibility)));
+            // A server that gives the model no tool has nothing to say of them.
+            if (state.Instructions is { } text && tools.Count > listed)
+            {
+                (instructions ??= new Dictionary<string, string>(StringComparer.Ordinal))[server.Definition.Key] = text;
+            }
         }
 
         foreach (var missing in requestedServers.OrderBy(static key => key, StringComparer.Ordinal))
@@ -396,6 +411,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 .ThenBy(static tool => tool.Name, StringComparer.Ordinal)
                 .ToArray(),
             Diagnostics = diagnostics,
+            Instructions = instructions ?? McpServerInstructions.None,
         };
     }
 
@@ -771,7 +787,8 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     /// decide which stay loaded: <c>all</c> keeps every tool of a server, <c>none</c> none, <c>allowlist</c> and <c>auto</c>
     /// those of <c>direct_tools</c> (or of <c>allowed_tools</c> when it has none), and at most <c>direct_tool_threshold</c> tools
     /// stay loaded in all. The others are deferred. The list is in the order of the servers and of the tools, so that it is
-    /// the same from one run to the next.
+    /// the same from one run to the next. The instructions of the servers are those kept for the identity of the request
+    /// (<see cref="McpRuntimeRequest.Environment"/>).
     /// </summary>
     public McpCachedToolsResult ListCachedTools(McpRuntimeRequest request)
     {
@@ -780,6 +797,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         var cache = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home));
         var loaded = new List<McpRuntimeTool>();
         var deferred = new List<McpRuntimeTool>();
+        Dictionary<string, string>? instructions = null;
         if (!context.Policy.Enabled) return new McpCachedToolsResult(loaded, deferred);
         var maximumLoaded = Math.Max(0, context.Policy.DirectToolThreshold);
         foreach (var effective in context.Config.EffectiveServers.OrderBy(static server => server.Definition.Key, StringComparer.Ordinal))
@@ -787,6 +805,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             var key = effective.Definition.Key;
             if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) continue;
             if (cache.Read(key, McpToolListCache.Fingerprint(effective.Definition)) is not { } list) continue;
+            var offered = loaded.Count + deferred.Count;
             foreach (var tool in list.Tools.OrderBy(static tool => tool.Name, StringComparer.Ordinal))
             {
                 // A tool only the view of its server calls (MCP Apps) is not offered to the model.
@@ -799,9 +818,19 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 if (StaysLoaded(context.Policy, serverPolicy, tool.Name) && loaded.Count < maximumLoaded) loaded.Add(runtimeTool);
                 else deferred.Add(runtimeTool);
             }
+
+            // The instructions of a server whose tools are offered tell the model when to look for them: those the server
+            // gave to this project and this identity, never the ones another gave under the same key. The file is read as it
+            // is: its text is brought back to what is kept.
+            if (context.Policy.DiscoverInPrompt && loaded.Count + deferred.Count > offered
+                && string.Equals(list.InstructionsScope, InstructionsScopeOf(effective.Definition, context.Request.Environment), StringComparison.Ordinal)
+                && McpServerInstructions.Normalize(list.Instructions) is { } text)
+            {
+                (instructions ??= new Dictionary<string, string>(StringComparer.Ordinal))[key] = text;
+            }
         }
 
-        return new McpCachedToolsResult(loaded, deferred);
+        return new McpCachedToolsResult(loaded, deferred) { Instructions = instructions ?? McpServerInstructions.None };
     }
 
     private static bool StaysLoaded(McpPolicyOptions policy, McpServerPolicyOptions? serverPolicy, string toolName)
@@ -903,8 +932,8 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
             if (changed)
             {
-                _servers[cacheKey] = ServerRuntimeState.Connected(client, tools, kept.Variant, kept.Skills);
-                WriteToolList(context, effective.Definition, tools, kept.Variant);
+                _servers[cacheKey] = ServerRuntimeState.Connected(client, tools, kept.Variant, kept.Skills, kept.Instructions);
+                WriteToolList(context, effective.Definition, tools, kept.Variant, kept.Instructions);
             }
 
             return;
@@ -930,14 +959,21 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     }
 
     // Every listing is kept, so that search finds the tools of the server without starting it.
-    private static void WriteToolList(RuntimeContext context, McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools, string? variant)
+    private static void WriteToolList(RuntimeContext context, McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools, string? variant, string? instructions)
     {
         try
         {
-            new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Write(definition, tools, variant);
+            new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Write(definition, tools, variant, instructions,
+                InstructionsScopeOf(definition, context.Request.Environment));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next listing. */ }
     }
+
+    // What the instructions kept with a list answer for: the file that defines the server and, for a server CodeAlta starts,
+    // the identity it is started with. The key and the fingerprint of a list leave out the values of the variables and the
+    // headers, so two projects may share a list; what a server says to one is not said to the other. No secret is read for it.
+    internal static string InstructionsScopeOf(McpServerDefinition definition, CodeAlta.Agent.AgentProcessEnvironment? environment)
+        => McpToolListCache.VariantOf(string.Join('\0', definition.SourcePath, definition.Transport == McpTransportKind.Stdio ? EnvironmentKey(environment) : string.Empty));
 
     private static string CacheKeyOf(RuntimeContext context, McpEffectiveServer effective, out string serverAliasPart)
     {
@@ -1007,12 +1043,14 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             IReadOnlyList<McpRuntimeTool> tools = [.. ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy)
                 .Select(tool => tool with { ServerVersion = serverVersion })];
             var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
-            WriteToolList(context, effective.Definition, tools, variant);
+            // What the server says of its tools to the model: kept with them, for the agent of a session that uses the server.
+            var instructions = McpServerInstructions.Normalize(client.ServerInstructions);
+            WriteToolList(context, effective.Definition, tools, variant, instructions);
             // The skills are listed with the tools, never a file of them: a file is read only when a skill is loaded.
             var skills = LoadsSkills ? await ListServerSkillsAsync(context, effective.Definition, client, variant, timeout.Token, cancellationToken).ConfigureAwait(false) : null;
             var connectedClient = client;
             client = null;
-            return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools, variant, skills));
+            return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools, variant, skills, instructions));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -2249,13 +2287,14 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
     private sealed class ServerRuntimeState
     {
-        private ServerRuntimeState(McpClient? client, IReadOnlyList<McpRuntimeTool> tools, McpRuntimeDiagnostic? diagnostic, string? variant, McpCachedSkillList? skills)
+        private ServerRuntimeState(McpClient? client, IReadOnlyList<McpRuntimeTool> tools, McpRuntimeDiagnostic? diagnostic, string? variant, McpCachedSkillList? skills, string? instructions)
         {
             Client = client;
             Tools = tools;
             Diagnostic = diagnostic;
             Variant = variant;
             Skills = skills;
+            Instructions = instructions;
         }
 
         public McpClient? Client { get; }
@@ -2270,10 +2309,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         // The skills the server listed at the connection, for a host that loads skills and a server that publishes some.
         public McpCachedSkillList? Skills { get; }
 
-        public static ServerRuntimeState Connected(McpClient client, IReadOnlyList<McpRuntimeTool> tools, string? variant, McpCachedSkillList? skills = null)
-            => new(client, tools, null, variant, skills);
+        // What the server said of its tools to the model at the connection (McpServerInstructions); null when it said nothing.
+        public string? Instructions { get; }
+
+        public static ServerRuntimeState Connected(McpClient client, IReadOnlyList<McpRuntimeTool> tools, string? variant, McpCachedSkillList? skills = null, string? instructions = null)
+            => new(client, tools, null, variant, skills, instructions);
 
         public static ServerRuntimeState Failed(McpRuntimeDiagnostic diagnostic)
-            => new(null, [], diagnostic, null, null);
+            => new(null, [], diagnostic, null, null, null);
     }
 }

@@ -118,7 +118,7 @@ internal sealed class WindowsService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (_windows is null) return new("unavailable", null);
-        return _windows.FocusTab(request.Tab) is { } id ? new("ok", id) : new("not_found", null);
+        return _windows.FocusTab(request.Tab, request.Payload) is { } id ? new("ok", id) : new("not_found", null);
     }
 
     /// <summary>Opens a new secondary window, or a saved one that is closed.</summary>
@@ -285,7 +285,9 @@ internal sealed record WindowsMoveTabResponse(string Status, string? WindowId);
 
 internal sealed record WindowsRefuseMoveRequest(string RequestId, string? Status);
 
-internal sealed record WindowsTabRequest(string Tab);
+/// <param name="Tab">The tab, as <c>session:&lt;id&gt;</c>, <c>editor:&lt;project&gt;</c> and so on.</param>
+/// <param name="Payload">What the window that holds the tab is asked to show in it once in front, when more than the tab.</param>
+internal sealed record WindowsTabRequest(string Tab, string? Payload = null);
 
 internal sealed record WindowsWindowIdResponse(string Status, string? WindowId);
 

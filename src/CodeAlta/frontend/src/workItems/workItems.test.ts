@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkItemRow, WorkItemsProject } from "#neoastra";
 import { carriedBy, createdDay, filterWorkItems, readingOrder, sessionCards, shownTags, sortWorkItems, stageCounts, startChoices, tagColor, tagNameOf, workCounts, workDateGroup,
-  workItemKey, workItems, workStage, workStatusLabel } from "./workItems";
+  readWorkItemsFocus, workItemKey, workItems, workStage, workStatusLabel } from "./workItems";
 
 const row = (id: string, kind: "task" | "plan", status: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind, title: `Title of ${id}`, summary: null,
   category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, tags: null, shortId: null, updated: null, ...more });
@@ -151,4 +151,12 @@ test("the groups of the list are today, yesterday, this week from Monday, last w
   // On a Monday, the day before is yesterday, and last week starts a week before.
   assert.equal(workDateGroup("2026-11-01", new Date(2026, 10, 2)).key, "yesterday");
   assert.equal(workDateGroup("2026-10-26", new Date(2026, 10, 2)).key, "last-week");
+});
+
+test("the focus another window sends is read back, and what is not a focus is refused", () => {
+  const key = workItemKey({ projectId: "p1", kind: "task", id: "t1" });
+  assert.deepEqual(readWorkItemsFocus(JSON.stringify({ projectId: "p1", key })), { projectId: "p1", key });
+  assert.deepEqual(readWorkItemsFocus(JSON.stringify({ projectId: null, kind: "review" })), { projectId: null, kind: "review" });
+  assert.deepEqual(readWorkItemsFocus(JSON.stringify({ projectId: "p1", kind: "bogus", key: 3 })), { projectId: "p1" });
+  for (const text of [null, undefined, "", "not json", "null", "3", "{}", JSON.stringify({ projectId: 3 })]) assert.equal(readWorkItemsFocus(text), null, String(text));
 });

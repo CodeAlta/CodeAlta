@@ -58,9 +58,34 @@ internal sealed class MobileLive
         // alta steers a session whose turn runs, as `isRunning` says it.
         ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.TryGetValue(sessionId, out var ask) ? MobileAsks.Mark(ask) : null,
         ["approving"] = _approving.TryGetValue(sessionId, out var approval) ? MobilePermissions.Mark(approval) : null,
-        // A suggestion is only an event: one made before the plugin saw the session is not known.
+        // A suggestion is only an event: one made before the plugin saw the session comes with its status (see Adopt).
         ["suggestion"] = null,
     };
+
+    /// <summary>
+    /// Takes what <c>alta session status</c> says a session suggests. For a session whose events the plugin does not
+    /// follow (one it never saw, or one the host detached), the status is all there is: the suggestion is the one it says,
+    /// or none, as when another process ran the session meanwhile. A session the plugin follows keeps what its events
+    /// said; the status only gives it the suggestion restored when the host attached it again, while it is idle and told none.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="projectId">Its project.</param>
+    /// <param name="suggestion">What its status says; null when it says none.</param>
+    internal void Adopt(string sessionId, string? projectId, string? suggestion)
+    {
+        var text = AgentPromptSuggestionEvent.Normalize(suggestion);
+        // A session the plugin never saw and that suggests nothing has no state to keep.
+        if (text is null && !_sessions.ContainsKey(sessionId)) return;
+        var session = _sessions.GetOrAdd(sessionId, static _ => new Session());
+        lock (session)
+        {
+            if (session.Followed ? text is null || session.State != Idle || session.Suggestion is not null : session.Suggestion == text) return;
+            session.ProjectId ??= projectId;
+            session.Suggestion = text;
+            session.Dirty = true;
+        }
+    }
+
 
     /// <summary>Follows one event of a session.</summary>
     /// <param name="agentEvent">The event.</param>
@@ -73,6 +98,8 @@ internal sealed class MobileLive
         lock (session)
         {
             if (projectId is not null) session.ProjectId = projectId;
+            // An event says the host has the session attached; its shutdown, that it no longer tells what happens to it.
+            session.Followed = agentEvent is not AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Shutdown };
             switch (agentEvent)
             {
                 case AgentActivityEvent { Kind: AgentActivityKind.Turn } turn:
@@ -140,13 +167,10 @@ internal sealed class MobileLive
                     session.Suggestion = null;
                     session.Set(session.State, "error", "Error");
                     break;
-                case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Shutdown }:
-                    if (session.Suggestion is null) return;
-                    session.Suggestion = null;
-                    session.Dirty = true;
-                    break;
                 // The session tells a suggestion once its run said it is idle, as the runtime keeps it: one that comes
-                // while a turn is seen running answers nothing any more.
+                // while a turn is seen running answers nothing any more. A session that shuts down keeps it, as its journal
+                // does (the host detaches an idle session): another turn, a prompt or an error of the session ends it, or a
+                // status that says otherwise once the plugin no longer follows the session (see Adopt).
                 case AgentPromptSuggestionEvent suggested:
                     var suggestion = session.State == Idle ? AgentPromptSuggestionEvent.Normalize(suggested.Suggestion) : null;
                     if (suggestion is null || suggestion == session.Suggestion) return;
@@ -319,6 +343,8 @@ internal sealed class MobileLive
         internal PluginPermissionSummary? Approving;
         // What the model suggested as the next prompt once the last turn ended; null once another one started.
         internal string? Suggestion;
+        // Whether the plugin sees the events of the session: since one of them, until its shutdown.
+        internal bool Followed;
         internal int NotRunning;
         internal DateTimeOffset ProbedAt;
 

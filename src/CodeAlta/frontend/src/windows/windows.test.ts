@@ -3,7 +3,7 @@ import test from "node:test";
 import type { WindowsCurrentResponse, WindowsEvent, WindowsWindow } from "#neoastra";
 import { automationsTab, canvasTab, changesTab, documentationTab, editorTab, terminalTab } from "../fileTabs";
 import { testLimit } from "../testTime";
-import { fileTabRef, readTransfer, sessionTabRef, spaceBound, tabRefKind, transferOf } from "./tabRefs";
+import { fileTabRef, readTransfer, sessionIdOfRef, sessionTabRef, spaceBound, tabRefKind, transferOf } from "./tabRefs";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsApi } from "./windowsHub";
 
 const project = { id: "p1", path: "C:\\code\\p1" };
@@ -18,6 +18,11 @@ test("a tab is named as the host and alta window name it", () => {
   assert.equal(fileTabRef(canvasTab({ pluginKey: "git", canvasId: "board", project: { id: "p1", path: "C:\\code\\p1" } })), "canvas:git/board/p1//");
   assert.equal(tabRefKind("session:s1"), "session");
   assert.equal(tabRefKind("documentation"), "documentation");
+});
+
+test("the session of a reference is read back, and another tab names none", () => {
+  assert.equal(sessionIdOfRef(sessionTabRef("s1")), "s1");
+  for (const ref of ["terminal:t1", "workItems", "session:", "editor:session:x"]) assert.equal(sessionIdOfRef(ref), null, ref);
 });
 
 test("what is of a project stays in a window of its space; what is of the application goes anywhere", () => {
@@ -100,6 +105,42 @@ test("a page that is no window of the host is the main one, and asks nothing", (
   assert.equal(hub.secondary, false);
   assert.equal(hub.heldElsewhere("session:s1"), false);
   assert.equal(hub.handles("terminal:t1"), true);
+});
+
+test("a tab is brought to the front with what the window is asked to show in it", async () => {
+  const { api, calls } = fakeApi(() => []);
+  const hub = createWindowsHub(api, current(window("main")));
+  hub.focusTab("workItems:", "{\"projectId\":\"p1\"}");
+  hub.focusTab("session:s2");
+  await settle();
+  assert.deepEqual(calls, [["focusTab", { tab: "workItems:", payload: "{\"projectId\":\"p1\"}" }], ["focusTab", { tab: "session:s2", payload: null }]]);
+});
+
+test("the sessions that another open window holds are listed for the Explorer, and the list changes only with them", async () => {
+  let windows = [window("main", { tabs: ["session:s1"] }), window("w2", { tabs: ["session:s2", "terminal:t2"], activeTab: "session:s2" })];
+  const { api, send } = fakeApi(() => windows);
+  const hub = createWindowsHub(api, { ...current(windows[0]), windows });
+  assert.deepEqual([...hub.getSnapshot().sessionWindows], [["s2", "w2"]]);
+  let notified = 0;
+  hub.subscribe(() => notified++);
+  const stop = hub.connect();
+  const changed = { kind: "changed", tab: null, payload: null, requestId: null, target: null, x: null, y: null, refused: false } as const;
+  await settle(); await settle();
+  const before = notified;
+  // Another tab in front, and a terminal that moves: the sessions are the same, nothing is drawn again.
+  windows = [window("main", { tabs: ["session:s1"] }), window("w2", { tabs: ["session:s2", "terminal:t3"], activeTab: "terminal:t3" })];
+  send(changed);
+  await settle(); await settle();
+  assert.equal(notified, before);
+  windows = [window("main", { tabs: ["session:s1"] }), window("w2", { tabs: ["session:s2", "session:s3"] })];
+  send(changed);
+  await settle(); await settle();
+  assert.deepEqual([...hub.getSnapshot().sessionWindows], [["s2", "w2"], ["s3", "w2"]]);
+  windows = [window("main", { tabs: ["session:s1"] }), window("w2", { open: false, saved: true, tabs: ["session:s2"] })];
+  send(changed);
+  await settle(); await settle();
+  assert.deepEqual([...hub.getSnapshot().sessionWindows], [], "a window that is closed holds nothing");
+  stop();
 });
 
 test("a tab that another window holds is shown there; a request that reaches every window is the holder's, else the main one's", async () => {
@@ -193,11 +234,11 @@ test("the tabs the windows hold do not change what the page shows of them", asyn
   assert.equal(notified, 0);
   assert.equal(hub.ownerOf("session:s3"), "main", "the owners are read from what the host listed");
 
-  // A tab another window takes is known at once, without the page drawing anything, and so is a change of focus.
-  windows = [window("main", { tabs: ["session:s1"], focused: false }), window("w2", { tabs: ["session:s2", "session:s3"], focused: true, state: "minimized" })];
+  // A tab another window takes is known at once, without the page drawing anything (a session it takes is marked in the Explorer: see below), and so is a change of focus.
+  windows = [window("main", { tabs: ["session:s1"], focused: false }), window("w2", { tabs: ["session:s2", "terminal:t3"], focused: true, state: "minimized" })];
   fake.send({ kind: "changed", tab: null, payload: null, requestId: null, target: null, x: null, y: null, refused: false });
   await settle(); await settle();
-  assert.equal(hub.heldElsewhere("session:s3"), true, "the owners are those the host listed last");
+  assert.equal(hub.heldElsewhere("terminal:t3"), true, "the owners are those the host listed last");
   assert.equal(hub.getSnapshot(), before);
   assert.equal(notified, 0);
 

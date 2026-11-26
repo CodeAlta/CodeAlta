@@ -169,7 +169,7 @@ Type `@` in the prompt to search the files and folders of the project. An accept
 @"src/path with spaces/file.cs":10-40
 ```
 
-`Esc` closes the picker for that `@`; put the caret right after it and press `Ctrl+Space` to open it again. The `#` picker works the same way. `Ctrl+E` or `/edit` opens the same picker to edit a file in the [code editor](code.md#code-editor).
+`Esc` closes the picker for that `@`; put the caret right after it and press `Ctrl+Space` to open it again. The `#` picker works the same way. Only a typed `@` or `#` opens a picker by itself: a path or a number that arrives by pasting, by taking a suggestion or by putting the caret after it stays plain text, and `Ctrl+Space` opens the picker there. `Ctrl+E` or `/edit` opens the same picker to edit a file in the [code editor](code.md#code-editor).
 
 > [!NOTE]
 > Attach only what the task needs: focused context is easier to review and compacts less often.

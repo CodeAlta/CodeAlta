@@ -49,6 +49,17 @@ test("issues checked in the picker opened by the attach menu are attached, and #
       await command("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: virtual, modifiers });
     };
     const shiftEnter = () => key("Enter", "Enter", 13, 8);
+    // Text as the keyboard types it: a `#` is a key (Shift+3) that the picker sees, the rest is inserted as a whole.
+    const typed = async (text: string) => {
+      const parts = text.split("#");
+      for (const [index, part] of parts.entries()) {
+        if (part) await command("Input.insertText", { text: part });
+        if (index < parts.length - 1) {
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key: "#", code: "Digit3", windowsVirtualKeyCode: 51, modifiers: 8, text: "#" });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key: "#", code: "Digit3", windowsVirtualKeyCode: 51, modifiers: 8 });
+        }
+      }
+    };
     const dialog = "document.querySelector('dialog[open].reference-palette')";
     const attached = "document.querySelector('#attached').textContent";
     const prompt = "document.querySelector('#prompt').value";
@@ -105,10 +116,10 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     const pressed = "Array.from(document.querySelectorAll('.reference-kind[aria-pressed=\"true\"]'), button => button.getAttribute('data-kind')).join(',')";
     const reopen = async (text: string) => {
       await evaluate("{ const area = document.querySelector('#prompt'); area.focus(); area.setSelectionRange(area.value.length, area.value.length); }");
-      await command("Input.insertText", { text });
+      await typed(text);
     };
     await evaluate("document.querySelector('#prompt').focus()");
-    await command("Input.insertText", { text: "fix #" });
+    await typed("fix #");
     assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length === 5`), true, "# opens the picker");
     assert.equal(await evaluate(kinds), "task,issue,issue,issue,plan", "mixed, the most recent first");
     assert.equal(await evaluate(pressed), "issue,task,plan", "the sessions are not shown at first");
@@ -149,7 +160,7 @@ test("issues checked in the picker opened by the attach menu are attached, and #
 
     // The number of a known issue and a space close the picker and stay in the prompt as typed.
     await evaluate("{ const area = document.querySelector('#prompt'); area.value = ''; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); }");
-    await command("Input.insertText", { text: "see #" });
+    await typed("see #");
     assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "# opens the picker");
     await command("Input.insertText", { text: "42" });
     await key(" ", "Space", 32);
@@ -158,7 +169,7 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     assert.equal(await evaluate("document.querySelector('#prompt').selectionStart"), 8, "the caret goes on after the space");
     // A full stop ends it as well, without a space.
     await evaluate("{ const area = document.querySelector('#prompt'); area.value = ''; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); }");
-    await command("Input.insertText", { text: "see #" });
+    await typed("see #");
     assert.equal(await until(dialog), true);
     await command("Input.insertText", { text: "7" });
     await key(".", "Period", 190);
@@ -168,7 +179,7 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     assert.equal(await evaluate(prompt), "see #7.");
     await command("Input.insertText", { text: " " });
     // Words may be a real search: a space is part of the query.
-    await command("Input.insertText", { text: "and #" });
+    await typed("and #");
     assert.equal(await until(dialog), true);
     await command("Input.insertText", { text: "crash" });
     await key(" ", "Space", 32);
@@ -184,8 +195,32 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     assert.equal(await evaluate(`!!${dialog}`), false, "a paste does not open the picker");
     assert.equal(await evaluate(prompt), "see #test");
     // Typing a new # afterwards opens it as usual.
-    await command("Input.insertText", { text: " #" });
+    await typed(" #");
     assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a typed # opens the picker after a paste");
+    await key("Escape", "Escape", 27);
+    assert.equal(await until(`!${dialog}`), true);
+
+    // A token that arrives without its # typed is text: a suggestion taken or a draft shown (inserted whole, then the key that
+    // took it comes up), and a deletion that leaves the caret after one.
+    await evaluate("{ const area = document.querySelector('#prompt'); area.value = ''; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); }");
+    await command("Input.insertText", { text: "Review PR #123" });
+    await key("ArrowRight", "ArrowRight", 39);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(await evaluate(`!!${dialog}`), false, "a suggestion that ends with a #123 does not open the picker");
+    await command("Input.insertText", { text: "4" });
+    await key("Backspace", "Backspace", 8);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(await evaluate(`!!${dialog}`), false, "a deletion that leaves the caret after a #123 does not open it");
+    assert.equal(await evaluate(prompt), "Review PR #123");
+    await typed(" #");
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a typed # opens the picker again");
+    await key("Escape", "Escape", 27);
+    assert.equal(await until(`!${dialog}`), true);
+    // A # pressed while the timeline has the focus is given to the prompt, which sees no key: the request to type it counts as one.
+    await command("Input.insertText", { text: " " });
+    await evaluate("document.querySelector('#prompt').dispatchEvent(new CustomEvent('codealta:prompt-type', { detail: '#', cancelable: true }))");
+    await command("Input.insertText", { text: "#" });
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a # typed from outside the prompt opens the picker");
 
     // Closed issues are left out until asked for: the host is told so, and Ctrl+I asks for them.
     const issueRows = "document.querySelectorAll('.reference-item[data-kind=\"issue\"]').length";

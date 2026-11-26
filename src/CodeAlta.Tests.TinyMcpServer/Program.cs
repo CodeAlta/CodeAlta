@@ -30,6 +30,7 @@ builder.Services
         // The skills of the extension are specified against the revision that stamps `_meta` on every request.
         options.ProtocolVersion = settings.Skills ? null : "2025-06-18";
         options.ServerInfo = new Implementation { Name = "codealta-tiny-mcp", Version = "1.0.0" };
+        options.ServerInstructions = settings.Instructions;
         options.Capabilities = new ServerCapabilities
         {
             Tools = new ToolsCapability { ListChanged = false },
@@ -94,12 +95,16 @@ internal sealed record TinyMcpServerSettings(string? LogPath, string? StderrLine
             string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_INCOMPATIBLE_TOOL"), "1", StringComparison.Ordinal))
         {
             StartDirectory = Environment.GetEnvironmentVariable("MCP_TEST_START_DIR"),
+            Instructions = Environment.GetEnvironmentVariable("MCP_TEST_INSTRUCTIONS"),
             UiTools = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_UI_TOOLS"), "1", StringComparison.Ordinal),
             HostileView = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_UI_HOSTILE"), "1", StringComparison.Ordinal),
             Skills = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_SKILLS"), "1", StringComparison.Ordinal),
             TamperSkills = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_SKILLS_TAMPER"), "1", StringComparison.Ordinal),
         };
     }
+
+    // What the server says of its tools to the model at the connection (MCP_TEST_INSTRUCTIONS); nothing when not set.
+    public string? Instructions { get; init; }
 
     // The skills of the MCP Skills extension (MCP_TEST_SKILLS=1).
     public bool Skills { get; init; }

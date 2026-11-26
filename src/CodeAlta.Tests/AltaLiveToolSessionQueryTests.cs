@@ -319,6 +319,46 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    [DataRow(true, DisplayName = "host shows suggestions")]
+    [DataRow(false, DisplayName = "host shows none")]
+    public async Task SessionStatus_SaysTheSuggestionOfADetachedSession_AsTheHostShowsIt(bool shows)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("suggesting");
+        var provider = new StatefulProviderRuntime(providerId);
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, provider.DisplayName), () => provider);
+        var catalog = new SessionViewCatalog(options);
+        var skills = new SkillCatalog();
+        var runtime = new SessionRuntimeService(new AgentHub(registry), new AgentSessionCatalog(catalog.JournalStore.CreateSessionStore()),
+            new ProjectCatalog(options), catalog, new AgentInstructionTemplateProvider(skills, options), options, skills)
+        {
+            ShowsPromptSuggestions = shows,
+        };
+        await using var _ = runtime.ConfigureAwait(false);
+        var session = await runtime.CreateGlobalSessionAsync(new SessionExecutionOptions
+        {
+            ProviderId = providerId, ProviderKey = providerId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }, "Suggesting").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+        async Task<System.Text.Json.JsonElement> StatusAsync()
+            => ReadJsonLines((await dispatcher.InvokeAsync(["session", "status", session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout)
+                .Single(static line => line.GetProperty("type").GetString() == "alta.session.status");
+
+        // The suggestion of the turn the session ended with, as its journal keeps it once the host detached the idle session.
+        var store = catalog.JournalStore.CreateSessionStore();
+        var summary = await store.GetSessionSummaryAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
+        Assert.IsNotNull(summary, "A created session has a summary.");
+        await store.UpsertSessionAsync(summary with { PromptSuggestion = "  commit it  ", PromptSuggestionRunId = new AgentRunId("run-1") }, CancellationToken.None).ConfigureAwait(false);
+        Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(session.SessionId).ConfigureAwait(false));
+
+        var status = await StatusAsync().ConfigureAwait(false);
+        Assert.AreEqual(shows ? "commit it" : null, status.TryGetProperty("promptSuggestion", out var suggestion) ? suggestion.GetString() : null);
+    }
+
+    [TestMethod]
     public async Task SessionList_ReadsTheSessionProjection_NeverAJournal()
     {
         using var root = TempDirectory.Create();

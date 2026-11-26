@@ -459,6 +459,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
 
         string? toolsAvailable = null;
+        JsonElement? serverInstructions = null;
+        string? serverInstructionsNote = null;
         if (mcpIds.Count > 0)
         {
             var registry = context.Services.Get<AltaCommandRegistry>();
@@ -498,7 +500,13 @@ internal sealed partial class BuiltInAltaCommandContributor
                 }
             }
 
-            if (activation is { } done && done.TryGetProperty("toolsAvailable", out var available)) toolsAvailable = available.GetString();
+            if (activation is { } done)
+            {
+                if (done.TryGetProperty("toolsAvailable", out var available)) toolsAvailable = available.GetString();
+                // What the servers of the loaded tools say of them to the model is passed on with them.
+                if (done.TryGetProperty("serverInstructions", out var instructions)) serverInstructions = instructions;
+                if (done.TryGetProperty("serverInstructionsNote", out var instructionsNote)) serverInstructionsNote = instructionsNote.GetString();
+            }
         }
 
         var loaded = items.Count(static item => item["status"] is "loaded");
@@ -514,6 +522,8 @@ internal sealed partial class BuiltInAltaCommandContributor
                 : toolsAvailable == "now"
                     ? "The tools are registered for this turn: call them in your next step. Do not end the turn. The session keeps them, also when it is resumed."
                     : "The tools come with the next run of this session, which keeps them.",
+            ["serverInstructions"] = loaded > 0 ? serverInstructions : null,
+            ["serverInstructionsNote"] = loaded > 0 ? serverInstructionsNote : null,
         });
         return loaded > 0 || items.Count(static item => item["status"] is "already_loaded" or "activate") > 0 ? AltaExitCodes.Success
             : items.All(static item => item["status"] is "not_found") ? AltaExitCodes.NotFound : AltaExitCodes.Failure;

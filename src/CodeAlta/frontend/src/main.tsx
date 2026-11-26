@@ -88,10 +88,11 @@ import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
-import { ProjectEditor, type EditorRequest } from "./editor/ProjectEditor";
+import { ProjectEditor } from "./editor/ProjectEditor";
+import { readEditorRequest, type EditorRequest } from "./editor/editorWorkbench";
 import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
 import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
-import { changeKeyKept } from "./changes/projectChanges";
+import { changeKeyKept, readChangesFocus, type ChangesFocus } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { inHiddenPane } from "./keptPanes";
 import { createSideQuestions, type SideQuestions } from "./sideQuestion/sideQuestions";
@@ -232,7 +233,7 @@ import { ReviewOpenerContext, ReviewsHubContext, ReviewsListOpenerContext } from
 import { ReviewComposerStatus } from "./review/ReviewComposerStatus";
 import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
 import { reviewSessions, sessionCheckout } from "./review/reviewSessions";
-import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
+import { WorkItemsPanel } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
 import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
@@ -244,7 +245,7 @@ import { sessionSettingsApi } from "./sessionSettings/sessionSettingsApi";
 import { SessionSettingsChip, useSessionSettingsChoices } from "./sessionSettings/SessionSettingsChip";
 import { machineRunProviders, onMachine } from "./machines/machineProviderNames";
 import { startWorkItem, type WorkStartSession } from "./workItems/startWorkItem";
-import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workItems, type WorkItem, type WorkStart } from "./workItems/workItems";
+import { carriedBy, readingOrder, sessionCards, workCounts, readWorkItemsFocus, workItemKey, workItems, type WorkItem, type WorkItemsFocus, type WorkStart } from "./workItems/workItems";
 import { SessionWorkMark } from "./workItems/SessionWorkMark";
 import { findTaskReference, taskReferenceIndex, TaskReferencesContext, type TaskReferences } from "./workItems/taskReferences";
 import { TerminalList } from "./terminal/TerminalList";
@@ -293,7 +294,8 @@ import { managedPolicy } from "#neoastra";
 import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsRequest } from "./windows/windowsHub";
 import { fileTabRef, readTransfer, sessionTabRef, spaceBound, transferOf } from "./windows/tabRefs";
-import { WindowBadge, WindowIcon, windowName } from "./windows/WindowBadge";
+import { SessionWindowMark, WindowBadge, WindowIcon, windowName } from "./windows/WindowBadge";
+import { dockTab, flashElement, rowsOfSession } from "./windows/focusFlash";
 import { WindowSettings } from "./windows/WindowSettings";
 import { SpeechContext } from "./speech/speech";
 import { SpeechSettings } from "./speech/SpeechSettings";
@@ -781,7 +783,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [fileClosing, setFileClosing] = useState<{ tab: FileTab; busy: boolean } | null>(null);
   // What was last asked of a changes tab, by project: the file an `alta diff show` asked it to select, the
   // checkout a session that works in a worktree asked it to show.
-  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null; worktree?: string | null; review?: "changes" | "branch" | null }>>>(() => new Map());
+  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, ChangesFocus>>(() => new Map());
   // Where the next session of each project works: the folder of the project unless a new worktree was chosen.
   const [workPlaces, setWorkPlaces] = useState(() => restoreWorkPlaces(() => localStorage.getItem(workPlacesKey)));
   // A command asked where the next session works: the choice of its prompt opens.
@@ -1532,6 +1534,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // what it showed.
     if (selection && !tabs.open.some(tab => tab.sessionId === selection.sessionId) && windowsHub.heldElsewhere(sessionTabRef(selection.sessionId))) {
       windowsHub.focusTab(sessionTabRef(selection.sessionId));
+      // Nothing else changes here, and the other window may already be in view: the row says the click was heard.
+      if (sessionRail.current) for (const row of rowsOfSession(sessionRail.current, selection.sessionId)) flashElement(row);
       const front = shownFront.current;
       if (front && "file" in front && fileTabs.open.some(tab => sameFileTab(tab, front.file))) {
         if (valid.active) applyTabState(valid); else selectProject(projectId);
@@ -1926,10 +1930,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A tab is brought to the front by what happens in it while it is shown. A focus that lands in a tab that is not
   // shown, as the one a closing popover gives back to its button once another tab was pressed, leaves it behind.
   function activateShown(tab: FileTab, visible: boolean) { return () => { if (visible) activateFile(tab); }; }
+  // Whether another window holds the tab: the tab is shown there, not here.
+  const heldElsewhere = (tab: FileTab) => !fileTabs.open.some(value => sameFileTab(value, tab)) && windowsHub.heldElsewhere(fileTabRef(tab));
   function openFile(tab: FileTab) {
     // A tab that another window holds is shown there: that window comes to the front, on it.
-    const ref = fileTabRef(tab);
-    if (!fileTabs.open.some(value => sameFileTab(value, tab)) && windowsHub.heldElsewhere(ref)) { windowsHub.focusTab(ref); return; }
+    if (heldElsewhere(tab)) { windowsHub.focusTab(fileTabRef(tab)); return; }
     openFileHere(tab);
   }
   // Open run on the card of a run, or a run of the Workflows tab: the tab of that run.
@@ -1942,14 +1947,25 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // Opens the changes of a project's repository in their tab, beside the tab that is shown: the ones of the
   // folder of the project, or of the worktree a session works in.
   function showChanges(project: Readonly<{ id: string; path: string }>, path: string | null = null, worktree?: string | null, review: "changes" | "branch" | null = null) {
-    if (path !== null || worktree !== undefined || review) setChangeRequests(current => new Map(current).set(project.id, { path, worktree, review }));
-    openFile(changesTab(project));
+    const tab = changesTab(project);
+    if (path !== null || worktree !== undefined || review) {
+      const request = { path, worktree, review };
+      // The window that holds the tab shows what was asked: it is told what, and comes to the front.
+      if (heldElsewhere(tab)) { windowsHub.focusTab(fileTabRef(tab), JSON.stringify(request)); return; }
+      setChangeRequests(current => new Map(current).set(project.id, request));
+    }
+    openFile(tab);
   }
   const showChangesLatest = useRef(showChanges); showChangesLatest.current = showChanges;
   // Opens the code editor of a project in its tab: on a file, at a place in it, or with the files of the project.
   function openEditor(project: Readonly<{ id: string; path: string }>, request: EditorRequest) {
-    setEditorRequests(current => new Map(current).set(project.id, request));
-    openFile(editorTab(project));
+    askEditor(editorTab(project), request);
+  }
+  // Shows what is asked of the editor in its tab. The window that holds the tab shows it: it is told what, and comes to the front.
+  function askEditor(tab: FileTab, request: EditorRequest) {
+    if (heldElsewhere(tab)) { windowsHub.focusTab(fileTabRef(tab), JSON.stringify(request)); return; }
+    setEditorRequests(current => new Map(current).set(tab.projectId, request));
+    openFile(tab);
   }
   const openEditorLatest = useRef(openEditor); openEditorLatest.current = openEditor;
   // A review is done where its target is shown: a file of the project folder in the editor, rendered when it is a
@@ -1964,20 +1980,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [reviewOpener] = useState(() => (scope: ReviewScope, target: ReviewTarget) => openReviewLatest.current(scope, target));
   // The code editor on the folder of a source plugin: from Settings, or asked by an agent with `alta plugin open`.
   function openPluginEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
-    setEditorRequests(current => new Map(current).set(folder.id, request));
-    openFile(pluginEditorTab(folder));
+    askEditor(pluginEditorTab(folder), request);
   }
   const openPluginEditorLatest = useRef(openPluginEditor); openPluginEditorLatest.current = openPluginEditor;
   // The code editor on a folder of the disk that is no project: the folder of a file that a link named.
   function openDiskEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
-    setEditorRequests(current => new Map(current).set(folder.id, request));
-    openFile(diskEditorTab(folder));
+    askEditor(diskEditorTab(folder), request);
   }
   const openDiskEditorLatest = useRef(openDiskEditor); openDiskEditorLatest.current = openDiskEditor;
   // The code editor on the folder of a skill, from Settings: its files, with its SKILL.md shown.
   function openSkillEditor(folder: Readonly<{ id: string; path: string; name: string }>) {
-    setEditorRequests(current => new Map(current).set(folder.id, { path: "SKILL.md", line: null, column: null, explorer: true }));
-    openFile(skillEditorTab(folder));
+    askEditor(skillEditorTab(folder), { path: "SKILL.md", line: null, column: null, explorer: true });
   }
   // What an agent or a link asks to show of a project: at once when the shown space has the project. For a project
   // of another space the window stays where the user is, and a message offers that space, where it is then shown.
@@ -2289,11 +2302,23 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     for (const request of waiting) receiveTab(request);
   });
   // Brings a tab of this window to the front: another window asked for it.
-  function focusTabRef(ref: string) {
+  function focusTabRef(ref: string, payload: string | null) {
     const tab = tabOfRef(ref);
     if (!tab) return;
     if ("session" in tab) selectSessionTab(tab.session, "preview"); else activateFile(tab.file);
+    // What the other window asked the tab to show: the item of the Work items list, the file of the changes or of the editor.
+    if ("file" in tab) {
+      const file = tab.file;
+      const work = isWorkItemsTab(file) ? readWorkItemsFocus(payload) : null;
+      if (work) setWorkFocus(work);
+      const changes = isChangesTab(file) ? readChangesFocus(payload) : null;
+      if (changes) setChangeRequests(current => new Map(current).set(file.projectId, changes));
+      const editing = isEditorTab(file) ? readEditorRequest(payload) : null;
+      if (editing) setEditorRequests(current => new Map(current).set(file.projectId, editing));
+    }
     tabFocusPending.current = true;
+    // The tab is shown once the dock has drawn the selection: the mark says which tab the click was for.
+    requestAnimationFrame(() => requestAnimationFrame(() => flashElement(dockTab(document, "session" in tab ? sessionNodeId(tab.session) : fileNodeId(tab.file)))));
   }
   // The window is asked to close (its close button, Close window, `alta window close`): its tabs close as each would,
   // the editors with unsaved edits asking first; the last tab that leaves closes the window.
@@ -2305,7 +2330,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const windowRequest = useRef<(request: WindowsRequest) => void>(() => { });
   windowRequest.current = request => {
     if (request.kind === "open") receiveTab(request);
-    else if (request.kind === "focus" && request.tab) focusTabRef(request.tab);
+    else if (request.kind === "focus" && request.tab) focusTabRef(request.tab, request.payload);
     else if (request.kind === "move" && request.tab && request.requestId) {
       const tab = tabOfRef(request.tab);
       if (tab) void moveTabLatest.current(tab, request.target === "new" ? null : request.target, request.requestId);
@@ -3308,7 +3333,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const workByProject = useMemo(() => workCounts(work, runningSessionIds), [work, runningSessionIds]);
   const [workFocus, setWorkFocus] = useState<WorkItemsFocus | null>(null);
   const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
-  function openWorkItems(focus: WorkItemsFocus | null = null) {
+  function openWorkItems(focus: WorkItemsFocus | null = null, fromSession: string | null = null) {
+    // The window that holds the tab shows the item: it is told which, and comes to the front.
+    if (focus && heldElsewhere(workItemsTab)) {
+      windowsHub.focusTab(fileTabRef(workItemsTab), JSON.stringify(focus));
+      // Nothing changes here: the row of the session the item was opened from says the click was heard.
+      if (fromSession && sessionRail.current) for (const row of rowsOfSession(sessionRail.current, fromSession)) flashElement(row);
+      return;
+    }
     if (focus) setWorkFocus(focus);
     openFile(workItemsTab);
   }
@@ -4609,9 +4641,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
       <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />
+      <SessionWindowMark window={windowsState.windows.find(window => window.id === windowsState.sessionWindows.get(session.id))} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
-      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} />
+      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) }, session.id)} />
       <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
       <CloudMark session={session} />
