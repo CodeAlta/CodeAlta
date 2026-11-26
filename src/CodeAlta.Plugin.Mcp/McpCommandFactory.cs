@@ -177,6 +177,11 @@ internal static class McpCommandFactory
                 requested.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.Home, options.Connections, request.SpaceId, options.SessionEnvironment)).ToArray()) ?? [];
             context.RunTools?.KeepLoaded([.. serverKeys.Select(McpToolReference.OfServer), .. toolKeys.Select(static key => McpToolReference.OfTool(key.Server, key.Tool))]);
             var availableNow = context.RunTools is { } runTools && requested.Length > 0 && requested.All(tool => runTools.Contains(tool.Alias));
+            // What the servers of these tools say of them to the model: the run that activates them reads it here, the next
+            // runs of the session in their prompt. A text that would not leave room for the record in the result is left to the prompt.
+            var instructions = McpServerInstructions.ForRecord(listed.Instructions.Where(pair => requested.Any(tool => string.Equals(tool.Server, pair.Key, StringComparison.Ordinal))))
+                .Select(static entry => new { server = entry.Server, instructions = entry.Instructions, omitted = entry.Instructions is null ? true : (bool?)null })
+                .ToArray();
 
             WriteRecord(context.Stdout, new
             {
@@ -195,12 +200,17 @@ internal static class McpCommandFactory
                 note = availableNow
                     ? "The tools are registered for this turn: call them as mcp__<server>__<tool> in your next step, or as mcp.<server>.<tool> in your next exec script. Do not end the turn and do not wait for another message."
                     : "Activated for future runs; tools are available on the next agent run as mcp__<server>__<tool>.",
+                serverInstructions = instructions.Length == 0 ? null : instructions,
+                serverInstructionsNote = instructions.Length == 0 ? null
+                    : "Read `serverInstructions` before you use these tools. " + McpServerInstructions.Provenance
+                        + (instructions.Any(static entry => entry.omitted == true) ? " An entry marked `omitted` was too long for this result: the prompt of the next run has it." : string.Empty),
             });
             return 0;
         });
         AddHelpText(command, "Examples: `alta mcp activate memory`; `alta mcp activate github docs`; `alta mcp activate github/create_issue` (one tool).",
             "Called by an agent, the result says `toolsAvailable: now`: the tools are registered in the running turn and are called in the next step. Called from a terminal, or when a server gave no tool, they come with the next agent run.",
-            "An agent's session keeps what it activated: a resumed session has the same tools again.");
+            "An agent's session keeps what it activated: a resumed session has the same tools again.",
+            "A server may publish instructions for the model on the use of its tools: the result gives them in `serverInstructions`, and the later runs of the session have them in their prompt.");
         return command;
     }
 

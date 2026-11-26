@@ -348,7 +348,7 @@ public sealed partial class McpPlugin : PluginBase
             : _activationState.GetUsedServers(activationScope);
         if (usedServers.Count == 0)
         {
-            return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, []).ConfigureAwait(false));
+            return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, [], cancellationToken).ConfigureAwait(false));
         }
 
         // A server activated before it left the space of the session is dropped, and forgotten by the session.
@@ -361,7 +361,7 @@ public sealed partial class McpPlugin : PluginBase
                 usedServers = [.. usedServers.Where(server => policy.IsServerInSpace(server, spaceId))];
                 if (usedServers.Count == 0)
                 {
-                    return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, []).ConfigureAwait(false));
+                    return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, [], cancellationToken).ConfigureAwait(false));
                 }
             }
         }
@@ -381,17 +381,29 @@ public sealed partial class McpPlugin : PluginBase
                 .GroupBy(static tool => tool.Server, StringComparer.Ordinal)
                 .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal));
         var activeTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _home, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray();
-        var cached = await CreateCachedToolsAsync(context, projectPath, activeTools).ConfigureAwait(false);
+        var cached = await CreateCachedToolsAsync(context, projectPath, activeTools, cancellationToken).ConfigureAwait(false);
         if (direct.Tools.Count == 0 && direct.Diagnostics.Count == 0)
         {
             return CachedToolsResult(cached);
         }
 
+        // What the servers the session uses say of their tools, as they said it at this connection; then what the servers of
+        // the other tools it is offered said when they were listed.
+        var instructions = new Dictionary<string, string>(cached.Instructions, StringComparer.Ordinal);
+        foreach (var (server, text) in direct.Instructions)
+        {
+            if (direct.Tools.Any(tool => string.Equals(tool.Server, server, StringComparison.Ordinal)))
+            {
+                instructions[server] = text;
+            }
+        }
+
         return new PluginBeforeAgentRunResult
         {
-            AdditionalTools = [.. activeTools, .. cached],
+            AdditionalTools = [.. activeTools, .. cached.Tools],
             AdditionalToolsFollowSandbox = true,
-            TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
+            // The instructions first: they stay the same from one run to the next, the diagnostics do not.
+            TemporaryPromptContributions = [.. McpServerInstructions.CreatePrompt(instructions), .. CreateDirectToolDiagnosticsPrompt(direct.Diagnostics)],
         };
     }
 
@@ -419,23 +431,27 @@ public sealed partial class McpPlugin : PluginBase
     // For a provider that defers tools, the tools of every enabled server of the space that CodeAlta listed before, without
     // starting any: the few the policy keeps loaded, and the others deferred, found with the tool search of the session. A
     // deferred tool starts its server at its first call. The tools the session activated keep their place before them.
-    private async ValueTask<IReadOnlyList<AgentToolDefinition>> CreateCachedToolsAsync(PluginBeforeAgentRunContext context, string? projectPath, IReadOnlyList<AgentToolDefinition> activeTools)
+    // With them, what their servers said of their tools when they were listed, which tells the model when to look for them.
+    private async ValueTask<CachedRunTools> CreateCachedToolsAsync(PluginBeforeAgentRunContext context, string? projectPath, IReadOnlyList<AgentToolDefinition> activeTools,
+        CancellationToken cancellationToken)
     {
         if (!context.ProviderDefersTools)
         {
-            return [];
+            return CachedRunTools.None;
         }
 
+        // The identity of the session says which instructions kept with a list are its own.
+        var environment = await SessionEnvironmentAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
         McpCachedToolsResult cached;
         await using (var runtime = _connections.CreateRuntime(_home))
         {
             try
             {
-                cached = runtime.ListCachedTools(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId });
+                cached = runtime.ListCachedTools(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId, Environment = environment });
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
             {
-                return [];
+                return CachedRunTools.None;
             }
         }
 
@@ -450,15 +466,28 @@ public sealed partial class McpPlugin : PluginBase
         // A sandboxed session is offered the tools of the servers of its profile only.
         bool Offered(McpRuntimeTool tool) => !active.Contains(tool.Alias)
             && (context.SandboxMcpServers is not { } sandboxServers || sandboxServers.Contains(tool.Server, StringComparer.Ordinal));
-        return
-        [
-            .. cached.Loaded.Where(Offered).Select(Create),
-            .. cached.Deferred.Where(Offered).Select(Defer),
-        ];
+        var offered = cached.Loaded.Concat(cached.Deferred).Where(Offered).Select(static tool => tool.Server).ToHashSet(StringComparer.Ordinal);
+        return new CachedRunTools(
+            [
+                .. cached.Loaded.Where(Offered).Select(Create),
+                .. cached.Deferred.Where(Offered).Select(Defer),
+            ],
+            cached.Instructions.Where(pair => offered.Contains(pair.Key)).ToDictionary(StringComparer.Ordinal));
     }
 
-    private static PluginBeforeAgentRunResult? CachedToolsResult(IReadOnlyList<AgentToolDefinition> tools)
-        => tools.Count == 0 ? null : new PluginBeforeAgentRunResult { AdditionalTools = tools, AdditionalToolsFollowSandbox = true };
+    private static PluginBeforeAgentRunResult? CachedToolsResult(CachedRunTools cached)
+        => cached.Tools.Count == 0 ? null : new PluginBeforeAgentRunResult
+        {
+            AdditionalTools = cached.Tools,
+            AdditionalToolsFollowSandbox = true,
+            TemporaryPromptContributions = McpServerInstructions.CreatePrompt(cached.Instructions),
+        };
+
+    // The listed tools a run is offered without an activation, and the instructions of their servers, by server.
+    private sealed record CachedRunTools(IReadOnlyList<AgentToolDefinition> Tools, IReadOnlyDictionary<string, string> Instructions)
+    {
+        public static CachedRunTools None { get; } = new([], McpServerInstructions.None);
+    }
 
     private void RestoreLoadedTools(string activationScope, IReadOnlyList<string> loadedTools)
     {

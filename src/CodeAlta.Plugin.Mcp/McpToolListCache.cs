@@ -46,6 +46,19 @@ public sealed record McpCachedToolList(string Server, string Fingerprint, DateTi
 
     /// <summary>Gets the version the server gave of itself when it listed them; null when it gave none.</summary>
     public string? ServerVersion { get; init; }
+
+    /// <summary>
+    /// Gets the instructions the server published for the model when it listed them (<see cref="McpServerInstructions"/>);
+    /// null when it gave none, and in a list of an older version.
+    /// </summary>
+    public string? Instructions { get; init; }
+
+    /// <summary>
+    /// Gets what <see cref="Instructions"/> answers for: a hash of the file that defines the server and of the identity it
+    /// was started with. A session of another project or identity whose server has the same key and the same
+    /// <see cref="Fingerprint"/> is not given them.
+    /// </summary>
+    public string? InstructionsScope { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = false)]
@@ -108,9 +121,12 @@ public sealed class McpToolListCache
         var path = PathOf(server);
         try
         {
-            var info = new FileInfo(path);
-            if (!info.Exists || info.Length > MaximumBytes) return null;
-            var list = JsonSerializer.Deserialize(File.ReadAllBytes(path), McpToolListCacheJsonContext.Default.McpCachedToolList);
+            // A list that is being replaced is read once it is: a read in that gap would make a listed server look unlisted.
+            using var stream = StagedFileReplacement.OpenReplacedFile(path);
+            if (stream is null || stream.Length > MaximumBytes) return null;
+            var bytes = new byte[(int)stream.Length];
+            stream.ReadExactly(bytes);
+            var list = JsonSerializer.Deserialize(bytes, McpToolListCacheJsonContext.Default.McpCachedToolList);
             return list is not null && string.Equals(list.Server, server, StringComparison.Ordinal) && string.Equals(list.Fingerprint, fingerprint, StringComparison.Ordinal) ? list : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
@@ -140,17 +156,19 @@ public sealed class McpToolListCache
         }
     }
 
-    internal void Write(McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools, string? variant = null)
+    internal void Write(McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools, string? variant = null, string? instructions = null, string? instructionsScope = null)
     {
+        if (instructions is null) instructionsScope = null;
         var list = new McpCachedToolList(definition.Key, Fingerprint(definition), DateTimeOffset.UtcNow,
             [.. tools.Select(static tool => new McpCachedTool(tool.Name, tool.Alias, tool.Title, tool.Description, ArgumentsOf(tool.InputSchema),
                 Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(tool.InputSchema.GetRawText())))[..32], tool.Enabled)
                 {
                     InputSchema = tool.InputSchema.Clone(), UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
-                })]) { Variant = variant, ServerVersion = tools.FirstOrDefault()?.ServerVersion };
+                })]) { Variant = variant, ServerVersion = tools.FirstOrDefault()?.ServerVersion, Instructions = instructions, InstructionsScope = instructionsScope };
         var path = PathOf(definition.Key);
         // A list with the same tools is not written again: its time would only wake the readers for nothing.
         if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Variant == variant && previous.ServerVersion == list.ServerVersion
+            && previous.Instructions == instructions && previous.InstructionsScope == instructionsScope
             && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
         Directory.CreateDirectory(Folder);
         SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(list, McpToolListCacheJsonContext.Default.McpCachedToolList));
