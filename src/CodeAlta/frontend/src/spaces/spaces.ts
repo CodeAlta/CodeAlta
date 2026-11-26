@@ -368,7 +368,9 @@ export function readSessionActivity(value: SpaceSessionActivity | null | undefin
     // The kind of the process that holds it when another one does: it is read-only here meanwhile.
     elsewhere: text(value.elsewhere, 64) ? value.elsewhere : null,
     // The length of its journal then, in decimal: its timeline is read again when it grows.
-    journalLength: typeof value.journalLength === "string" && /^\d{1,19}$/.test(value.journalLength) ? value.journalLength : null };
+    journalLength: typeof value.journalLength === "string" && /^\d{1,19}$/.test(value.journalLength) ? value.journalLength : null,
+    // Whether its turn ended while the user did not look at it, and they have not looked at it since.
+    unread: value.unread === true };
 }
 
 /** A session that waits for the user, as the session above it shows it. */
@@ -501,7 +503,7 @@ export function sameSessions(left: readonly SpaceSessionActivity[], right: reado
     return session.sessionId === other.sessionId && session.projectId === other.projectId && session.spaceId === other.spaceId && session.title === other.title && session.running === other.running
       && session.backgroundTasks === other.backgroundTasks && session.failed === other.failed && session.waiting === other.waiting
       && session.fallback?.at === other.fallback?.at && session.restoredForRunAt === other.restoredForRunAt
-      && session.elsewhere === other.elsewhere && session.journalLength === other.journalLength
+      && session.elsewhere === other.elsewhere && session.journalLength === other.journalLength && session.unread === other.unread
       && session.ancestors.length === other.ancestors.length && session.ancestors.every((id, at) => id === other.ancestors[at]);
   });
 }

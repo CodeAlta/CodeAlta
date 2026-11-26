@@ -4,7 +4,7 @@ import { Actions, DockLocation, RowNode, TabNode, TabSetNode } from "flexlayout-
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeDraftTab, closePreviewTab, closeSessionTab, emptySessionTabs, openDraftTab, openSessionTab, pinSessionTab, sessionTabLimit, type DraftTab, type SessionTab, type SessionTabs } from "./sessionTabs";
-import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, paneNodeIds, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, draftNodeId, draftTabAction, fileTabAction, frontDockNodeIds, ownsSessionTabContent, paneNodeIds, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
 import { activateFileTab, canvasTab, changesTab, claudeCodeTab, closeFileTab, dropClaudeCodeTab, openClaudeCodeTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
@@ -162,6 +162,23 @@ test("three simultaneously selected split panes survive reconciliation and closi
   assert.equal(model.getNodeById(two.getId()), undefined);
   assert.equal(model.getNodeById(one.getId()), one);
   assert.equal(model.getNodeById(three.getId()), three);
+});
+
+test("the tabs in front of the dock are the selected tab of each pane, and only those", () => {
+  const model = createSessionTabModel();
+  let state = openSessionTab(both(), tab("three"));
+  reconcileSessionTabModel(model, state, label);
+  const [one, two, three] = ["one", "two", "three"].map(id => model.getNodeById(sessionNodeId(tab(id))) as TabNode);
+  assert.deepEqual(frontDockNodeIds(model), [three.getId()], "one pane: the tab in front of it");
+  // Two panes: the left one shows one of its two tabs, the right one its only tab.
+  model.doAction(Actions.moveNode(two.getId(), one.getParent()!.getId(), DockLocation.RIGHT, -1, true));
+  model.doAction(Actions.selectTab(one.getId()));
+  assert.deepEqual(frontDockNodeIds(model), [one.getId(), two.getId()]);
+  state = closeSessionTab(state, tab("two"));
+  reconcileSessionTabModel(model, state, label);
+  // The pane that lost its last tab is gone, and the one left shows the session now in front.
+  assert.equal(state.active?.sessionId, "three");
+  assert.deepEqual(frontDockNodeIds(model), [three.getId()]);
 });
 
 test("public model has only draggable session identities, retaining nodes across reconciliation and label/geometry updates", () => {

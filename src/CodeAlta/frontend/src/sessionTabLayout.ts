@@ -214,6 +214,16 @@ export function dockNodeIds(model: Model): string[] {
   return order;
 }
 
+/** The tabs in front of the panes of the dock, one for each pane that has a tab: what the dock shows. */
+export function frontDockNodeIds(model: Model): string[] {
+  const front: string[] = [];
+  model.visitNodes(node => {
+    const selected = node instanceof TabSetNode ? node.getSelectedNode() : undefined;
+    if (selected instanceof TabNode) front.push(selected.getId());
+  });
+  return front;
+}
+
 /**
  * The tabs of the pane that holds `current`, in strip order. Empty if the current tab is no longer in the dock.
  */

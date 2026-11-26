@@ -72,7 +72,7 @@ import { isTabSwitcherKey, TabSwitcher, type TabSwitcherHandle, type TabSwitcher
 import { FileTabIcon } from "./fileTabLook";
 import { recentOrder, rememberRecent } from "./tabSwitcher/recentTabs";
 import { ActivityRail } from "./ActivityRail";
-import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, dockNodeName, draftNodeId, hasTransientDraft, paneNodeIds, sessionDraftNodeId, sessionNodeId, sessionTabPresentation, type SessionTabView } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, dockNodeIds, dockNodeName, draftNodeId, frontDockNodeIds, hasTransientDraft, paneNodeIds, sessionDraftNodeId, sessionNodeId, sessionTabPresentation, type SessionTabView } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
@@ -114,6 +114,7 @@ import { createReminderActions } from "./reminderActions";
 import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type ActiveReminders } from "./activeReminders";
 import { ReminderBadge } from "./ReminderBadge";
 import { SessionWaitingBadge, WaitingBadge } from "./WaitingBadge";
+import { UnreadMark } from "./UnreadMark";
 import { PermissionSettings } from "./PermissionSettings";
 import { PermissionModeSelect } from "./PermissionModeSelect";
 import { permissionModeName } from "./permissionModes";
@@ -1569,11 +1570,18 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (tabsReady && snapshot) persistFileTabs(value => { if (secondary) windowPage.fileTabs = value; else localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value); }, fileTabs);
   }, [fileTabs, tabsReady, snapshot, spaceId]);
   // The host is told which tabs this window holds: a tab is in one window, and a link to it brings that window to the front.
+  // It is told the tabs in front of the panes too: a session shown there while the window has the focus is looked at,
+  // and loses its unread mark.
   function reportWindow() {
     if (!tabsReady || !snapshot) return;
     const refs = [...tabs.open.map(tab => sessionTabRef(tab.sessionId)), ...fileTabs.open.map(fileTabRef)];
     const active = fileTabs.active ? fileTabRef(fileTabs.active) : tabs.active ? sessionTabRef(tabs.active.sessionId) : null;
-    windowsHub.report(refs, active, secondary ? writeWindowPage(windowPage) : null);
+    const shown = frontDockNodeIds(shownDockLayout()).flatMap(id => {
+      const session = tabs.open.find(tab => sessionNodeId(tab) === id);
+      const file = session ? undefined : fileTabs.open.find(tab => fileNodeId(tab) === id);
+      return session ? [sessionTabRef(session.sessionId)] : file ? [fileTabRef(file)] : [];
+    });
+    windowsHub.report(refs, active, shown, secondary ? writeWindowPage(windowPage) : null);
   }
   const reportWindowLatest = useRef(reportWindow);
   reportWindowLatest.current = reportWindow;
@@ -1709,6 +1717,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const layoutTimer = useRef<number | undefined>(undefined);
   function dockLayoutChanged(model: ReturnType<typeof createSessionTabModel>) {
     if (!snapshot || spaceLayouts.current.get(spaceId) !== model) return;
+    // A tab moved or put in front of a pane changes what the window shows.
+    reportWindowLatest.current();
     const alreadyPending = layoutPending.current !== null;
     layoutPending.current = { model, spaceId };
     if (secondary) {
@@ -1877,6 +1887,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The sessions that wait for the user (a question, a command to allow, a form): marked in the Explorer and on their
   // tab. One of the space that is shown is also said once, when it starts to wait while another session is on screen.
   const waitingSessions = useMemo(() => new Set(spacesState.sessions.filter(session => session.waiting).map(session => session.sessionId)), [spacesState.sessions]);
+  // The sessions whose turn ended while the user looked elsewhere, until they look at them: marked in the Explorer and on their tab.
+  const unreadSessions = useMemo(() => new Set(spacesState.sessions.filter(session => session.unread).map(session => session.sessionId)), [spacesState.sessions]);
   // The sessions another process holds (the command line, another instance): marked, and read-only here meanwhile.
   const elsewhereSessions = useMemo(() => new Map(spacesState.sessions.flatMap(session => {
     const kind = elsewhereKind(session.elsewhere);
@@ -4649,7 +4661,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       <WorktreeBadge session={session} />
       <CloudMark session={session} />
       {session.forkedFromSessionId && <SessionLineageMark lineage={sessionLineage(session)!} />}
-      <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
+      <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><UnreadMark unread={unreadSessions.has(session.id)} /><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
   }
   // A closed project shows its chevron only when opening it shows something: its sessions, its terminals, or the
@@ -6797,7 +6809,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 permissionReviewer={owners.permissionReviewer} heldReviewer={owners.heldReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider></SessionRetentionGate>;
             }}
-            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions} waitingBelow={waitingBelow}
+            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions} waitingBelow={waitingBelow} unread={unreadSessions}
             elsewhere={elsewhereSessions}
             onSessionTabClick={focusPromptSoon}
             select={tab => selectSessionTab(tab, "preview")} close={tab => {

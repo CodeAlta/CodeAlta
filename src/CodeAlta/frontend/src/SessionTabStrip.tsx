@@ -8,6 +8,7 @@ import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { isPreviewTab, resolveSessionTab, type DraftTab, type SessionTab } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
+import { UnreadMark } from "./UnreadMark";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import type { ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
@@ -138,7 +139,7 @@ const noFiles = emptyFileTabs();
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
-export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, elsewhere, capture, children, renderSession, newSessionLabel,
+export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, unread, elsewhere, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout, layoutChanged,
   keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background, windowEntries, dragOut, externalDrag, arrival, onArrived }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
@@ -162,6 +163,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   waiting?: ReadonlySet<string>;
   /** How many sessions under each session wait for the user. */
   waitingBelow?: ReadonlyMap<string, readonly unknown[]>;
+  /** The sessions whose turn ended while the user looked elsewhere: their tab says so while another tab is in front of its pane. */
+  unread?: ReadonlySet<string>;
   /** The sessions another process holds, with its kind: their tab says so. */
   elsewhere?: ReadonlyMap<string, Readonly<{ kind: ElsewhereKind }>>;
   capture: () => () => boolean; children: ReactNode;
@@ -534,7 +537,11 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         else if (tab?.sessionId && elsewhere?.has(tab.sessionId)) values.leading = <ElsewhereBadge kind={elsewhere.get(tab.sessionId)!.kind} />;
         // So does one whose sub-sessions wait: its work waits for theirs.
         else if (tab?.sessionId && waitingBelow?.get(tab.sessionId)?.length) values.leading = <SessionWaitingBadge waiting={false} below={waitingBelow.get(tab.sessionId)!.length} />;
-        else if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
+        else if (tab) {
+          // A session whose turn ended while the user looked elsewhere says so where its activity goes, when it has none.
+          const mark = <UnreadMark unread={!node.isSelected() && !!unread?.has(tab.sessionId)} />;
+          values.leading = observations ? <SessionTabActivity controls={observations} tab={tab} idle={mark} /> : mark;
+        }
       }}
       onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" ref={markMountedTitleBar} variant="minimal" size="small" className="session-tab-more"
         icon={<AppIcon name="ellipsis" size={16} />} aria-label={t("Open sessions")} aria-haspopup="menu"

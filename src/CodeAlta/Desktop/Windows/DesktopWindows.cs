@@ -134,6 +134,12 @@ internal sealed class DesktopWindows : IAsyncDisposable
     /// <summary>Raised on the thread of the windows when the windows, their names or the tabs they hold changed.</summary>
     internal event Action? Changed;
 
+    /// <summary>
+    /// Raised when what the user looks at may have changed (<see cref="SessionsInView"/>): a window got the focus, or the page
+    /// of a window put other tabs in front of its panes.
+    /// </summary>
+    internal event Action? ViewChanged;
+
     /// <summary>Gets whether the secondary windows that were open come back at the next start.</summary>
     internal bool RestoreAtStartup { get { lock (_gate) return _file.RestoreAtStartup; } }
 
@@ -159,6 +165,17 @@ internal sealed class DesktopWindows : IAsyncDisposable
     internal static string? IdOf(string? label)
         => label == MainLabel ? MainId
             : label is not null && label.StartsWith(LabelPrefix, StringComparison.Ordinal) && DesktopWindowRecord.IsValidId(label[LabelPrefix.Length..]) ? label[LabelPrefix.Length..] : null;
+
+    /// <summary>The sessions the user looks at: those whose tab is in front of a pane of a window that has the focus.</summary>
+    internal IReadOnlyList<string> SessionsInView()
+    {
+        lock (_gate)
+        {
+            return [.. _entries.Where(static entry => entry.Window is { IsClosed: false, IsFocused: true })
+                .SelectMany(static entry => entry.Shown).Where(static tab => tab.StartsWith("session:", StringComparison.Ordinal))
+                .Select(static tab => tab["session:".Length..]).Where(static id => id.Length > 0)];
+        }
+    }
 
     /// <summary>The sessions whose tabs the secondary windows hold, which no page of the main window claims.</summary>
     internal IReadOnlyList<string> SecondarySessions()
@@ -310,12 +327,14 @@ internal sealed class DesktopWindows : IAsyncDisposable
     /// <param name="label">The label of the view of the page.</param>
     /// <param name="tabs">The tabs, as <c>session:&lt;id&gt;</c>, <c>editor:&lt;project&gt;</c> and so on.</param>
     /// <param name="active">The tab in front; null for none.</param>
+    /// <param name="shown">The tabs in front of its panes, one for each pane: what the window shows.</param>
     /// <param name="pageState">What the page keeps of its tabs and panes, for a secondary window; null to leave it.</param>
     /// <returns>False for a label that is no window's.</returns>
-    internal bool Report(string label, IReadOnlyList<string> tabs, string? active, string? pageState)
+    internal bool Report(string label, IReadOnlyList<string> tabs, string? active, IReadOnlyList<string> shown, string? pageState)
     {
         ArgumentNullException.ThrowIfNull(tabs);
-        bool changed, empty;
+        ArgumentNullException.ThrowIfNull(shown);
+        bool changed, viewChanged, empty;
         Entry? entry;
         lock (_gate)
         {
@@ -328,6 +347,9 @@ internal sealed class DesktopWindows : IAsyncDisposable
             foreach (var tab in held) _owners[tab] = entry.Id;
             entry.Record.Tabs = [.. held];
             entry.ActiveTab = active;
+            var front = shown.Where(tab => held.Contains(tab, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal).ToArray();
+            viewChanged = !front.SequenceEqual(entry.Shown, StringComparer.Ordinal);
+            entry.Shown = front;
             if (!entry.IsMain && pageState is { Length: <= DesktopWindowRecord.MaximumPageState }) entry.Record.PageState = pageState;
             if (held.Length > 0) entry.HadTabs = true;
             // A secondary window is never empty: the last tab that leaves it closes it.
@@ -336,6 +358,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
 
         if (!entry.IsMain) Persist();
         if (changed) RaiseChanged();
+        if (viewChanged) RaiseViewChanged();
         if (empty) Post(() => CloseNow(entry));
         return true;
     }
@@ -1017,6 +1040,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
             bool changed;
             lock (_gate) { changed = _focused != entry.Id; _focused = entry.Id; }
             if (changed) RaiseChanged();
+            RaiseViewChanged();
         };
     }
 
@@ -1044,6 +1068,12 @@ internal sealed class DesktopWindows : IAsyncDisposable
         foreach (var entry in entries) Deliver(entry, new WindowsEvent("changed"), queue: false);
         try { Changed?.Invoke(); }
         catch (Exception exception) { Warn($"A watcher of the windows failed: {exception.Message}"); }
+    }
+
+    private void RaiseViewChanged()
+    {
+        try { ViewChanged?.Invoke(); }
+        catch (Exception exception) { Warn($"A watcher of what the windows show failed: {exception.Message}"); }
     }
 
     /// <summary>Whether the main window has something of its own to keep: a name, an icon, a color or a pinned display.</summary>
@@ -1232,6 +1262,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
         internal List<Action<WindowsEvent>> Watchers { get; } = [];
         internal List<WindowsEvent> Queued { get; } = [];
         internal string? ActiveTab { get; set; }
+        internal string[] Shown { get; set; } = [];
         internal string? ShownSpace { get; set; }
         internal bool HadTabs { get; set; }
         internal bool CloseAllowed { get; set; }

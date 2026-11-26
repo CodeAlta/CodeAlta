@@ -23,7 +23,7 @@ const session = (id: string, scopeKind: string | null, projectId: string | null,
   messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null });
 const doing = (sessionId: string, projectId: string | null, changes: Partial<SpaceSessionActivity> = {}): SpaceSessionActivity =>
   ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt: null,
-    elsewhere: null, journalLength: null, ...changes });
+    elsewhere: null, journalLength: null, unread: false, ...changes });
 
 test("the spaces are read as the host lists them, the default one first, and what is not a space is left out", () => {
   const spaces = readSpaces([item("work", ["a", "b"], { icon: "briefcase", color: "#2D72D2", description: "Paid work" }), item("default", ["a", "b", "c"]),
@@ -414,6 +414,20 @@ test("the hub tells the host the tabs of the page, again after a lost watch, and
   const held = hub.getSnapshot().sessions.find(session => session.sessionId === "s3");
   assert.deepEqual([held?.elsewhere, held?.journalLength], ["altacli", "120"]);
 
+  // A session got its unread mark: what the sessions do is read again, and the window is not asked to read the sessions.
+  sessions = [doing("s4", null, { unread: true })];
+  calls.length = 0;
+  watches[0].push({ kind: "activity", spaceId: null });
+  await settle();
+  assert.deepEqual(requests, ["sessions"]);
+  assert.ok(calls.includes("activity"));
+  assert.equal(hub.getSnapshot().sessions.find(session => session.sessionId === "s4")?.unread, true);
+  // It loses its mark and nothing else changes: the window sees it all the same.
+  sessions = [doing("s4", null)];
+  watches[0].push({ kind: "activity", spaceId: null });
+  await settle();
+  assert.equal(hub.getSnapshot().sessions.find(session => session.sessionId === "s4")?.unread, false);
+
   // The watch is lost: the host forgot the tabs of the page, which are told again once it watches again.
   calls.length = 0;
   watches[0].push(null);
@@ -429,6 +443,12 @@ test("what the host says of a session another process holds is read as it is, an
   assert.deepEqual([read?.elsewhere, read?.journalLength], ["altacli", "4096"]);
   const odd = readSessionActivity({ ...doing("s1", null), elsewhere: "x".repeat(65), journalLength: "-1" });
   assert.deepEqual([odd?.elsewhere, odd?.journalLength], [null, null]);
+});
+
+test("a session is unread only when the host says it is", () => {
+  assert.equal(readSessionActivity(doing("s1", null, { unread: true }))?.unread, true);
+  assert.equal(readSessionActivity(doing("s1", null))?.unread, false);
+  assert.equal(readSessionActivity({ ...doing("s1", null), unread: "yes" as unknown as boolean })?.unread, false);
 });
 
 test("a host that keeps no spaces leaves the window with the default one, and nobody waits for more", async () => {

@@ -212,6 +212,8 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
             else if (event.kind === "changed") { await list(); request("changed", null); }
             // A session another process writes was listed, changed or released: what the sessions do is read again too.
             else if (event.kind === "sessions") { void readActivity(); request("sessions", null); }
+            // A session got or lost its unread mark: what the sessions do is read again, and only that.
+            else if (event.kind === "activity") void readActivity();
           }
         } catch { /* Told again below. */ }
         if (!abort.signal.aborted) timer = timers.set(() => void watch(), reconnectMilliseconds);

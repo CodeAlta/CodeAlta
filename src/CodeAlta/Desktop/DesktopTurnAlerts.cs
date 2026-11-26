@@ -37,7 +37,8 @@ internal enum DesktopTurnAlertKind
 /// <param name="SessionId">The session.</param>
 /// <param name="Title">Its title, as the runtime knows it.</param>
 /// <param name="Kind">What happened.</param>
-internal sealed record DesktopTurnAlert(string SessionId, string Title, DesktopTurnAlertKind Kind);
+/// <param name="ParentSessionId">The session that created it, when one did.</param>
+internal sealed record DesktopTurnAlert(string SessionId, string Title, DesktopTurnAlertKind Kind, string? ParentSessionId = null);
 
 /// <summary>
 /// Finds, between two readings of the sessions, those that just finished their work or started to wait for the user.
@@ -48,9 +49,6 @@ internal sealed record DesktopTurnAlert(string SessionId, string Title, DesktopT
 internal sealed class DesktopTurnAlertTracker
 {
     private Dictionary<string, (bool Busy, bool Waiting)>? _previous;
-
-    /// <summary>Forgets the last reading: the next one only sets what the following ones compare with.</summary>
-    internal void Reset() => _previous = null;
 
     /// <summary>Reads the sessions once and returns what changed since the last reading; nothing at the first one.</summary>
     /// <param name="sessions">What the sessions do now.</param>
@@ -71,7 +69,7 @@ internal sealed class DesktopTurnAlertTracker
             // A session the runtime did not hold at the last reading did nothing then.
             var before = _previous.GetValueOrDefault(session.SessionId);
             if (waits && !before.Waiting)
-                alerts.Add(new(session.SessionId, session.Title, DesktopTurnAlertKind.Waiting));
+                alerts.Add(new(session.SessionId, session.Title, DesktopTurnAlertKind.Waiting, session.ParentSessionId));
             else if (!waits && !busy && before.Busy && session.ParentSessionId is null)
                 alerts.Add(new(session.SessionId, session.Title, session.Failed ? DesktopTurnAlertKind.Failed : DesktopTurnAlertKind.Done));
         }
@@ -116,7 +114,8 @@ internal interface IDesktopTurnAlertSurface
 /// Tells the user, while CodeAlta is in the background, that a session finished its work or waits for them: a
 /// notification of the system that opens the session, and the mark of the application (the number of such sessions
 /// on the Dock icon, which bounces, on macOS; the flashing taskbar button on Windows). Both go once a window of the
-/// application has the focus again.
+/// application has the focus again. Whatever the setting and the focus, each reading also gives the sessions whose
+/// turn ended to the unread marks of the Explorer (<see cref="DesktopUnreadSessions"/>).
 /// </summary>
 /// <remarks>
 /// The sessions are read at a short interval rather than observed, as the taskbar progress reads them: a session is
@@ -131,6 +130,7 @@ internal sealed class DesktopTurnAlerts : IAsyncDisposable
     internal const string NotificationPrefix = "codealta.session.";
 
     private readonly IDesktopTurnAlertSurface _surface;
+    private readonly DesktopUnreadSessions? _unread;
     private readonly DesktopTurnAlertTracker _tracker = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
@@ -146,11 +146,13 @@ internal sealed class DesktopTurnAlerts : IAsyncDisposable
     /// <summary>Creates the alerts over what they read and act on.</summary>
     /// <param name="surface">The sessions, the windows, the notifications and the mark of the application.</param>
     /// <param name="period">How often the sessions are read; null when the caller reads them with <see cref="RefreshAsync"/>.</param>
+    /// <param name="unread">The unread marks of the sessions, which each reading gives the sessions whose turn ended; null for none.</param>
     /// <exception cref="ArgumentNullException"><paramref name="surface"/> is null.</exception>
-    internal DesktopTurnAlerts(IDesktopTurnAlertSurface surface, TimeSpan? period = null)
+    internal DesktopTurnAlerts(IDesktopTurnAlertSurface surface, TimeSpan? period = null, DesktopUnreadSessions? unread = null)
     {
         ArgumentNullException.ThrowIfNull(surface);
         _surface = surface;
+        _unread = unread;
         _observation = period is { } interval ? Task.Run(() => ObserveAsync(interval)) : Task.CompletedTask;
     }
 
@@ -186,24 +188,21 @@ internal sealed class DesktopTurnAlerts : IAsyncDisposable
     internal static bool CanActivate(string sessionId)
         => sessionId is { Length: > 0 and <= 512 } && sessionId.All(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or ':');
 
-    /// <summary>Reads the sessions once, tells the user of what changed while the application is in the background, and clears the mark once it is not.</summary>
+    /// <summary>
+    /// Reads the sessions once, gives the sessions whose turn ended to the unread marks, tells the user of them while the
+    /// application is in the background, and clears the mark of the application once it is not.
+    /// </summary>
     internal async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var mode = _surface.Mode;
-            if (mode == DesktopTurnAlertMode.Off)
-            {
-                // Turned on again, the alerts start from what the sessions do then, not from what they did before.
-                _tracker.Reset();
-                await ClearAsync(cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
+            // The sessions are read whatever the setting: turned on again, the alerts are about what ends from then on.
             var waiting = (await _surface.ReadWaitingAsync(cancellationToken).ConfigureAwait(false)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var alerts = _tracker.Observe(_surface.ReadSessions(), waiting);
-            if (_surface.IsForeground)
+            _unread?.Observe(alerts);
+            var mode = _surface.Mode;
+            if (mode == DesktopTurnAlertMode.Off || _surface.IsForeground)
             {
                 await ClearAsync(cancellationToken).ConfigureAwait(false);
                 return;

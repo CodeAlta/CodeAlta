@@ -78,7 +78,7 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
   let reported = "";
   let reportTimer: ReturnType<typeof setTimeout> | null = null;
   let reporting = false;
-  let pending: Readonly<{ tabs: readonly string[]; active: string | null; pageState: string | null }> | null = null;
+  let pending: Readonly<{ tabs: readonly string[]; active: string | null; shown: readonly string[]; pageState: string | null }> | null = null;
   let listing = 0;
   const notify = () => { for (const listener of [...listeners]) listener(); };
 
@@ -131,7 +131,7 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
     pending = null;
     reporting = true;
     const failed = () => { if (reported === key) reported = ""; };
-    void api.report({ tabs: [...value.tabs], active: value.active, pageState: value.pageState }, { timeoutMilliseconds: 15_000 })
+    void api.report({ tabs: [...value.tabs], active: value.active, shown: [...value.shown], pageState: value.pageState }, { timeoutMilliseconds: 15_000 })
       .then(reply => { if (reply.status !== "ok") failed(); }, failed).finally(() => {
         reporting = false;
         // Keep the host's snapshots in order even when a newer report was flushed before this one answered.
@@ -189,13 +189,16 @@ export function createWindowsHub(api: WindowsApi, initial: WindowsCurrentRespons
       if (!current || owners.get(ref) === current.id) return;
       owners = new Map(owners).set(ref, current.id);
     },
-    /** Says which tabs this window holds, and what its page keeps of them; written a moment later, once. */
-    report(tabs: readonly string[], active: string | null, pageState: string | null) {
+    /**
+     * Says which tabs this window holds, the one in front (`active`), the ones in front of its panes (`shown`, what the
+     * user looks at while the window has the focus), and what its page keeps of them; written a moment later, once.
+     */
+    report(tabs: readonly string[], active: string | null, shown: readonly string[], pageState: string | null) {
       if (!current) return;
-      const key = JSON.stringify([tabs, active, pageState]);
+      const key = JSON.stringify([tabs, active, shown, pageState]);
       if (key === reported) return;
       reported = key;
-      pending = { tabs, active, pageState };
+      pending = { tabs, active, shown, pageState };
       // The tabs this window holds are its own at once: a link that follows does not open them twice.
       const held = new Map(owners);
       for (const [tab, owner] of held) if (owner === current.id && !tabs.includes(tab)) held.delete(tab);

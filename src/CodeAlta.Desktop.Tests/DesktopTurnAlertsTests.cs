@@ -48,7 +48,7 @@ public sealed class DesktopTurnAlertsTests
 
         tracker.Observe([Session("child", running: true, parent: "parent")], NoneWaits);
         var waiting = tracker.Observe([Session("child", running: true, parent: "parent")], new HashSet<string> { "child" });
-        Assert.AreEqual(new DesktopTurnAlert("child", "Title of child", DesktopTurnAlertKind.Waiting), waiting.Single());
+        Assert.AreEqual(new DesktopTurnAlert("child", "Title of child", DesktopTurnAlertKind.Waiting, "parent"), waiting.Single());
     }
 
     [TestMethod]
@@ -144,6 +144,27 @@ public sealed class DesktopTurnAlertsTests
         await alerts.RefreshAsync();
         Assert.IsEmpty(surface.Shown, "turned on again, what happened while it was off is not told");
         Assert.AreEqual(1, surface.Attention);
+    }
+
+    [TestMethod]
+    public async Task EachReading_GivesTheTurnsThatEndedToTheUnreadMarks_WithTheFocus_AndWithTheAlertsOff()
+    {
+        var surface = new FakeSurface { Foreground = true, Sessions = [Session("a", running: true), Session("b", running: true), Session("c", running: true)] };
+        IReadOnlyCollection<string> inView = ["b"];
+        var unread = new DesktopUnreadSessions(() => inView);
+        await using var alerts = new DesktopTurnAlerts(surface, unread: unread);
+        await alerts.RefreshAsync();
+
+        surface.Sessions = [Session("a"), Session("b"), Session("c", running: true)];
+        await alerts.RefreshAsync();
+        CollectionAssert.AreEqual(new[] { "a" }, unread.Sessions.ToArray(), "the one the user looks at is not marked");
+        Assert.IsEmpty(surface.Shown, "with the focus, nothing else is shown");
+
+        surface.Mode = DesktopTurnAlertMode.Off;
+        surface.Sessions = [Session("a"), Session("b"), Session("c")];
+        await alerts.RefreshAsync();
+        CollectionAssert.AreEqual(new[] { "a", "c" }, unread.Sessions.ToArray(), "the marks do not follow the setting of the notifications");
+        Assert.IsEmpty(surface.Badges);
     }
 
     [TestMethod]

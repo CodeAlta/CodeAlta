@@ -221,6 +221,12 @@ h1, h2, h3, p { margin-top: 0; }
 .session-background { flex: 0 0 auto; display: inline-block; width: 7px; height: 7px; margin-inline: 4px; border-radius: 50%; background: var(--green); opacity: .75; animation: session-background 2.4s ease-in-out infinite; }
 @keyframes session-background { 0%, 100% { opacity: .3; } 50% { opacity: .9; } }
 @media (prefers-reduced-motion: reduce) { .session-background { animation: none; } }
+/* A session whose turn ended while the user looked elsewhere (UnreadMark.tsx): a dot of the accent color, apart from the
+   green of a run and the yellow of a wait. In the Explorer it comes before the time, on its line: the time is in the last
+   span of the button of the row, which the rule of the title (`.nav-list button > span:last-child`) would make a grid of one column. */
+.session-unread { flex: 0 0 auto; align-self: center; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.nav-list button > .session-meta:has(> .session-unread) { display: flex; align-items: center; gap: 4px; }
+.flexlayout__tab_button_leading .session-unread { margin-inline: 4px; }
 .background-tasks-status.bp6-button { min-height: 0; padding: 0 6px; color: var(--muted); font-size: inherit; }
 .background-tasks-status.bp6-button[data-running="true"] { color: var(--green); font-weight: 500; }
 .background-tasks-spinner { display: inline-block; flex: none; width: 12px; height: 12px; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-right-color: currentColor; border-radius: 50%; animation: background-tasks-spin 1s linear infinite; }
