@@ -390,6 +390,40 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
+    public async Task ASessionWhoseTurnEndedUnseen_IsMarked_TheOnesThatDoNothingElseLast_EvenOnceTheRuntimeLetThemGo()
+    {
+        using var fixture = new Fixture();
+        IReadOnlyList<string> unread = ["failed", "idle", "released", "cli"];
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            HeldElsewhere = () => [new("cli", SessionLeaseOwner.CliKind, 42, 1234)],
+            Unread = () => unread,
+        };
+        fixture.Runs = [new("running", "p1", "Running", true, 0, false), new("failed", "p1", "Failed", false, 0, true), new("idle", "p1", "Idle", false, 0, false)];
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        // A session marked that has something else to say says it with its mark; the others come last, with their mark alone.
+        CollectionAssert.AreEqual(new[] { "failed", "running", "cli", "idle", "released" }, reply.Sessions.Select(static session => session.SessionId).ToArray());
+        CollectionAssert.AreEqual(new[] { true, false, true, true, true }, reply.Sessions.Select(static session => session.Unread).ToArray());
+        Assert.IsFalse(reply.Sessions[3].Running || reply.Sessions[3].Failed || reply.Sessions[3].Waiting || reply.Sessions[3].BackgroundTasks > 0);
+        StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"unread\":true");
+
+        // The pages read what the sessions do again when a mark comes or goes, and only that.
+        using var stop = new CancellationTokenSource(TestTime.Seconds(30));
+        await using var events = service.WatchAsync(new(Epoch), stop.Token).GetAsyncEnumerator(stop.Token);
+        var next = events.MoveNextAsync();
+        for (var turn = 0; turn < 200 && !next.IsCompleted; turn++)
+        {
+            fixture.View.NotifyActivityChanged();
+            await Task.Delay(10, stop.Token);
+        }
+
+        Assert.IsTrue(await next);
+        Assert.AreEqual(("activity", (string?)null), (events.Current.Kind, events.Current.SpaceId));
+    }
+
+    [TestMethod]
     public async Task TheTabsOfThePages_AreTheOpenSessions_UntilAPageGoesAway_AndTheSessionsEventReachesEveryPage()
     {
         using var fixture = new Fixture();

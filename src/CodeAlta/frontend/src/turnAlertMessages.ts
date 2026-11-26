@@ -41,4 +41,7 @@ export const turnAlertMessages = {
     "実行が終わったら通知する", "运行结束时通知我"],
   "Every run": ["Cada ejecución", "Chaque exécution", "Jeder Lauf", "すべての実行", "每次运行"],
   "Failures only": ["Solo los fallos", "Échecs seulement", "Nur Fehlschläge", "失敗のみ", "仅失败"],
+  // The mark of a session whose turn ended while the user looked elsewhere, on its row in the Explorer and on its tab.
+  "New since you last looked": ["Novedades desde la última vez que miraste", "Du nouveau depuis votre dernier passage", "Neu seit Ihrem letzten Blick",
+    "前回見てから新着あり", "自你上次查看后有新内容"],
 } as const;

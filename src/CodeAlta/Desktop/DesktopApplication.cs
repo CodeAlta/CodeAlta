@@ -863,7 +863,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var alertSurface = new DesktopTurnAlertSurface(window, chrome.Services, host.RuntimeService,
                 async _ => await SessionsWaitingAsync(), () => shell.TurnAlerts, () => windows.AnyFocused,
                 DesktopTurnAlertSurface.CanNotify(OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null));
-            sessionTurnAlerts = new DesktopTurnAlerts(alertSurface, DesktopTurnAlerts.Period);
+            // A session whose turn ended while the user looked elsewhere is marked in the Explorer until its tab is in front
+            // of a pane of a window that has the focus.
+            var unreadSessions = new DesktopUnreadSessions(windows.SessionsInView);
+            windows.ViewChanged += unreadSessions.Look;
+            sessionTurnAlerts = new DesktopTurnAlerts(alertSurface, DesktopTurnAlerts.Period, unreadSessions);
             // What an automation whose run ended, a plugin or a script tells the user goes the same way: a notification of the
             // system while the application is in the background, a notice in the window otherwise.
             var notices = new DesktopNotices(alertSurface, pluginUi.ShowNotice);
@@ -981,6 +985,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (host.ExternalSessions is { } externalSessions) externalSessions.Changed += (_, _) => spaceView.NotifySessionsChanged();
                 // A paired machine that changes its sessions or its state: the windows read the sessions again.
                 fleet.Changed += spaceView.NotifySessionsChanged;
+                // A session that got or lost its unread mark: the windows read what the sessions do again.
+                unreadSessions.Changed += spaceView.NotifyActivityChanged;
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 // The project the catalog lists for a folder; null for none.
                 async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)
@@ -1384,6 +1390,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Fallbacks = () => host.Commands.LastFallbacks,
                         MoveProjectSessions = host.Commands.MoveProjectSessionsAsync,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
+                        Unread = () => unreadSessions.Sessions,
                         RemoteSessions = () => fleet is { } machines ? [.. machines.Hosts.SelectMany(static machine => machine.Listing.Sessions.Select(session => (machine.MachineId!, session)))] : [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, options.McpHome, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost, profileRoot: options.Profile)).ReadAsync,

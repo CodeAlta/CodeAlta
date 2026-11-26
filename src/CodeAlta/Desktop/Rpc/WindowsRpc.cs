@@ -80,12 +80,15 @@ internal sealed class WindowsService
         await foreach (var value in events.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
     }
 
-    /// <summary>The tabs the window of the page holds, and, for a secondary window, what its page keeps of them.</summary>
+    /// <summary>
+    /// The tabs the window of the page holds, the ones in front of its panes, and, for a secondary window, what its page
+    /// keeps of them.
+    /// </summary>
     [NeoRpcMethod("report")]
     public WindowsStatusResponse Report(WindowsReportRequest request, NeoRpcContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(_windows is not null && _windows.Report(context.ViewLabel, request.Tabs ?? [], request.Active, request.PageState) ? "ok" : "unavailable");
+        return new(_windows is not null && _windows.Report(context.ViewLabel, request.Tabs ?? [], request.Active, request.Shown ?? [], request.PageState) ? "ok" : "unavailable");
     }
 
     /// <summary>
@@ -269,8 +272,9 @@ internal sealed record WindowsDisplaysResponse(string Status, WindowsDisplay[] D
 
 /// <param name="Tabs">The tabs the window holds.</param>
 /// <param name="Active">The tab in front.</param>
+/// <param name="Shown">The tabs in front of its panes, one for each pane: what the window shows.</param>
 /// <param name="PageState">What the page of a secondary window keeps of its tabs and panes.</param>
-internal sealed record WindowsReportRequest(string[]? Tabs, string? Active, string? PageState);
+internal sealed record WindowsReportRequest(string[]? Tabs, string? Active, string[]? Shown, string? PageState);
 
 internal sealed record WindowsStatusResponse(string Status);
 

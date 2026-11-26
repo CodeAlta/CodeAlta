@@ -388,8 +388,8 @@ internal sealed class SpacesService
 
     /// <summary>
     /// What the sessions are doing right now, in every space: the ones that run, that work in the background,
-    /// whose last run failed, or that wait for the user, and the ones another process holds. The page works out from it
-    /// what each space is doing.
+    /// whose last run failed, or that wait for the user, the ones another process holds, and the ones whose turn ended
+    /// while the user did not look at them. The page works out from it what each space is doing.
     /// </summary>
     [NeoRpcMethod("activity")]
     public async Task<SpacesActivityResponse> ActivityAsync(SpacesRequest request, CancellationToken cancellationToken)
@@ -397,6 +397,7 @@ internal sealed class SpacesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false);
         var waiting = (await _waiting!().ConfigureAwait(false)).ToHashSet(StringComparer.Ordinal);
+        var unread = (Unread?.Invoke() ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var runs = _runs!();
         // A fallback is news for a short while: the page says it once.
         var since = DateTimeOffset.UtcNow - RecentFallback;
@@ -424,6 +425,7 @@ internal sealed class SpacesService
                     ? new SpaceSessionFallback(fallback.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture), Cut(fallback.Message, 512))
                     : null,
                 RestoredForRunAt = Restored(session) ? session.RestoredForRunAt!.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : null,
+                Unread = unread.Contains(session.SessionId),
             });
         // The sessions agents of this computer started on other machines, at work or waiting for the user: shown under
         // their parent here, so that a question or a permission request there reaches the person where they are.
@@ -452,13 +454,22 @@ internal sealed class SpacesService
             {
                 Elsewhere = hold.HolderKind is { Length: > 0 and <= 64 } kind ? kind : "other",
                 JournalLength = hold.JournalLength?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Unread = unread.Contains(hold.SessionId),
             }).ToArray();
-        var all = own.Concat(elsewhere).ToArray();
+        // The sessions whose turn ended while the user did not look at them, and that have nothing else to say: last, as a
+        // reading cut short keeps what matters most. The runtime may have let one go since: its mark stays all the same.
+        var listed = ownIds.Concat(elsewhere.Select(static activity => activity.SessionId)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var quiet = unread.Where(id => !listed.Contains(id)).Order(StringComparer.Ordinal)
+            .Select(static id => new SpaceSessionActivity(id, null, string.Empty, false, 0, false, false, []) { Unread = true });
+        var all = own.Concat(elsewhere).Concat(quiet).ToArray();
         return new("ok", [.. all.Take(MaximumActivitySessions)], all.Length > MaximumActivitySessions);
     }
 
     /// <summary>Gets the sessions another process holds now; none when null.</summary>
     internal Func<IReadOnlyList<ExternalSessionHold>>? HeldElsewhere { get; init; }
+
+    /// <summary>Gets the sessions whose turn ended while the user did not look at them (<see cref="DesktopUnreadSessions"/>); none when null.</summary>
+    internal Func<IReadOnlyCollection<string>>? Unread { get; init; }
 
     /// <summary>Gets the sessions the paired machines last listed, with their machine; none when null.</summary>
     internal Func<IReadOnlyList<(string MachineId, CodeAlta.Fleet.NodeApi.FleetSessionSummary Session)>>? RemoteSessions { get; init; }
@@ -743,7 +754,8 @@ internal sealed record SpaceOpenSessionsRequest(string ExpectedEpoch, IReadOnlyL
 /// <summary>A request that reaches the page from elsewhere.</summary>
 /// <param name="Kind">
 /// <c>show</c>: show the space named; <c>changed</c>: read the spaces again; <c>sessions</c>: read the sessions and their
-/// activity again (a session another process writes was listed, changed or released).
+/// activity again (a session another process writes was listed, changed or released); <c>activity</c>: read the activity
+/// of the sessions again (a session got or lost its unread mark).
 /// </param>
 /// <param name="SpaceId">The space to show.</param>
 internal sealed record SpacesEvent(string Kind, string? SpaceId);
@@ -790,6 +802,12 @@ internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId,
     /// session runs, and its timeline is read again when it does; null otherwise.
     /// </summary>
     public string? JournalLength { get; init; }
+
+    /// <summary>
+    /// Gets whether the turn of the session ended (done, failed, or waiting for the user) while the user did not look at it,
+    /// and the user has not looked at it since: the Explorer marks it.
+    /// </summary>
+    public bool Unread { get; init; }
 }
 
 /// <summary>A fallback of a session: it went on with the next model of its tier after a failure of its provider.</summary>

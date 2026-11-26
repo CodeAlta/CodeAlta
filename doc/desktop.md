@@ -314,6 +314,12 @@ setting `general.turn_alerts`, NeoAstra's notifications, badge and attention):
 
 - **Sessions** (`DesktopTurnAlerts`): a session that is done or waits, read every second, notified only while no window
   has the focus, with the mark of the application; both go once a window has the focus again.
+- **Unread marks** (`DesktopUnreadSessions`): every reading of `DesktopTurnAlerts`, whatever the setting and the focus,
+  marks a top-level session whose turn ended while it is not in view: its tab is not in front of a pane of a focused
+  window. The pages report the tabs in front of their panes with their tabs (`windows.report`), which
+  `DesktopWindows.SessionsInView` reads; a report or a focus that changes the view clears what is now in view. The marks
+  live in the host for the life of the application, so that every window shows the same ones: the pages read them with
+  the activity of the sessions (`SpaceSessionActivity.Unread`), at once on the `activity` event of `spaces.watch`.
 - **Notices** (`DesktopNotices`, an `IUserNotifications`): what an automation whose run ended (`AutomationDefinition.Notify`),
   a plugin (`IPluginUiService.NotifyAsync(PluginNotification)`) or a script (`notify()`) tells. In the background, and
   with the setting on, a notification of the system; otherwise a notice in the window (`PluginUiEvent` `notify`): the

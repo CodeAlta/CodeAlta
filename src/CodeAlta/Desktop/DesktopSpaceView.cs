@@ -81,6 +81,9 @@ internal sealed class DesktopSpaceView : IAltaSpaceView
     /// </summary>
     internal void NotifySessionsChanged() => _watchers.Publish(new("sessions", null), null);
 
+    /// <summary>Asks every window to read what the sessions do again: a session got or lost its unread mark.</summary>
+    internal void NotifyActivityChanged() => _watchers.Publish(new("activity", null), null);
+
     /// <summary>Records the session tabs of a page; an empty list when it has none, or when it went away.</summary>
     /// <param name="page">The page: the label of the view of its window and its document.</param>
     /// <param name="sessionIds">The sessions it has a tab of.</param>

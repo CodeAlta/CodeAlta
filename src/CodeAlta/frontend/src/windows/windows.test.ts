@@ -178,8 +178,8 @@ test("what the host asks of the window reaches the shell, and the tabs are repor
   await settle(); await settle();
   assert.deepEqual(asked.map(value => value.kind), ["focus"]);
 
-  hub.report(["session:s1"], "session:s1", null);
-  hub.report(["session:s1"], "session:s1", null);
+  hub.report(["session:s1"], "session:s1", ["session:s1"], null);
+  hub.report(["session:s1"], "session:s1", ["session:s1"], null);
   await new Promise(resolve => setTimeout(resolve, 250));
   assert.equal(fake.calls.filter(([name]) => name === "report").length, 1);
   assert.equal(hub.ownerOf("session:s1"), "main", "the tabs of the window are its own at once");
@@ -187,6 +187,18 @@ test("what the host asks of the window reaches the shell, and the tabs are repor
   hub.claim("editor:p1");
   assert.equal(hub.ownerOf("editor:p1"), "main");
   stop();
+});
+
+test("the tabs in front of the panes are reported, and a change of them alone is reported again", async () => {
+  const fake = fakeApi(() => [window("main")]);
+  const hub = createWindowsHub(fake.api, current(window("main")));
+  // Two panes, one session in front of each; then another tab in front of the second pane.
+  hub.report(["session:s1", "session:s2", "editor:p1"], "session:s1", ["session:s1", "session:s2"], null);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  hub.report(["session:s1", "session:s2", "editor:p1"], "session:s1", ["session:s1", "editor:p1"], null);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const shown = fake.calls.filter(([name]) => name === "report").map(([, request]) => (request as { shown: readonly string[] }).shown);
+  assert.deepEqual(shown, [["session:s1", "session:s2"], ["session:s1", "editor:p1"]]);
 });
 
 test("flushing a window report sends it without a timer and never passes an older in-flight report", { timeout: testLimit(5000) }, async () => {
@@ -203,11 +215,11 @@ test("flushing a window report sends it without a timer and never passes an olde
     return { status: "ok" };
   } }, current(secondary));
 
-  hub.report([], null, "old");
+  hub.report([], null, [], "old");
   hub.flushReport();
   assert.deepEqual(layouts, ["old"]);
-  hub.report([], null, "intermediate");
-  hub.report([], null, "latest");
+  hub.report([], null, [], "intermediate");
+  hub.report([], null, [], "latest");
   hub.flushReport();
   assert.deepEqual(layouts, ["old"]);
   acknowledgeFirst();
@@ -226,7 +238,7 @@ test("the tabs the windows hold do not change what the page shows of them", asyn
   const unsubscribe = hub.subscribe(() => notified++);
 
   // Switching the session in front reports the tabs, and the host lists the windows again with them: nothing to draw.
-  hub.report(["session:s1", "session:s3"], "session:s3", null);
+  hub.report(["session:s1", "session:s3"], "session:s3", ["session:s3"], null);
   windows = [window("main", { tabs: ["session:s1", "session:s3"], activeTab: "session:s3" }), windows[1]];
   fake.send({ kind: "changed", tab: null, payload: null, requestId: null, target: null, x: null, y: null, refused: false });
   await settle(); await settle();

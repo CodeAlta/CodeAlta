@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { tabKey, type SessionTab } from "./sessionTabs";
 import { BackgroundMark } from "./BackgroundTaskViews";
@@ -33,14 +33,14 @@ export function RunningSessionBadge({ controls, tab, projectId, projectIds }: {
     : background > 0 ? <BackgroundMark count={background} /> : null;
 }
 
-/** Tab-title activity: a spinner while the session runs, a quieter mark while only its background tasks go on, nothing otherwise. */
-export function SessionTabActivity({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
+/** Tab-title activity: a spinner while the session runs, a quieter mark while only its background tasks go on, `idle` otherwise. */
+export function SessionTabActivity({ controls, tab, idle = null }: { controls: RuntimeObservationControls; tab: SessionTab; idle?: ReactNode }) {
   const { t } = useShellLanguage();
   const running = useSyncExternalStore(controls.store.subscribe, () => sessionRunning(controls.store.getSnapshot(), tab));
   const background = useSyncExternalStore(controls.store.subscribe, () => sessionBackground(controls.store.getSnapshot(), tab));
-  if (!controls.enabled || !controls.canObserve(tab)) return null;
+  if (!controls.enabled || !controls.canObserve(tab)) return idle;
   return running ? <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>
-    : background > 0 ? <BackgroundMark count={background} /> : null;
+    : background > 0 ? <BackgroundMark count={background} /> : idle;
 }
 
 export function RuntimeObservationBadge({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
