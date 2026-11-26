@@ -304,3 +304,20 @@ export function restoreChangesPreferences(read: () => string | null): ChangesPre
 export function persistChangesPreferences(write: (value: string) => void, value: ChangesPreferences): boolean {
   try { write(JSON.stringify(value)); return true; } catch { return false; }
 }
+
+/**
+ * What a changes tab is asked to show: the file of an `alta diff show` or of a review, the checkout (undefined keeps
+ * the one shown, null is the folder of the project) and the review to open.
+ */
+export type ChangesFocus = Readonly<{ path: string | null; worktree?: string | null; review?: "changes" | "branch" | null }>;
+
+/** The request another window sent as text (`JSON.stringify` of a focus); null when the text is not one. */
+export function readChangesFocus(text: string | null | undefined): ChangesFocus | null {
+  try {
+    const value: unknown = text ? JSON.parse(text) : null;
+    if (!value || typeof value !== "object") return null;
+    const { path, worktree, review } = value as { path?: unknown; worktree?: unknown; review?: unknown };
+    if (path !== null && typeof path !== "string") return null;
+    return { path, ...(worktree === null || typeof worktree === "string" ? { worktree } : {}), ...(review === "changes" || review === "branch" ? { review } : {}) };
+  } catch { return null; }
+}

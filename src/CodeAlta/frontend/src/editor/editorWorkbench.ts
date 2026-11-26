@@ -196,3 +196,23 @@ export function adoptLegacyFiles(read: () => string | null, write: (value: strin
     updateEditorStorage(read, write, { projectId, editor: { ...storedEditor(storage, projectId), files: [...paths], active: paths.at(-1) ?? null, side: null } });
   }
 }
+
+/** What the shell asks of a project's editor: a file to open, a place in it, and whether its files are shown. */
+export type EditorRequest = Readonly<{ path: string | null; line: number | null; column: number | null;
+  /** True shows the files of the project; false leaves them hidden when the editor is first opened; null changes nothing. */
+  explorer: boolean | null;
+  /** The view the file opens in, for a file that has a preview (a review opens a plan rendered); none keeps the last one. */
+  view?: "preview" | "source" }>;
+
+/** The request another window sent as text (`JSON.stringify` of a request); null when the text is not one. */
+export function readEditorRequest(text: string | null | undefined): EditorRequest | null {
+  try {
+    const value: unknown = text ? JSON.parse(text) : null;
+    if (!value || typeof value !== "object") return null;
+    const { path, line, column, explorer, view } = value as { path?: unknown; line?: unknown; column?: unknown; explorer?: unknown; view?: unknown };
+    if (path !== null && typeof path !== "string") return null;
+    const place = (number: unknown) => Number.isInteger(number) && (number as number) >= 0 ? number as number : null;
+    return { path, line: place(line), column: place(column), explorer: typeof explorer === "boolean" ? explorer : null,
+      ...(view === "preview" || view === "source" ? { view } : {}) };
+  } catch { return null; }
+}
