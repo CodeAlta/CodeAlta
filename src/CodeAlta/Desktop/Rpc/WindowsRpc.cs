@@ -88,7 +88,9 @@ internal sealed class WindowsService
     public WindowsStatusResponse Report(WindowsReportRequest request, NeoRpcContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(_windows is not null && _windows.Report(context.ViewLabel, request.Tabs ?? [], request.Active, request.Shown ?? [], request.PageState) ? "ok" : "unavailable");
+        // A page that does not say what its panes show (one loaded before the host changed) shows at least the tab in front.
+        var shown = request.Shown ?? (request.Active is { } active ? [active] : []);
+        return new(_windows is not null && _windows.Report(context.ViewLabel, request.Tabs ?? [], request.Active, shown, request.PageState) ? "ok" : "unavailable");
     }
 
     /// <summary>

@@ -409,6 +409,17 @@ public sealed class SpacesRpcTests
         Assert.IsFalse(reply.Sessions[3].Running || reply.Sessions[3].Failed || reply.Sessions[3].Waiting || reply.Sessions[3].BackgroundTasks > 0);
         StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"unread\":true");
 
+        // A session marked here and since moved to another machine, where it waits, has one row: its own, with its mark.
+        var now = DateTimeOffset.UtcNow;
+        var moved = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            RemoteSessions = () => [("mac", new("moved", "Moved", null, "default", null, "codex", null, now, now, "waiting"))],
+            Unread = () => ["moved"],
+        };
+        var there = (await moved.ActivityAsync(new(Epoch), default)).Sessions.Where(static session => session.SessionId == "moved").ToArray();
+        Assert.HasCount(1, there);
+        Assert.AreEqual((true, true, "machine:mac"), (there[0].Unread, there[0].Waiting, there[0].ProjectId));
+
         // The pages read what the sessions do again when a mark comes or goes, and only that.
         using var stop = new CancellationTokenSource(TestTime.Seconds(30));
         await using var events = service.WatchAsync(new(Epoch), stop.Token).GetAsyncEnumerator(stop.Token);

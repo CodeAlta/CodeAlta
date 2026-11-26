@@ -971,6 +971,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 fleet.Changed += spaceView.NotifySessionsChanged;
                 // A session that got or lost its unread mark: the windows read what the sessions do again.
                 unreadSessions.Changed += spaceView.NotifyActivityChanged;
+                host.RuntimeService.SessionDeleted += unreadSessions.Forget;
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 // The project the catalog lists for a folder; null for none.
                 async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)

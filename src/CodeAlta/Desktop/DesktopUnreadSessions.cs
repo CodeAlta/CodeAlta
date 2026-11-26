@@ -9,7 +9,8 @@ namespace CodeAlta.Desktop;
 /// </summary>
 /// <remarks>
 /// The marks last as long as the application. The readings of the sessions and the windows that say what they show come
-/// from different threads: each change is made under one lock, and <see cref="Changed"/> is raised outside it.
+/// from different threads: each change is made under one lock, with what the user looks at read under it, so that a mark
+/// set by a reading is never set after the look that should have cleared it. <see cref="Changed"/> is raised outside it.
 /// </remarks>
 internal sealed class DesktopUnreadSessions
 {
@@ -42,10 +43,10 @@ internal sealed class DesktopUnreadSessions
     internal void Observe(IReadOnlyList<DesktopTurnAlert> alerts)
     {
         ArgumentNullException.ThrowIfNull(alerts);
-        var inView = InView();
         bool changed;
         lock (_gate)
         {
+            var inView = InView();
             changed = ClearLocked(inView);
             foreach (var alert in alerts)
             {
@@ -64,9 +65,17 @@ internal sealed class DesktopUnreadSessions
     /// <summary>What the user looks at may have changed: the sessions they look at now lose their mark.</summary>
     internal void Look()
     {
-        var inView = InView();
         bool changed;
-        lock (_gate) changed = ClearLocked(inView);
+        lock (_gate) changed = ClearLocked(InView());
+        if (changed) Changed?.Invoke();
+    }
+
+    /// <summary>A session was deleted: it has no row to mark, and its mark leaves its place to another.</summary>
+    /// <param name="sessionId">The session.</param>
+    internal void Forget(string sessionId)
+    {
+        bool changed;
+        lock (_gate) changed = _sessions.RemoveAll(id => string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase)) > 0;
         if (changed) Changed?.Invoke();
     }
 

@@ -443,7 +443,9 @@ internal sealed class SpacesService
                     : local[value.Session.ParentSessionId].ProjectId ?? WorkspaceService.MachineScopePrefix + value.MachineId,
                 Cut(value.Session.Title, 256), value.Session.State == "working", 0, false, value.Session.State == "waiting",
                 value.Session.ParentSessionId is { } above ? [above, .. Ancestors(above, parents)] : [],
-                SpaceDescriptor.IsValidId(value.Session.SpaceId) ? value.Session.SpaceId : null))
+                SpaceDescriptor.IsValidId(value.Session.SpaceId) ? value.Session.SpaceId : null)
+                // A session marked here before it moved there keeps its mark, on its one row.
+                { Unread = unread.Contains(value.Session.Id) })
             .OrderByDescending(static activity => activity.Waiting).ToArray();
         own = [.. remote.Where(static activity => activity.Waiting), .. own, .. remote.Where(static activity => !activity.Waiting)];
         // The sessions another process runs or shows: read-only here while it holds them.
@@ -458,7 +460,7 @@ internal sealed class SpacesService
             }).ToArray();
         // The sessions whose turn ended while the user did not look at them, and that have nothing else to say: last, as a
         // reading cut short keeps what matters most. The runtime may have let one go since: its mark stays all the same.
-        var listed = ownIds.Concat(elsewhere.Select(static activity => activity.SessionId)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var listed = own.Concat(elsewhere).Select(static activity => activity.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var quiet = unread.Where(id => !listed.Contains(id)).Order(StringComparer.Ordinal)
             .Select(static id => new SpaceSessionActivity(id, null, string.Empty, false, 0, false, false, []) { Unread = true });
         var all = own.Concat(elsewhere).Concat(quiet).ToArray();
