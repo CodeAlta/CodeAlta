@@ -3318,9 +3318,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const workByProject = useMemo(() => workCounts(work, runningSessionIds), [work, runningSessionIds]);
   const [workFocus, setWorkFocus] = useState<WorkItemsFocus | null>(null);
   const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
-  function openWorkItems(focus: WorkItemsFocus | null = null) {
+  function openWorkItems(focus: WorkItemsFocus | null = null, fromSession: string | null = null) {
     // The window that holds the tab shows the item: it is told which, and comes to the front.
-    if (focus && heldElsewhere(workItemsTab)) { windowsHub.focusTab(fileTabRef(workItemsTab), JSON.stringify(focus)); return; }
+    if (focus && heldElsewhere(workItemsTab)) {
+      windowsHub.focusTab(fileTabRef(workItemsTab), JSON.stringify(focus));
+      // Nothing changes here: the row of the session the item was opened from says the click was heard.
+      if (fromSession && sessionRail.current) for (const row of rowsOfSession(sessionRail.current, fromSession)) flashElement(row);
+      return;
+    }
     if (focus) setWorkFocus(focus);
     openFile(workItemsTab);
   }
@@ -4611,7 +4616,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       <SessionWindowMark window={windowsState.windows.find(window => window.id === windowsState.sessionWindows.get(session.id))} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
-      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} />
+      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) }, session.id)} />
       <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
       <CloudMark session={session} />
