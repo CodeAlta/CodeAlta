@@ -39,7 +39,9 @@ export function ProjectReferencePicker({ text, edit, input, compact = true }: {
   const [page, setPage] = useState<SessionReferenceSearchResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const { trigger, dialog, close } = usePromptPicker({ input, edit, enabled: !!scope, detect: activeProjectReference, focus: search,
+  // Only typing `@` opens it by itself: an `@path` that arrives otherwise (pasted, a suggestion taken, a draft shown, a deletion or a click
+  // that puts the caret after it) is text, whether or not the editor tells of a paste.
+  const { trigger, dialog, close } = usePromptPicker({ input, edit, enabled: !!scope, detect: activeProjectReference, focus: search, typedOnly: "@",
     onOpen: value => { setQuery(value.query); setSelected(0); setPage(null); setFailed(false); } });
   const open = !!trigger;
 

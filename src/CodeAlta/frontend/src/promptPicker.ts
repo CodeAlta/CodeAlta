@@ -29,6 +29,14 @@ export function typedTrigger(typedAt: number | null, span: Readonly<{ start: num
   return typedAt === span.start;
 }
 
+/**
+ * Whether a key types the trigger character of a picker. AltGr, which types `@` and `#` on many layouts, reaches the page as
+ * Ctrl+Alt on Windows; Ctrl or the Command key alone is a shortcut.
+ */
+export function typesPromptTrigger(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">, trigger: string | undefined) {
+  return trigger !== undefined && event.key === trigger && !event.metaKey && (!event.ctrlKey || event.altKey);
+}
+
 // The keys that do not end a trigger just typed: they type nothing themselves, or change the next character.
 const typingModifiers: ReadonlySet<string> = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock", "Dead", "Process"]);
 
@@ -38,7 +46,7 @@ export function isPromptPickerReopenKey(event: Pick<KeyboardEvent, "key" | "ctrl
 }
 
 /**
- * Shared behavior of the prompt pickers (`@` files, `#` issues): watches the prompt editor, opens a modal
+ * Shared behavior of the prompt pickers (`@` files, `#` issues and tasks, `/` skills): watches the prompt editor, opens a modal
  * dialog when the caret sits in a trigger token, and on close either applies the replacement text or
  * leaves the text as typed; the caret then returns to the editor. A token closed without a choice stays
  * closed while typing goes on, until Ctrl+Space opens it again with the text after the trigger as query. With
@@ -115,7 +123,7 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
     // A key or a click in the prompt: before the editor, so that the caret is still where the key types.
     const pressed = (event: Event) => {
       if (!(event instanceof KeyboardEvent)) typedAt = null;
-      else if (event.key === latest.current.typedOnly && !event.ctrlKey && !event.metaKey) typedAt = Math.min(element.selectionStart, element.selectionEnd);
+      else if (typesPromptTrigger(event, latest.current.typedOnly)) typedAt = Math.min(element.selectionStart, element.selectionEnd);
       else if (event.key.length > 1 && !typingModifiers.has(event.key)) typedAt = null;
     };
     // Captured before the editor, which would otherwise show its own suggestions for Ctrl+Space.
