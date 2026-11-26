@@ -23,8 +23,12 @@ public sealed record CodeModeToolOptions
     /// <summary>Gets how long <c>exec</c> waits for a run before it goes on in the background, when the script does not say.</summary>
     public TimeSpan DefaultYield { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Gets the folder where the runs of a session keep their source, by session id, or null to keep none.</summary>
-    public Func<string, string?>? SourceFolder { get; init; }
+    /// <summary>
+    /// Gets the folder where the runs of a session keep their source, by session id, or null to keep none. It is asked at
+    /// each run, and answers null for a session whose source is not kept: a sandboxed session, which reads no folder
+    /// CodeAlta writes for it.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<string?>>? SourceFolder { get; init; }
 
     /// <summary>
     /// Gets whether the tools are those of sessions: a call of <c>exec</c> then comes with the tools of its session
@@ -361,6 +365,8 @@ public static class CodeModeToolFactory
                 : tools?.IsIdempotent(path) == true,
         };
 
+        // Asked before the run starts: nothing is awaited between its start and what stops it with the turn.
+        var sourceFolder = await SourceFolderOfAsync(options, sessionId, cancellationToken).ConfigureAwait(false);
         var run = options.Runs.TryStart(sessionId, execOptions.Title, maxOutputTokens, invocation.ToolCallId, start, (observer, runCancellation) =>
             {
                 // The pictures of the result are read as the session reads a picture: through its own tool, in its sandbox.
@@ -398,7 +404,7 @@ public static class CodeModeToolFactory
             return Failure(refusal!);
         }
 
-        var sourcePath = KeepSource(options, sessionId, run.Id, source);
+        var sourcePath = KeepSource(sourceFolder, run.Id, source);
 
         // While the turn waits for the run, stopping the turn stops it; once it goes on in the background, it no longer does.
         var yieldTime = execOptions.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(Math.Min(yieldMs, MaxYieldMilliseconds)) : options.DefaultYield;
@@ -596,9 +602,9 @@ public static class CodeModeToolFactory
     private static string SourceLine(string? sourcePath) => sourcePath is null ? string.Empty : $"Source: {sourcePath}\n";
 
     // The source of each run is kept as a file, so that the model fixes a long script with its file tools.
-    private static string? KeepSource(CodeModeToolOptions options, string sessionId, string runId, CodeModeSource source)
+    private static string? KeepSource(string? folder, string runId, CodeModeSource source)
     {
-        if (options.SourceFolder?.Invoke(sessionId) is not { } folder)
+        if (folder is null)
         {
             return null;
         }
@@ -611,6 +617,25 @@ public static class CodeModeToolFactory
             return path;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    // Where the source of a run of the session is kept, or null for none. A folder that cannot be told keeps none: the
+    // script is in the call that starts it.
+    private static async ValueTask<string?> SourceFolderOfAsync(CodeModeToolOptions options, string sessionId, CancellationToken cancellationToken)
+    {
+        if (options.SourceFolder is not { } folderOf)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await folderOf(sessionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             return null;
         }

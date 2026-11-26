@@ -54,7 +54,7 @@ test("a decision makes the next read of the permissions of its session a new one
   const before = reads.permissions(request);
   assert.equal(await Promise.race([reads.permissions(request).then(() => "answered"), Promise.resolve("waits")]), "waits");
   assert.equal(lists.length, 1, "the pane and the sub-session panel above another pane share the read that waits");
-  const decision = reads.resolvePermission({ expectedHostEpoch: epoch, handle, decision: "deny" }, {});
+  const decision = reads.resolvePermission({ expectedHostEpoch: epoch, handle, decision: "deny", feedback: null }, {});
   const older = listed;
   listed = deferred<SessionPermissionsPage>();
   void reads.permissions(request);

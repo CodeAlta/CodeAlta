@@ -4,17 +4,18 @@ title: Labels
 
 # Labels
 
-A label groups projects inside a [space](spaces.md): **Infra**, **Helm charts**, **Client X**. CodeAlta Desktop lists the projects of the shown space under their labels, so a long list of projects becomes a few short ones.
+A label groups projects inside a [space](spaces.md): **Infra**, **Helm charts**, **Client X**. CodeAlta Desktop lists the projects of the shown space under their labels, so a long list of projects becomes a few short ones. A label can also be [for sessions](#labels-of-sessions): it groups the sessions inside a project, such as **Audit**, **PR review** or **Bug**.
 
 - A label has a name, an icon and a color for its badge.
 - A label can be under another label: **Infra › Helm charts**.
 - A project can have several labels. It is listed under each of them.
 - A label is in one space, or in every space. A label under another one is in the space of the label above it.
+- A label is for projects or for sessions, chosen when it is created. A label under another one is for what the label above it is for.
 - Labels side by side have different names. Two spaces can each have a top-level label of the same name, such as **Infra**: they never show together. A label of every space shows in each space, so no top-level label there may share its name.
 
 A repository can also give labels to its sub-projects in its project map: those nest under the repository in the Explorer, and are changed in the map ([Monorepos](monorepos.md)).
 
-CodeAlta TUI lists the projects without their labels, and keeps them.
+CodeAlta TUI lists the projects and the sessions without their labels, and keeps them.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-labels.webp" alt="The Explorer of the Open source space with its projects under the labels Apps, Parsers, Config formats, Native and Terminal, beside a Markdig session" loading="lazy">
@@ -50,7 +51,7 @@ A label created from the Explorer is in the shown space, or in every space when 
 
 ## Settings > Labels
 
-**Settings > Labels**, under **Spaces**, shows every label as a tree. Drag a label to move it, or use the arrows of its row: up, down, under the label above, out of its parent. Select a label to change its name, icon, color, space, what it stands for, and its projects.
+**Settings > Labels**, under **Spaces**, shows every label as a tree: those for projects, or those for sessions with **Labels for > Sessions**. A new label is for what the page shows. Drag a label to move it, or use the arrows of its row: up, down, under the label above, out of its parent. Select a label to change its name, icon, color, space, what it stands for, and, for a label of projects, its projects.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-label-settings.webp" alt="Settings > Labels: the tree of the labels with Parsers selected, and its form with its name, icon, color, space and projects" loading="lazy">
@@ -59,18 +60,37 @@ A label created from the Explorer is in the shown space, or in every space when 
 
 Deleting a space deletes its labels.
 
+## Labels of sessions
+
+Inside a project, sessions come from very different work: refactoring, bug fixing, and the runs of [automations](automations.md) such as pull request reviews or audits. A label for sessions puts each concern in a group of its own, with its latest sessions on top.
+
+- A session can have several labels. A label for sessions is in one space or in every space, as a label of projects is: a session gets the labels of its space and those of every space.
+- In the **⋯** menu of a session, **Labels…** checks the labels it has, and makes a new one.
+- Without groups, a session shows its labels as small badges after its title.
+- **Group sessions by labels**, in the **⋯** menu of a project or of **Chats**, lists its sessions under their labels: a title for each label one of its sessions has, in the order of the labels, with how many sessions it holds and the sessions that run or wait in it, then **Other sessions**, those of no label. A title folds its sessions. A session with several labels is listed under the first one, and shows the others as badges. **Sessions in one list** goes back to one list. This choice belongs to the window, project by project.
+- **Filter sessions**, the [search](workspace/readme.md#search) (`Ctrl+P`) and the [session browser](workspace/readme.md#session-browser) take a word `label:audit`: they keep the sessions with a label whose id starts with `audit`.
+- The sub-agents of a session follow it: they are listed under it, whatever their own labels.
+
+Every run of an automation gets the label of the automation: the one it names, or one of its name, made at its first run. The runs of each automation then fold into one group, apart from the work done by hand (see [Automations](automations.md#follow-the-runs)).
+
+An [archive policy](sessions/readme.md#archive-policies) archives the older sessions of a label by itself, such as the audits of last week.
+
 ## Agents and labels
 
-Agents read and change labels with `alta label`, and list the projects of a label with `alta project list --label`. Ask in your own words:
+Agents read and change labels with `alta label`, and list the projects of a label with `alta project list --label`. For sessions, `alta label create --for sessions` makes a label, `alta session label` gives it to a session, `alta session create --label` creates a session with it, and `alta session list --label` lists its sessions. Ask in your own words:
 
 ```text
 Run the tests of every project labeled Infra.
 Label the three Helm projects "Helm charts", under Infra.
+Label this session "bug".
+What did the sessions labeled audit find this week?
 ```
+
+An agent prompt can tell its agent to label its session when a task starts, such as `alta session label --add review`.
 
 - An agent sees the labels of its space and those of every space.
 - The labels it creates are in its own space.
-- **What it stands for** helps an agent choose the right label.
+- **What it stands for** helps an agent choose the right label, for a project or for a session.
 
 ## Files
 
@@ -90,4 +110,4 @@ parent: infra
 Helm charts deployed by the platform team.
 ```
 
-`space` is written only for a label at the top, and `favorite: true` only for a favorite.
+`space` is written only for a label at the top, and `favorite: true` only for a favorite. A label for sessions has `for: sessions` at the top of its tree. A session names its labels in its [journal](sessions/readme.md), and keeps the id of a label that is deleted, which it no longer shows.

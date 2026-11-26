@@ -46,6 +46,7 @@ folders of the session and the computer (`SandboxHost`) into a `SandboxPolicy`:
   the start, so that it is read-only.
 - **Denied**: the user's secrets wherever a grant would reach them.
 - **Environment**: built from scratch. Variables named like a secret pass only when the profile names them. A profile also sets variables; the references of their values (a secret, a variable of the store) are read on the host from the values of the machine, the same for every session of a profile since they share its home folder, and nothing starts in the sandbox while one has no value.
+- **Secrets of the project**: the identity of a session (`SessionIdentityResolver`) names the variables it assigns from a secret. Those whose secrets only the project gets (`IProjectSecretLookup`: limited to projects in the store, or given by the fleet for the project) and that hold no variable of the application enter the sandbox whatever their name (`SandboxProjectSecrets`). The home and the caches are then those of the project (`projects/<id>` under the folder of the profile, or of the agent's own home), so that a session of another project leaves nothing there that reads them. The session's own project names that folder, not the one a secret is limited to: a sub-project may get secrets its repository does not. The other variables assigned from a secret never enter (`WithheldVariables`): a repository names secrets in its own `[env]`, and would bring any secret of the machine in under another name. The account folder of Claude Code and the CODEX_HOME of Codex CLI stay shared between projects, with what their agents write there.
 
 ## The mxc backend
 
@@ -57,7 +58,10 @@ Bubblewrap on Linux. Invariants:
   sandboxed session, never commands without a sandbox.
 - **The parents of a grant.** Tools resolve a path one folder at a time from the volume root. A read-only grant
   cascades to everything below it, so each parent folder of a read-write grant is granted read-only with its other
-  entries denied. The volume root is granted only to be listed (`enumeratePaths`) where Windows reports that capability:
+  entries denied. Those entries are the ones that exist when the container starts: on Windows, a container that runs
+  reads what is created later in one of those folders, until it starts again. This is accepted: what was there at its
+  start stays denied, and the worker of a session stops after ten minutes without a call. The volume root is granted
+  only to be listed (`enumeratePaths`) where Windows reports that capability:
   read-only it opens the whole disk, and read-write it lets the sandbox create folders there and write in them, which a
   default Windows lets every user do at the root of a disk. A link to a folder the sandbox needs is not denied, since
   mxc denies what a denied link names and a Windows profile has such links (`Local Settings` names `AppData\Local`):

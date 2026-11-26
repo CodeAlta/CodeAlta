@@ -413,7 +413,7 @@ public sealed class StatisticsPluginTests
         var events = new AgentEvent[]
         {
             new AgentActivityEvent(ProviderId, "session-1", DateTimeOffset.UtcNow, runId, AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1", null, "turn", null),
-            new AgentContentDeltaEvent(ProviderId, "session-1", DateTimeOffset.UtcNow.AddSeconds(1), runId, AgentContentKind.Assistant, "assistant-1", "turn-1", "still running"),
+            new AgentContentDeltaEvent(ProviderId, "session-1", DateTimeOffset.UtcNow.AddSeconds(1), runId, AgentContentKind.Assistant, "assistant-1", "turn-1", "still running"), // not a limit
         };
 
         var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);

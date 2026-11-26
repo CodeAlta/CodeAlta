@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 import { devToolsAnswerLimit, pageWaitLimit, testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
-test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: testLimit(60_000) }, async () => {
+const appRender = "project-focus-app-render";
+test("the Explorer keeps what is open; closing the window asks first; Ctrl+O focuses the opened project's prompt and cancellation restores its origin", { skip: !edge, timeout: testLimit(60_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-project-focus-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -20,6 +21,13 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
       bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-project-focus", setup(bundle) {
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./projectFocus.neoastra.mount.ts", import.meta.url)) }));
+        bundle.onLoad({ filter: /[/\\]src[/\\]main\.tsx$/ }, async ({ path }) => {
+          const source = await readFile(path, "utf8");
+          const app = /^function App\(.*\) \{$/m;
+          assert.match(source, app);
+          // Count committed renders of App itself, not its children or StrictMode's extra render attempts.
+          return { loader: "tsx", contents: source.replace(app, `$&\n  useLayoutEffect(() => { performance.mark("${appRender}"); });`) };
+        });
         bundle.onResolve({ filter: /^monaco-editor\/.*\?worker$/ }, args => ({ path: args.path, namespace: "fixture-worker" }));
         bundle.onLoad({ filter: /.*/, namespace: "fixture-worker" }, async () => {
           const worker = await build({ entryPoints: [fileURLToPath(new URL("../node_modules/monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url))],
@@ -66,6 +74,19 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     };
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${pageWaitLimit};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({focus:document.activeElement?.outerHTML.slice(0,300),promptText:document.querySelector('#catalog-prompt .view-lines')?.textContent,project:document.querySelector('.welcome-subtitle')?.textContent,errors:window.projectFocusErrors});else setTimeout(tick,20)};tick()})`);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true)))))");
+    const resetAppRenders = () => evaluate(`performance.clearMarks("${appRender}")`);
+    const appRenders = () => evaluate(`performance.getEntriesByName("${appRender}", "mark").length`);
+    const keystrokeRenders = async (text: string) => {
+      await frames();
+      const renders: number[] = [];
+      for (const character of text) {
+        await resetAppRenders();
+        await command("Input.insertText", { text: character });
+        await frames();
+        renders.push(await appRenders());
+      }
+      return renders;
+    };
     const key = async (key: string, code: string, virtual: number, ctrl = false) => {
       for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: virtual, modifiers: ctrl ? 2 : 0 });
     };
@@ -89,7 +110,7 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("!!document.querySelector('#catalog-prompt')"), true, exceptions.join("\n"));
-    await evaluate("localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true')");
+    await evaluate("localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true');localStorage.setItem('archivedInfoFixture','true')");
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#session-prompt') && !!document.querySelector('#project-list')"), true);
 
@@ -99,6 +120,195 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     const expanded = () => evaluate(`['project','other'].map(id=>${scope("'+id+'")}.getAttribute('aria-expanded')).join()`);
     const otherSession = `document.querySelector('#project-list .session-row > button[title="other-session"]')`;
     assert.equal(await expanded(), "true,false", "with nothing remembered the selected project is the one open");
+    await t.test("moving a session offers other projects and confirms the captured source and target", async () => {
+      const trigger = "document.querySelector('.session-row[data-session-id=\"one\"] .session-actions-trigger')";
+      const line = "[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].find(item=>item.textContent.trim()==='Move to project…')";
+      const dialog = "document.querySelector('dialog.move-session-dialog[open]')";
+      const option = `${dialog}?.querySelector('[role=option]')`;
+      const moves = "projectFocusFixture.moves";
+      const openMove = async () => {
+        await evaluate(`${trigger}.click()`);
+        assert.equal(await wait(`!!${line}`), true);
+        await evaluate(`${line}.click()`);
+        assert.equal(await wait(`!!${option}`), true);
+      };
+      await openMove();
+      assert.match(await evaluate(`${dialog}.querySelector('h2').textContent`), /Move one to another project/);
+      assert.deepEqual(await evaluate(`[...${dialog}.querySelectorAll('[role=option] .reference-name')].map(row=>row.textContent)`), ["Other project"]);
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${dialog}`), true);
+      assert.equal(await evaluate(`${moves}.length`), 0, "cancel sends no move");
+      await openMove();
+      await evaluate(`${option}.click()`);
+      assert.equal(await wait(`${moves}.length===1 && ${option}?.getAttribute('aria-disabled')==='true'`), true);
+      assert.deepEqual(await evaluate(`(({sessionId,projectId,projectPath,targetProjectId,targetProjectPath})=>({sessionId,projectId,projectPath,targetProjectId,targetProjectPath}))(${moves}[0].request)`),
+        { sessionId: "one", projectId: "project", projectPath: "/fixture/project", targetProjectId: "other", targetProjectPath: "/fixture/other" });
+      await evaluate(`(()=>{const {request,resolve}=${moves}[0];resolve({...request,hostEpoch:request.expectedHostEpoch,status:'target_missing',moved:[],warnings:[]})})()`);
+      assert.equal(await wait(`!${dialog} && document.body.textContent.includes('The project to move the session to is gone or archived.')`), true);
+    });
+    await t.test("Info of an archived session opens recorded details above Saved Sessions", async () => {
+      const browser = "document.querySelector('dialog.session-browser[open]')";
+      const archived = `${browser}?.querySelector('.session-browser-archived')`;
+      const info = "document.querySelector('dialog.session-info-dialog[open]')";
+      for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent",
+        { type, key: "b", code: "KeyB", windowsVirtualKeyCode: 66, modifiers: 1 | 2 });
+      assert.equal(await wait(`${archived}?.querySelector('.session-browser-count')?.textContent==='1'`), true);
+      await evaluate(`${archived}.click()`);
+      assert.equal(await wait(`${browser}?.querySelector('.session-browser-name')?.textContent==='Closed transcript'`), true);
+      await evaluate(`[...${browser}.querySelectorAll('.archived-footer button')].find(button=>button.textContent==='Info…').click()`);
+      assert.equal(await wait(`${info}?.querySelector('#session-info-saved + dl')?.textContent.includes('recorded-info')`), true);
+      assert.match(await evaluate(`${info}.querySelector('#session-info-saved + dl').textContent`), /Closed transcript.*Archived/s);
+      assert.equal(await evaluate(`${info}.querySelector('[aria-label="Refresh observed details"]').disabled`), true);
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${info} && ${archived}?.getAttribute('aria-pressed')==='true'`), true);
+      await evaluate(`${browser}.querySelector('.app-window-close').click()`);
+      assert.equal(await wait(`!${browser}`), true);
+    });
+    await t.test("typing a session title does not render App", async t => {
+      const input = `document.querySelector('.rename-popover input')`;
+      const openRename = async () => {
+        await evaluate(`document.querySelector('.session-row[data-session-id="one"] > button').focus()`);
+        await key("F2", "F2", 113);
+        assert.equal(await wait(`${input} && document.activeElement===${input} && ${input}.selectionEnd===3`), true);
+        assert.equal(await evaluate(`${input}.value`), "one", "each rename starts from the current title");
+      };
+      await openRename();
+      const renders = await keystrokeRenders("new");
+      assert.equal(await evaluate(`${input}.value`), "new");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${input}`), true);
+      assert.equal(await evaluate("settingsShellFixture.renameRequests.length"), 0, "cancel sends no rename");
+      await openRename();
+      await command("Input.insertText", { text: "submitted title" });
+      await evaluate("document.querySelector('.rename-popover button[type=submit]').click()");
+      assert.equal(await wait(`settingsShellFixture.renameRequests[0]?.title==='submitted title' && ${input}?.disabled`), true);
+      await evaluate("settingsShellFixture.releaseMutation('rename')");
+      assert.equal(await wait(`${input}?.disabled && !!document.querySelector('.rename-popover [role=alert]')`), true, "an unconfirmed rename keeps its draft locked");
+      assert.equal(await evaluate(`${input}.value`), "submitted title");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${input}`), true);
+      t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
+      assert.deepEqual(renders, [0, 0, 0]);
+    });
+    await t.test("typing a project name does not render App", async t => {
+      const input = `document.querySelector('.rename-popover input')`;
+      const openRename = async () => {
+        await evaluate(`${scope("project")}.focus()`);
+        await key("F2", "F2", 113);
+        assert.equal(await wait("settingsShellFixture.projectNameReads.length===1"), true);
+        await evaluate("settingsShellFixture.releaseProjectName()");
+        assert.equal(await wait(`${input} && document.activeElement===${input} && ${input}.selectionEnd===13`), true);
+        assert.equal(await evaluate(`${input}.value`), "Original name", "the form starts from the host's project name");
+      };
+      await evaluate("localStorage.setItem('draftTabFixture','true')");
+      try {
+        await openRename();
+        const renders = await keystrokeRenders("new");
+        assert.equal(await evaluate(`${input}.value`), "new");
+        await key("Escape", "Escape", 27);
+        assert.equal(await wait(`!${input}`), true);
+        assert.equal(await evaluate("settingsShellFixture.projectRenames.length"), 0, "cancel sends no rename");
+        await openRename();
+        await command("Input.insertText", { text: "submitted project name" });
+        await evaluate("document.querySelector('.rename-popover button[type=submit]').click()");
+        assert.equal(await wait(`settingsShellFixture.projectRenames[0]?.request.displayName==='submitted project name' && ${input}?.disabled`), true);
+        await evaluate(`(() => {
+          const {request,resolve}=settingsShellFixture.projectRenames[0];
+          resolve({...request,hostEpoch:request.expectedHostEpoch,status:'conflict'});
+        })()`);
+        assert.equal(await wait(`${input}?.disabled && document.querySelector('.rename-popover [role=alert]')?.textContent.includes('project file changed')`), true);
+        assert.equal(await evaluate(`${input}.value`), "submitted project name", "a conflict preserves the draft");
+        await key("Escape", "Escape", 27);
+        assert.equal(await wait(`!${input}`), true);
+        t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
+        assert.deepEqual(renders, [0, 0, 0]);
+      } finally {
+        await evaluate("localStorage.removeItem('draftTabFixture')");
+      }
+    });
+    await t.test("typing a Settings search does not render App", async t => {
+      const input = `document.querySelector('.settings-search-field input')`;
+      await evaluate("document.querySelector('button.activity-settings').click()");
+      assert.equal(await wait(`${input} && document.activeElement===${input}`), true);
+      const renders = await keystrokeRenders("darker");
+      assert.equal(await evaluate(`${input}.value`), "darker");
+      assert.equal(await wait(`!!document.querySelector('.settings-search-results [data-setting-result="appearance.darker"]')`), true);
+      // Enter opens the setting on the same page that Settings was on before the search.
+      await key("Enter", "Enter", 13);
+      assert.equal(await wait(`!document.querySelector('.settings-search-results') && document.querySelector('.settings-dialog-content [data-glow]')?.getAttribute('data-setting')==='appearance.darker'`), true);
+      assert.equal(await evaluate(`${input}.value`), "");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${input}`), true);
+      t.diagnostic(`App commits per keystroke: ${renders.join(", ")}`);
+      assert.deepEqual(renders, [0, 0, 0, 0, 0, 0]);
+    });
+    await t.test("typing in the sidebar applies one settled filter", async t => {
+      const input = "document.querySelector('.sidebar-filter input')";
+      const one = `document.querySelector('.session-row[data-session-id="one"]')`;
+      const two = `document.querySelector('.session-row[data-session-id="two"]')`;
+      await evaluate(`${input}.focus()`);
+      await frames();
+      assert.equal(await evaluate(`!!${one} && !!${two}`), true);
+      // Dispatch the burst in one browser task, so Node or DevTools delays cannot turn it into separate pauses.
+      const { strokes, lastInputAt } = await evaluate(`(() => {
+        const field=${input};
+        const setValue=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+        const marks=() => performance.getEntriesByName("${appRender}", "mark");
+        performance.clearMarks("${appRender}");
+        let lastInputAt=0;
+        const strokes=['t','tw','two'].map(value => {
+          lastInputAt=performance.now();
+          setValue.call(field,value);
+          field.dispatchEvent(new Event('input',{bubbles:true}));
+          return {value:field.value,renders:marks().length,originalRow:!!${one}};
+        });
+        return {strokes,lastInputAt};
+      })()`);
+      assert.equal(await wait(`!${one} && !!${two}`), true, "the paused query narrows the list");
+      await frames();
+      const commits = await evaluate(`performance.getEntriesByName("${appRender}", "mark").map(mark => Math.round(mark.startTime - ${lastInputAt}))`);
+      await evaluate(`${scope("project")}.querySelector('.tree-twist').click()`);
+      assert.equal(await wait(`${scope("project")}.getAttribute('aria-expanded')==='false'`), true, "a matching group can be folded temporarily");
+      await evaluate(`${input}.focus()`);
+      await frames();
+      await resetAppRenders();
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`${input}.value==='' && !!${one} && !!${two} && ${scope("project")}.getAttribute('aria-expanded')==='true'`), true, "Escape restores the original open group");
+      await frames();
+      const cleared = await appRenders();
+      t.diagnostic(`App commits during burst: ${strokes.map((stroke: { renders: number }) => stroke.renders).join(", ")} cumulative; offsets from last input: ${commits.join(", ")} ms; clearing: ${cleared} commit(s)`);
+      assert.deepEqual(strokes, ["t", "tw", "two"].map(value => ({ value, renders: 0, originalRow: true })));
+      assert.equal(commits.length, 1, "the settled value commits once");
+      assert.equal(cleared, 1, "clearing the value and its temporary folds commits once");
+    });
+    await t.test("deleting a project always asks and says why the host refused", async () => {
+      const form = "document.querySelector('.confirm-form')";
+      const cancel = `${form}?.querySelector('.rename-actions button:first-child')`;
+      const remove = `${form}.querySelector('.rename-actions button:last-child')`;
+      const requests = "projectFocusFixture.deletions";
+      const openDelete = async () => {
+        const line = "[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent==='Delete project…')";
+        await evaluate(`document.querySelector('button[aria-label="Project actions"]').click()`);
+        assert.equal(await wait(`!!${line}`), true);
+        await evaluate(`${line}.click()`);
+        assert.equal(await wait(`${form}?.textContent.includes('Delete this project?') && document.activeElement===${cancel}`), true);
+      };
+      await openDelete();
+      assert.equal(await evaluate(`${form}.querySelector('.confirm-subject').textContent`), "Project");
+      assert.equal(await evaluate(`${form}.querySelector('input[type=checkbox]')`), null, "the question cannot be skipped");
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait(`!${form}`), true);
+      assert.equal(await evaluate(`${requests}.length`), 0, "cancel sends no deletion");
+      await openDelete();
+      await evaluate(`${remove}.click()`);
+      assert.equal(await wait(`${requests}.length===1 && ${cancel}.disabled`), true);
+      assert.deepEqual(await evaluate(`(({projectId, projectPath, confirmedName, confirmed})=>({projectId, projectPath, confirmedName, confirmed}))(${requests}[0].request)`),
+        { projectId: "project", projectPath: "/fixture/project", confirmedName: "Project", confirmed: true });
+      await evaluate(`(()=>{const {request,resolve}=${requests}[0];resolve({status:'session_in_use',hostEpoch:request.expectedHostEpoch,projectId:request.projectId,projectPath:request.projectPath})})()`);
+      assert.equal(await wait(`${form}?.querySelector('.confirm-error')?.textContent.includes('running or waits for an answer') && !${cancel}.disabled`), true);
+      await evaluate(`${cancel}.click()`);
+      assert.equal(await wait(`!${form} && ${scope("project")}.getAttribute('aria-pressed')==='true'`), true);
+    });
     await evaluate(`${scope("other")}.querySelector('.tree-twist').click()`);
     assert.equal(await wait(`!!${otherSession}`), true);
     assert.equal(await evaluate(`${scope("project")}.getAttribute('aria-pressed')+${scope("other")}.getAttribute('aria-pressed')`), "truefalse", "the twist opens a project without selecting it");
@@ -338,6 +548,6 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
-    socket?.close(); browser?.kill(); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+    socket?.close(); await endBrowser(browser); await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   }
 });

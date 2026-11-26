@@ -18,7 +18,7 @@ export function TerminalRename({ terminal, rename, onDone }: {
   const [value, setValue] = useState(terminal.titled ? terminal.title : "");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  return <RenamePopover label={t("Terminal title")} value={value} busy={busy} error={failed ? t("The terminal could not be renamed.") : null}
+  return <RenamePopover label={t("Terminal title")} value={value} busy={busy} allowBlank error={failed ? t("The terminal could not be renamed.") : null}
     onChange={next => { setValue(next); setFailed(false); }} onCancel={onDone}
     onSubmit={() => {
       setBusy(true);

@@ -917,6 +917,9 @@ public sealed record FleetAskQuestion(string? Title, string? Question, string? D
 
     /// <summary>Gets what the empty free answer shows, when the question gives one.</summary>
     public string? FreeformPlaceholder { get; init; }
+
+    /// <summary>Gets whether the user may select more than one choice.</summary>
+    public bool AllowMultiSelect { get; init; }
 }
 
 /// <summary>The question of a session that waits for a person.</summary>

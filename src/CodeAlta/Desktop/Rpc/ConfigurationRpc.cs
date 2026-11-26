@@ -18,9 +18,8 @@ internal sealed class ConfigurationService(
     /// <summary>Gets the provider types of the running plugins, whose providers are shown with the others.</summary>
     internal CodeAlta.Hosting.PluginModelProviderTypes? PluginProviderTypes { get; init; }
 
-    internal ConfigurationService(string? catalogRoot) : this()
+    internal ConfigurationService(string catalogRoot) : this()
     {
-        if (catalogRoot is null) return; // Browser-only mode has no admitted catalog.
         if (string.IsNullOrWhiteSpace(catalogRoot) || !Path.IsPathFullyQualified(catalogRoot))
             throw new ArgumentException("An absolute catalog root is required.", nameof(catalogRoot));
         _catalogRoot = Path.GetFullPath(catalogRoot);

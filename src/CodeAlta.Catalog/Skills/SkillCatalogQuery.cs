@@ -169,8 +169,16 @@ public sealed record SkillCatalogQuery
         var query = ForSession(configStore, userCodeAltaRoot, userProfileRoot, project?.ProjectPath, [.. inherited, .. otherProjectRoots ?? []], space,
             project?.EffectiveSkillFolders);
         if (configStore is null || inherited.Count == 0) return query;
-        var disabled = new HashSet<string>(query.ProjectDisabledSkillNames, StringComparer.OrdinalIgnoreCase);
-        foreach (var root in inherited) disabled.UnionWith(configStore.LoadProjectDisabledSkillNames(root));
+        var disabled = ReadInheritedDisabledSkillNames(inherited, configStore.LoadProjectDisabledSkillNames);
+        disabled.UnionWith(query.ProjectDisabledSkillNames);
         return query with { ProjectDisabledSkillNames = disabled };
+    }
+
+    // Each inherited file can turn off names; no nearer file can turn them back on.
+    internal static HashSet<string> ReadInheritedDisabledSkillNames(IReadOnlyList<string> roots, Func<string, IReadOnlyCollection<string>> read)
+    {
+        var disabled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots) disabled.UnionWith(read(root));
+        return disabled;
     }
 }

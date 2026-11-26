@@ -6,17 +6,11 @@ Paths/commands below are relative to this directory.
 
 ## Orientation
 
-- Frontends: 
-    - Webview2-based UI: `src/CodeAlta` (`alta` command)
-    - TUI: `src/CodeAlta.Tui/` (`altatui` command)
-- **New features are developed for CodeAlta Desktop only.** No new feature is developed for the TUI: do not add a screen, a dialog, a command or a setting to `src/CodeAlta.Tui/`, and do not build a TUI counterpart of a desktop feature, unless the task asks for it.
-    - The TUI is kept working. It shares the orchestration, the catalog, the providers, the plugins and the `alta` tool with the desktop application, so a change made there for the desktop can change what the TUI does: build it, keep its tests passing, and fix what the change breaks.
-    - A bug of the TUI is still fixed when the task is about it.
+- Frontends: CodeAlta Desktop (`src/CodeAlta`, `alta`) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`). New features go in Desktop only unless the task asks for TUI work; keep the TUI building and its tests passing (see the [frontend scope and layer rules](doc/development-guide.md#architecture-rules)).
 - Tests: `src/CodeAlta.Tests/` (MSTest)
 - The in-process agent tool remains `alta`; do not rename neutral `CodeAlta.*` libraries or shared `.alta` state when changing frontend identities.
 - Website: `site/` (Lunet end-user documentation)
-- Architecture and its principles: `doc/architecture.md`; repository rules: `doc/development-guide.md`. Read them before a change that crosses areas.
-- Documentation: see [Documentation](#documentation) below.
+- Follow the [development guide](doc/development-guide.md) for repository rules. Read the [architecture](doc/architecture.md) before changing boundaries between areas.
 
 ## Build & Test
 
@@ -35,13 +29,9 @@ cd ../../../site
 lunet build
 ```
 
-Once the build is done, the two test suites do not depend on each other: run `dotnet test -c <Configuration> --no-build` and `npm test` at the same time, as two background jobs (`alta job start`) that each report when they end, so that a validation takes the time of the longer one. Never let `dotnet test` build while `npm test` runs: a build regenerates the RPC client that the frontend tests import. A test that fails only while both run is rerun alone before it is called a regression (see "Tests" in `doc/development-guide.md`).
+After the build, run `dotnet test -c <Configuration> --no-build` and `npm test` in parallel as two `alta job start` jobs. Never let `dotnet test` build while `npm test` runs: the build regenerates the RPC client that the frontend tests import. Follow the [test rules](doc/development-guide.md#tests) before submitting.
 
-All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge (found on Windows, macOS and Linux; `CODEALTA_TEST_BROWSER` names another Chromium) and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
-
-Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals (the final `--logger` argument there; a `.runsettings` logger is replaced by dotnet-releaser).
-
-Both frontend test scripts run at most two test files concurrently to bound headless Edge startup load. Browser fixtures use `browserTarget.ts` for guest-mode flags and `waitForBrowserPort`: a five-second wall-clock deadline (longer on CI, through `testLimit`) that tolerates missing/partial port files and reports child exit, spawn errors and bounded stderr. Keep stderr piped, preserve owned-browser cleanup (`endBrowser`, not a command of one system such as `taskkill`), and do not replace startup failures with blind retries or skips.
+The final `--logger` in `src/dotnet-releaser.toml` controls the GitHub .NET summary and replaces the `.runsettings` logger.
 
 ### Debug or Release
 
@@ -62,98 +52,35 @@ ps -eo pid,args | grep -E '/alta(tui)?( |$)'
 | --- | --- |
 | `bin/Release` of this checkout | `Debug` |
 | `bin/Debug` of this checkout | `Release` |
-| anywhere else (an installed `alta`, another checkout or worktree), or none runs | `Release` for the tests and `Debug` for the developer instance, as this file writes them |
+| anywhere else (an installed `alta`, another checkout or worktree), or none runs | `Release` for the tests and `Debug` for the developer instance |
 
-Use that configuration in every command of this file: `-c <Configuration>` for `dotnet build` and `dotnet test`, and `bin/<Configuration>` in the path of an executable. Tests that pass in `Debug` count; CI runs them in `Release`.
+Use the selected configuration in `dotnet build`, `dotnet test` and executable paths. Tests that pass in `Debug` count; CI runs them in `Release`.
 
 - Never exit that application to free its files: it is the one the user works in, and often the one you run in.
-- The developer instance you started (below) is yours: exit it before a build or a test run of its configuration.
+- Before building or testing, exit the developer instance you started if it runs that configuration.
 - Run one build at a time, whatever the configurations: they share `src/CodeAlta/frontend/dist` and the generated RPC client.
 
 ## Working on the desktop WebApp
 
-The desktop UI (`src/CodeAlta`, React frontend in `src/CodeAlta/frontend`) runs in a native window. Drive the running window through its MCP server instead of guessing from the source: look at it, click in it, read its DOM and console.
-
-**1. Build.** `dotnet build CodeAlta/CodeAlta.csproj` from `src` builds the host and the frontend in `Debug`; add `-c Release` when `Debug` is the configuration to leave alone (see "Debug or Release"). The build restores npm packages and regenerates the typed RPC client `src/CodeAlta/obj/neoastra/neoastra.ts`. The frontend alone is checked from `src/CodeAlta/frontend` with `node node_modules/typescript/bin/tsc --noEmit` and one test file with `node node_modules/tsx/dist/cli.mjs --test src/<name>.test.ts`, or `src/<feature>/<name>.test.ts` for a feature folder (`npm test` runs them all). The `src/*.browser.test.ts` files start their own Edge; do not use them to look at the app.
-
-**2. Launch the developer instance.** `--dev` starts a second CodeAlta beside the normal one (see "Developer instance" below). What makes an instance the normal or the developer one is `--dev`, not its build: either can be the `Debug` or the `Release` one. From the repository root, with the configuration you built (PowerShell; `src/CodeAlta/bin/Debug/net10.0/alta --dev` on macOS and Linux):
-
-```powershell
-Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -WorkingDirectory (Get-Location)
-```
-
-The native window is titled **CodeAlta (dev)** and the page shows a **DEV** tag beside its name (`document.title` stays `CodeAlta`). Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal instance has port 2582); `~/.alta/dev/mcp_url.txt` holds that address while the instance runs, and `--mcp-port <port>` asks for another port. `alta.exe` is a windowed executable: it has no console. Started from a shell, it runs the window in a second `alta.exe` process and exits once the window is shown, with code 0; a non-zero exit code is a startup failure, and the log is under `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs`. A second developer instance shows the window of the running one and exits at once. Add `--wait` to keep the window in the process you started.
-
-Keep the launcher short-lived; do not wait for the GUI's lifetime:
-
-- For the simple detached command above, omit `-Wait`, `-NoNewWindow` and application `--wait`. Do not casually add environment or output redirection: on Windows those launch paths can let the GUI inherit the shell tool's captured handles, keeping output collection open after the launcher exits.
-- For a launcher that needs an isolated environment and logs, run a separate script as a bounded background job: `alta job start --command "pwsh -NoProfile -File <launcher.ps1>" --title "Launch isolated desktop" --timeout 60`. In that launcher, make its captured standard handles non-inheritable (`SetHandleInformation(GetStdHandle(n), 1, 0)` for `n` = -10, -11, -12, through `Add-Type`), then use `Start-Process` with the allowlisted environment and **distinct** `-RedirectStandardOutput`/`-RedirectStandardError` log files. Do not use `-Wait`. Redirection alone is not proof that no capture handle is inherited, and a background job alone does not fix a pipe leak. A successful launcher ends within seconds; an unexpectedly live job needs diagnosis, not another launch.
-- Then check the start in a separate short shell call: the process and its path (`Get-Process alta | Select-Object Id, Path`), the owner of the port (`(Get-NetTCPConnection -LocalPort 2583 -State Listen).OwningProcess` must be that process; it can take a few seconds to listen), and the end of the log.
-- A fresh or isolated profile opens Settings on **Providers** with a setup guide: close it with its **Skip** button, and never configure a provider to get past it.
-
-**3. Connect.** Two checked-in files register that server as `codealta-dev`, over HTTP: `.mcp.json` for agents that read project MCP configuration (Claude Code and others), and `.alta/mcp.json` for CodeAlta itself. Nothing has to be installed. A client that connects when it starts needs the app running first, or a reconnection afterwards; a restart of the app needs neither, because the server keeps no session.
-
-- `take_snapshot` (the elements of the page, each with a `uid`) and `take_screenshot` show the window; `click`, `fill`, `type_text` and `press_key` act on it; `evaluate_script` runs JavaScript in the page; `list_console_messages` reads its console. The tools have the names and the arguments of [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp).
-- `take_screenshot` with a `filePath` saves the picture instead of returning it: in the folder of a project, or in the folder of the tools (`%LOCALAPPDATA%\CodeAlta\desktop-dev\ui`).
-- In an explicitly isolated fixture, save screenshots under its own `<browser-root>/ui`, not the normal profile or a source folder, and record that path with the inspection results.
-- `alta` runs the commands of that instance, for example `{"args": ["session", "list"]}`: the caller belongs to no session.
-- The title bar's native caption buttons are not part of the page, so they are not in screenshots.
-- In a CodeAlta session the server starts inactive, or unavailable while nothing listens: once the developer instance runs, `alta mcp activate codealta-dev` registers its tools (`mcp__codealta_dev__…`) in the running turn, and they stay for the next turns and across restarts of that instance. In a session of the Claude Code provider they are named `mcp__codealta__mcp__codealta_dev__…`; Claude Code may also list the server of `.mcp.json` by itself (`mcp__codealta-dev__…`), which is the same window.
-- A session of CodeAlta Desktop has the same tools for the window it runs in, without any server: `alta ui activate`. That is the user's window, not the developer instance: drive the developer instance through `codealta-dev` only.
-- `resize_page` sets the page size in CSS pixels; screenshots are in device pixels (1.5 times larger at a 150% display scale). Use the existing desktop site screenshots as the presentation baseline: `alta-desktop-settings.webp` and the Statistics overview are 2400×1500 pixels, obtained with a 1600×1000 CSS-pixel page at 150% scale. Verify the actual device scale and saved image dimensions instead of assuming them. Use a large window for ordinary inspection and final screenshots; restore it after responsive checks.
-- A 900×650 CSS-pixel window is an additional narrow-layout test only, not the default inspection or documentation size. Settings is a dialog whose content is about 430 px wide there; verify controls and overflow at that width without replacing the large presentation screenshot with it.
-- One `evaluate_script` can navigate (click `nav[aria-label="Settings pages"] button`), wait for an element, and return what it measures: rectangles, computed styles, `scrollWidth > clientWidth` for horizontal overflow. Scroll with `scrollIntoView({ block: "nearest" })`, since `"start"` also scrolls the dialog itself. Look with `take_screenshot`; choose an option of a native `<select>` with `fill`; check the keyboard with `click` and `press_key`/`type_text`; check that a setting was saved in the file it writes, with an isolated profile only.
-- On Windows, WebView2 still opens a DevTools port when `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` is set before the start, for what these tools do not cover (performance traces, CSS inspection).
-
-**4. Change, rebuild, look again.** The files of the developer instance are locked while it runs, and closing its window may only hide it. Ask it to exit, with the `alta` of either build:
-
-```powershell
-Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev", "--exit"
-```
-
-It is gone within a few seconds, and `~/.alta/dev/mcp_url.txt` with it. While sessions run there or files have unsaved edits, it asks in its window first. Always pass `--dev`: `--exit` alone exits the normal instance, which may be the one you are running in, and never end every `alta` process for the same reason. `press_key` with `Control+q` through `codealta-dev` also exits the window that server drives, once its port owner is checked to be the developer instance. Before the build, check that the port no longer listens.
-
-Then build and launch again. Check both themes and a narrow window (`resize_page`) when a change is visual.
-
-**5. Mind what is shared.** The developer instance has its own sessions, so sending prompts there is safe and its sessions are disposable. Everything else is the user's real profile: do not change settings, providers, prompts or skills, and do not rename, archive or add projects, unless the task asks for it. A window started without `--dev` is the normal instance, with the user's real sessions: look and navigate freely, but do not send prompts, rename or delete sessions there unless asked, and leave it as you found it.
-
-### Developer instance
-
-Only one CodeAlta runs on a profile, because two processes must not write the same session files. `--dev` (`alta --dev` for the desktop app, `altatui --dev` for the terminal UI) starts a second one on the same `~/.alta`:
-
-| Shared with the normal instance | Its own, under `~/.alta/dev/` |
-| --- | --- |
-| `config.toml`, providers and their credentials (`auth/`), `mcp.json`, prompts, skills, plugins and their data (`plugin-data/`), color schemes (`color-schemes/`), the project catalog (`projects/`) | `sessions/` (journals, pasted images), `scratchpad/`, `saved_statistics_after_deleted_sessions/`, `data/alta.sqlite3` (the application database, its `backups/`), `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
-
-The desktop developer instance also has its own WebView data (`%LOCALAPPDATA%\CodeAlta\desktop-dev`: open tabs, drafts, theme, and the placement of its window) and its own MCP port. One developer instance runs at a time, terminal or desktop. It leaves the coordinator `~/.alta/AGENTS.md` as the normal instance wrote it, and on its first run takes over the normal instance's per-project provider/model preferences.
-
-Startup scratchpad cleanup is on by default and removes only the owning instance's scratchpad contents after safety checks. For destructive maintenance verification, use isolated temporary roots and synthetic data, never the real normal or developer profile. Changing to the developer scratchpad path does not migrate or delete historical files.
-
-This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository in a configuration that instance does not run from, start that `alta.exe --dev`, and drive that window through its MCP server (`codealta-dev`). The terminal UI is checked the same way with `altatui --dev` in a separate console.
+Follow the [developer-instance loop](src/CodeAlta/README.md#developer-instance) and check [which build is in use](#debug-or-release) first.
+Always pass `--dev` when starting or exiting the test instance. Never exit the user's instance or change their real profile, which the developer instance shares.
+Drive the developer window through `codealta-dev`, not `alta ui activate`.
 
 ## Documentation
 
-- `site/docs` is the user guide, also what CodeAlta's agents read to answer users. Change it only when what a user sees or does changes, in the page of that feature: concise and task-oriented, headings of a few words (the page table of contents shows them), about a dozen `##` at most, pictures kept with their sections, links instead of repetition. A page that grows too long is split into sub-pages of substance (a folder with `readme.md` and `menu.yml`), never into fragments. Style: `doc/site-screenshots.md` for pictures; "CodeAlta Desktop" first, then "CodeAlta TUI"; no history or internal names.
-- `doc/` is the architecture: responsibilities, boundaries, main flows, invariants and why. Change it only when one of these changes, never for a feature, a fix or a setting. No history, plans, decision logs, test lists or per-option detail. A why that belongs to one piece of code is a comment in that code.
-- `readme.md` lists the features at a glance; plans and tasks stay under `.alta/`.
+Follow the [documentation rules](doc/development-guide.md#documentation). In the user guide, put CodeAlta Desktop before CodeAlta TUI, keep the page to about a dozen `##` headings at most, and follow the [screenshot style](doc/site-screenshots.md).
 
 ## Contribution Rules (Do/Don't)
 
 - Keep diffs focused; avoid drive-by refactors/formatting and unnecessary dependencies.
 - Follow existing patterns and naming; prefer clarity over cleverness.
-- New/changed behavior requires tests; bug fix = regression test first, then fix.
-- All public APIs require XML docs (avoid CS1591) and should document thrown exceptions.
-- Do not add static mutable data anywhere in the codebase. Prefer instance-owned state, DI-managed services, or immutable/frozen static data for true constants; never use static mutable collections or process-wide lock maps for runtime/session state.
-- Keep frontend, orchestration, plugin, catalog, and hosting boundaries aligned with `doc/development-guide.md`; reusable runtime orchestration should not move into the TUI project.
-- Runtime thread/session state should use explicit command/event contracts and single-writer mailbox/actor-style ownership where practical; do not add Akka.NET or another actor framework without a documented spike/decision.
 
 ## C# Conventions (Project Defaults)
 
 - Naming: `PascalCase` public/types/namespaces, `camelCase` locals/params, `_camelCase` private fields, `I*` interfaces.
 - Style: file-scoped namespaces; `using` outside namespace (`System` first); `var` when the type is obvious.
-- Nullability: enabled - respect annotations; use `ArgumentNullException.ThrowIfNull()`; prefer `is null`/`is not null`; don't suppress warnings without a justification comment.
-- Exceptions: validate inputs early; throw specific exceptions (e.g., `ArgumentException`/`ArgumentNullException`) with meaningful messages.
-- Async: `Async` suffix; no `async void` (except event handlers); follow `doc/development-guide.md` for UI-thread and `ConfigureAwait(false)` rules; consider `ValueTask<T>` on hot paths.
+- Validation: use `ArgumentNullException.ThrowIfNull()` and specific exceptions with meaningful messages. Prefer `is null`/`is not null`.
+- Async: `Async` suffix; no `async void` except event handlers. Consider `ValueTask<T>` on hot paths.
 
 ## Performance / AOT / Trimming
 
@@ -171,7 +98,6 @@ This is how CodeAlta is developed with CodeAlta: you run in the normal instance 
 
 - Commits: commit after each self-contained logical step; imperative subject, < 72 chars; one logical change per commit; reference issues when relevant; don't delete unrelated local files.
 - Commit subjects must start with a dotnet-releaser autolabel prefix: `Breaking Change`, `Add`, `Fix`/`Bugfix`, `Enhance`/`Refactor`, `Improve Perf`, `Add`/`Improve`/`Fix`/`Update` followed by `ci`/`doc`/`test`/`example`/`translation`/`accessibility`, or `Update Depend...`/`Bump <dependency>` for dependencies. Put any GitHub issue reference at the end in parentheses, e.g. `Fix parser error (#18)`.
-- Checklist: each self-contained step is committed; build+tests pass; the user guide follows a user-visible change, `doc/` an architecture change ([Documentation](#documentation)); public APIs have XML docs; changes covered by unit tests.
 
 ## Local References
 

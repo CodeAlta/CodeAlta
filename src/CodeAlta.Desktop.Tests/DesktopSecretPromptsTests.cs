@@ -61,7 +61,7 @@ public sealed class DesktopSecretPromptsTests
         var surface = new FakeSurface { Sessions = [new("s1", "project", "Fix the parser", true, 0, false)] };
         var pending = new List<PendingSecretUse>
         {
-            new("DEPLOY", "shell of the session s1", DateTimeOffset.UtcNow) { AwaitedUntil = DateTimeOffset.UtcNow.AddMinutes(2) },
+            new("DEPLOY", "shell of the session s1", DateTimeOffset.UtcNow) { AwaitedUntil = DateTimeOffset.UtcNow.AddMinutes(2) }, // not a limit
             new("OLD", "shell of the session gone", DateTimeOffset.UtcNow),
         };
         using var prompts = new DesktopSecretPrompts(surface, () => pending);

@@ -79,26 +79,57 @@ public sealed class SkillManagementService
     /// <exception cref="InvalidOperationException">A required root is absent.</exception>
     /// <exception cref="DirectoryNotFoundException">A supplied root is unavailable.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
-    public async Task<SkillListing> LoadListingAsync(
+    public Task<SkillListing> LoadListingAsync(
         SkillListingScope scope, string? projectRoot, SkillFolderContext folders, CancellationToken cancellationToken = default)
+        => LoadListingAsync(scope, projectRoot, [], folders, cancellationToken);
+
+    /// <summary>
+    /// Lists management descriptors with the resources and configuration the project inherits. An unreadable file
+    /// does not hide skills: it is named in the problems and treated as disabling none.
+    /// </summary>
+    /// <param name="scope">Which skills to list.</param>
+    /// <param name="project">The project whose skills and configuration are read too, or null.</param>
+    /// <param name="folders">The folders added for the space and for the project.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>The skills, and the configuration files that could not be read.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folders"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The scope is invalid.</exception>
+    /// <exception cref="ArgumentException">A supplied root is not an absolute valid path.</exception>
+    /// <exception cref="InvalidOperationException">A required root is absent.</exception>
+    /// <exception cref="DirectoryNotFoundException">A supplied root is unavailable.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public Task<SkillListing> LoadProjectListingAsync(
+        SkillListingScope scope, ProjectDescriptor? project, SkillFolderContext folders, CancellationToken cancellationToken = default)
+        => LoadListingAsync(scope, project?.ProjectPath, ProjectResourceRoots.Inherited(project), folders, cancellationToken);
+
+    private async Task<SkillListing> LoadListingAsync(SkillListingScope scope, string? projectRoot, IReadOnlyList<string> inheritedRoots,
+        SkillFolderContext folders, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(folders);
         ValidateListing(scope, projectRoot);
         cancellationToken.ThrowIfCancellationRequested();
         var problems = new List<SkillConfigurationProblem>();
         var global = ReadDisabled(() => _config.LoadGlobalDisabledSkillNames(), _config.ConfigPath, isProject: false, problems);
-        var project = projectRoot is null
-            ? []
-            : ReadDisabled(() => _config.LoadProjectDisabledSkillNames(projectRoot), Path.Combine(projectRoot, ".alta", "config.toml"), isProject: true, problems);
+        var project = projectRoot is null ? [] : ReadProjectDisabled(projectRoot, inherited: false, problems);
+        var inheritedDisabled = ReadInheritedDisabled(inheritedRoots, problems);
         // The file that cannot be read is named once, by the reading of the disabled skills: it adds no folder.
         IReadOnlyList<string> globalFolders;
         try { globalFolders = _config.LoadGlobalSkillFolders(); }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException) { globalFolders = []; }
-        var skills = await _catalog.ListAsync(CreateQuery(scope, projectRoot, global, project, globalFolders, folders), cancellationToken).ConfigureAwait(false);
-        return new SkillListing(skills, problems);
+        var skills = await _catalog.ListAsync(CreateQuery(scope, projectRoot, global, inheritedDisabled.Count == 0 ? project : [.. project, .. inheritedDisabled],
+            globalFolders, folders, inheritedRoots), cancellationToken).ConfigureAwait(false);
+        return new SkillListing(skills, problems) { InheritedDisabledSkillNames = inheritedDisabled };
     }
 
-    private static IReadOnlyCollection<string> ReadDisabled(Func<IReadOnlyCollection<string>> read, string path, bool isProject, List<SkillConfigurationProblem> problems)
+    private IReadOnlySet<string> ReadInheritedDisabled(IReadOnlyList<string> roots, List<SkillConfigurationProblem>? problems = null)
+        => SkillCatalogQuery.ReadInheritedDisabledSkillNames(roots, root => ReadProjectDisabled(root, inherited: true, problems));
+
+    private IReadOnlyCollection<string> ReadProjectDisabled(string root, bool inherited, List<SkillConfigurationProblem>? problems)
+        => ReadDisabled(() => _config.LoadProjectDisabledSkillNames(root), Path.Combine(root, ".alta", "config.toml"),
+            isProject: true, problems, inherited);
+
+    private static IReadOnlyCollection<string> ReadDisabled(Func<IReadOnlyCollection<string>> read, string path, bool isProject,
+        List<SkillConfigurationProblem>? problems, bool inherited = false)
     {
         try
         {
@@ -107,7 +138,7 @@ public sealed class SkillManagementService
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
             // The parser says where; the system says why a file being written cannot be opened.
-            problems.Add(new SkillConfigurationProblem(isProject, path, exception.GetBaseException().Message));
+            problems?.Add(new SkillConfigurationProblem(isProject, path, exception.GetBaseException().Message) { IsInherited = inherited });
             return [];
         }
     }
@@ -138,7 +169,7 @@ public sealed class SkillManagementService
     }
 
     private SkillCatalogQuery CreateQuery(SkillListingScope scope, string? projectRoot, IReadOnlyCollection<string> globalDisabled, IReadOnlyCollection<string> projectDisabled,
-        IReadOnlyList<string> globalFolders, SkillFolderContext folders)
+        IReadOnlyList<string> globalFolders, SkillFolderContext folders, IReadOnlyList<string>? inheritedRoots = null)
     {
         var includeUser = scope is SkillListingScope.User or SkillListingScope.Combined;
         var includeProject = scope != SkillListingScope.User && projectRoot is not null;
@@ -146,7 +177,7 @@ public sealed class SkillManagementService
         {
             Discovery = new SkillDiscoveryContext
             {
-                ProjectRoots = includeProject ? [projectRoot!] : [],
+                ProjectRoots = includeProject ? [projectRoot!, .. inheritedRoots ?? []] : [],
                 UserCodeAltaRoot = includeUser ? _globalRoot : null,
                 UserProfileRoot = includeUser ? _userProfileRoot : null,
                 AdditionalRoots = AddedSkillFolders.Roots(includeUser ? globalFolders : null, folders.SpaceId, includeUser ? folders.SpaceFolders : null,
@@ -211,6 +242,18 @@ public sealed class SkillManagementService
     /// <exception cref="IOException">A root is unavailable or config I/O fails.</exception>
     public SkillEnablementUpdateResult SetSkillsEnabled(SkillEnablementScope scope, string? projectRoot, IReadOnlyList<string> names, bool enabled)
         => UpdateEnablement(scope, projectRoot, names, enabled);
+
+    /// <summary>Sets project-local enablement without writing the disabled names of ancestors to the project.</summary>
+    /// <exception cref="ArgumentNullException">The project or names are null.</exception>
+    /// <exception cref="ArgumentException">A name or root is invalid.</exception>
+    /// <exception cref="InvalidOperationException">A required root is absent.</exception>
+    /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">A root is unavailable or config I/O fails.</exception>
+    public SkillEnablementUpdateResult SetProjectSkillsEnabled(ProjectDescriptor project, IReadOnlyList<string> names, bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        return UpdateEnablement(SkillEnablementScope.Project, project.ProjectPath, names, enabled, ProjectResourceRoots.Inherited(project));
+    }
 
     /// <summary>Inverts each name independently in each requested config file.</summary>
     /// <exception cref="ArgumentException">A name, scope or root is invalid.</exception>
@@ -311,7 +354,8 @@ public sealed class SkillManagementService
         return document;
     }
 
-    private SkillEnablementUpdateResult UpdateEnablement(SkillEnablementScope scope, string? projectRoot, IReadOnlyList<string> names, bool? enabled)
+    private SkillEnablementUpdateResult UpdateEnablement(SkillEnablementScope scope, string? projectRoot, IReadOnlyList<string> names, bool? enabled,
+        IReadOnlyList<string>? inheritedRoots = null)
     {
         ArgumentNullException.ThrowIfNull(names);
         if (!Enum.IsDefined(scope))
@@ -341,6 +385,13 @@ public sealed class SkillManagementService
 
         if (scope is SkillEnablementScope.Project or SkillEnablementScope.Both)
         {
+            if (enabled == false && inheritedRoots is { Count: > 0 })
+            {
+                // This write changes only local configuration. Like the listing, ignore unreadable ancestors.
+                var inherited = ReadInheritedDisabled(inheritedRoots);
+                normalized = [.. normalized.Where(name => !inherited.Contains(name))];
+            }
+
             var disabled = new HashSet<string>(_config.LoadProjectDisabledSkillNames(projectRoot), StringComparer.OrdinalIgnoreCase);
             projectChanged = ApplyChanges(disabled, normalized, enabled);
             if (projectChanged > 0)

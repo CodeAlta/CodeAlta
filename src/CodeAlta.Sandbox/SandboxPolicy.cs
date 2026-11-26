@@ -54,7 +54,29 @@ public sealed record SandboxSessionFolders
     /// there once and that no other process of a sandbox reaches; null for the home folder of the profile.
     /// </summary>
     public string? OwnHome { get; init; }
+
+    /// <summary>
+    /// Gets the secrets the project of the session gives it, which enter its sandbox; null for none. The home folder and
+    /// the caches of the sandbox are then those of the project.
+    /// </summary>
+    public SandboxProjectSecrets? ProjectSecrets { get; init; }
+
+    /// <summary>
+    /// Gets the names of the variables of the session that never enter its sandbox, whatever they are named: those its
+    /// identity assigns from a secret every project gets, which a repository can name in its own settings.
+    /// </summary>
+    public IReadOnlyList<string> WithheldVariables { get; init; } = [];
 }
+
+/// <summary>
+/// The variables of a session that hold secrets only its project gets (a secret the user limited to the project, named
+/// by the settings of the project or of its space). They enter the sandbox whatever their name, and the sandbox keeps a home folder and
+/// caches for the project alone: in the ones every session of a profile shares, a session of another project could
+/// leave what reads them later.
+/// </summary>
+/// <param name="Project">What names the project, the same for each of its sessions and for no other project: its id.</param>
+/// <param name="Variables">The names of the variables.</param>
+public sealed record SandboxProjectSecrets(string Project, IReadOnlyList<string> Variables);
 
 /// <summary>What the computer gives a sandbox: where its data goes, the home folder, the environment and the tools.</summary>
 public sealed record SandboxHost
@@ -102,6 +124,12 @@ public sealed record SandboxPolicy
 
     /// <summary>Gets the folders read and written.</summary>
     public required IReadOnlyList<string> ReadWrite { get; init; }
+
+    /// <summary>
+    /// Gets the folders of <see cref="ReadWrite"/> that the profile adds for the session to write (its <c>write</c>),
+    /// as full paths: the file tools of the session write them as its commands do.
+    /// </summary>
+    public IReadOnlyList<string> ProfileWrite { get; init; } = [];
 
     /// <summary>Gets the folders and files read only.</summary>
     public required IReadOnlyList<string> ReadOnly { get; init; }

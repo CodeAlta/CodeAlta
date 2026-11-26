@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// A display-only reference to another session that this tool call operates on,
 /// such as a subagent it created, delegated to, or is waiting on.
 /// 

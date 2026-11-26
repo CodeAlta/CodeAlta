@@ -1,9 +1,9 @@
 // Isolated bridge for mounting the actual main.tsx with spaces: the catalog of the project fixture, and a host
 // that keeps two spaces in memory. No native bridge or user data is touched.
 import type { SpaceAssignRequest, SpaceCreateRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceLinksItem, SpaceLinksUpdateRequest,
-  SpaceShownRequest, SpacesEvent } from "#neoastra";
+  SpaceShownRequest, SpacesEvent, WorkspaceMoveToSpaceRequest, WorkspaceMoveToSpaceResponse } from "#neoastra";
 export * from "../projectFocus.neoastra.mount";
-import { mcpServers as fixtureServers, skills as fixtureSkills } from "../projectFocus.neoastra.mount";
+import { mcpServers as fixtureServers, skills as fixtureSkills, workspace as fixtureWorkspace } from "../projectFocus.neoastra.mount";
 // The real editor can open an in-memory file; disk and git operations remain unavailable.
 export { projectFiles, projectGit } from "../demo-api";
 import { globalConfig as demoConfig } from "../demo-api";
@@ -15,9 +15,13 @@ const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), 
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" }),
   // A second space without projects, for the drags from a card to another.
   ...localStorage.getItem("settingsFixtureThirdSpace") === "true" ? [space("home", "Home", [])] : []];
+const moves: { request: WorkspaceMoveToSpaceRequest; resolve: (reply: WorkspaceMoveToSpaceResponse) => void }[] = [];
 const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; created: SpaceCreateRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number;
-  assignmentReads: number } = { shown: [], assigned: [], created: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0, assignmentReads: 0 };
+  assignmentReads: number; moves: typeof moves } = { shown: [], assigned: [], created: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0, assignmentReads: 0, moves };
 Object.assign(window, { spacesFixture: fixture });
+export const workspace = { ...fixtureWorkspace,
+  moveSessionToSpace: (request: WorkspaceMoveToSpaceRequest) => new Promise<WorkspaceMoveToSpaceResponse>(resolve => moves.push({ request, resolve })),
+};
 // How many times the page of a space read the MCP servers: once when it opens, not at each render.
 // One MCP server of the user, in every space: its page says so in the same words as the page of a space.
 export const mcpServers = { ...fixtureServers, list: async (..._args: Parameters<typeof fixtureServers.list>) => (fixture.serverReads++, {

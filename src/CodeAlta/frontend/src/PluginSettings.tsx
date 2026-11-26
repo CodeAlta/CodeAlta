@@ -77,20 +77,22 @@ export const pluginRowKey = (row: PluginRow) => `${row.entry?.scope ?? ""}:${row
 export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey) => string): PluginRow[] {
   const source = (entry: PluginsEntry) => entry.kind === "Source";
   return [
-    ...builtIn.map(plugin => { const entry = listed.find(value => value.id === plugin.id && !source(value)) ?? null;
-      // Configuration has one switch per id: the package of that id says what it holds for the built-in one. One that is off
-      // until it is turned on follows the global switch alone, which is the one its host reads.
-      const global = listed.find(value => value.id === plugin.id)?.enabledGlobal;
-      const configured = plugin.off ? global ?? false : entry?.enabled ?? global ?? true;
-      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true, icon: plugin.icon, color: plugin.color, cover: builtInCover(plugin.id) }; }),
-    ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id))
+    ...builtIn.map(plugin => {
+      // The runtime reads only the global override for a built-in, even if this id also names a source plugin.
+      const configured = listed.find(value => value.id.toLowerCase() === plugin.id && value.enabledGlobal !== null);
+      const entry = configured?.scope === "Global" && !source(configured) ? configured : null;
+      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured?.enabledGlobal ?? !plugin.off,
+        entry, builtIn: true, icon: plugin.icon, color: plugin.color, cover: builtInCover(plugin.id) }; }),
+    ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id.toLowerCase()))
       .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false, color: pluginAccent(entry.id, entry.color) })),
   ];
 }
 
+const projectPluginScope = (scope: string | undefined) => scope === "Project" || scope === "Inherited";
+
 /** What the filters and the search of the page read of a row: its words are its author, its tags and the titles of its canvases. */
 export function pluginFacts(row: PluginRow, canvases: readonly CanvasItem[] = []): PluginFacts {
-  return { id: row.id, name: row.name, description: row.description, enabled: row.enabled, builtIn: row.builtIn, project: !row.builtIn && row.entry?.scope === "Project",
+  return { id: row.id, name: row.name, description: row.description, enabled: row.enabled, builtIn: row.builtIn, project: !row.builtIn && projectPluginScope(row.entry?.scope),
     words: [row.entry?.author, ...(row.entry?.tags ?? []), ...pluginCanvases(row, canvases).map(canvas => canvas.title)] };
 }
 
@@ -126,7 +128,7 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
   return <div className="plugin-problems" role="alert">
     {problems.map((problem, index) => <small key={index} className="plugin-failure">
       {t(problemText[problem.kind] ?? "The settings could not be read.", { path: problem.path ?? "" })}{problem.message ? ` ${problem.message}` : ""}
-      {problem.kind === "config" && problem.path && problem.scope && files && <SettingsFileLocation path={problem.path} platform={files.platform}
+      {problem.kind === "config" && problem.path && (problem.scope === "Global" || problem.scope === "Project") && files && <SettingsFileLocation path={problem.path} platform={files.platform}
         onOpen={files.open ? () => files.open!({ kind: "config", scope: problem.scope! }) : undefined} onReveal={() => files.reveal({ kind: "config", scope: problem.scope! })} />}</small>)}
     {omitted > 0 && <small className="plugin-failure">{t("{count} more are not listed.", { count: omitted })}</small>}
   </div>;
@@ -166,9 +168,10 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   const { t } = useShellLanguage();
   return <div className="plugin-cards" role="list" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
-      const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) ?? typedSettings?.get(row.id) ?? null : null;
+      const inherited = entry?.scope === "Inherited";
+      const settings = !inherited && row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) ?? typedSettings?.get(row.id) ?? null : null;
       const key = pluginRowKey(row);
-      const own = buttons && row.enabled ? buttons.filter(button => button.pluginId === row.id) : [];
+      const own = buttons && row.enabled && !inherited ? buttons.filter(button => button.pluginId === row.id) : [];
       const tabs = pluginCanvases(row, canvases).filter(canvas => canvasPlacement(canvas) === "Tab");
       // The logo of a brand has its own colors; any other icon is drawn in the color of the plugin.
       const icon = (size: number) => pluginBrand(row.id) && row.builtIn ? <BrandIcon name={pluginBrand(row.id)!} size={size} />
@@ -177,7 +180,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
       return <PluginCard key={key} id={row.id} name={row.name} byline={byline} description={row.description} accent={row.color} off={!row.enabled}
         showCover={showImages} cover={row.cover ?? images?.get(key) ?? null} plainCover={builtInCover("plugin")} icon={icon(20)}
         overlay={question?.key === key ? question.node : null}
-        kind={<Tag minimal round>{t(row.builtIn ? "Built-in" : entry?.scope === "Project" ? "Project" : "User")}</Tag>}
+        kind={<Tag minimal round>{t(inherited ? "Inherited" : row.builtIn ? "Built-in" : entry?.scope === "Project" ? "Project" : "User")}</Tag>}
         status={<>
           {(entry && entry.kind === "Source" && entry.state !== "Enabled" && entry.state !== "Disabled" || entry?.runtime && runtimeTag[entry.runtime] && !(entry.runtime === "failed" && entry.state === "Failed")
             || source?.changed && source.runtime === "running") && <div className="plugin-card-status">
@@ -189,18 +192,19 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
           </div>}
           {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
           {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
+          {entry?.disabledByRepository && <Tag minimal round>{t("Disabled by repository")}</Tag>}
         </>}
-        footStart={entry?.scope !== "Project" ? <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} /> : null}
+        footStart={!projectPluginScope(entry?.scope) ? <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} /> : null}
         actions={<>
-          {source?.loadable && row.enabled && <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={disabled}
+          {!inherited && source?.loadable && row.enabled && <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={disabled}
             aria-label={t("Reload {name}", { name: row.name })} title={t("Build and reload")} onClick={() => onReload(source, row)} />}
-          {source?.folder && source.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
+          {!inherited && source?.folder && source.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
             aria-label={t("Edit {name}", { name: row.name })} title={t("Edit in the code editor")}
             onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
-          {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
+          {!inherited && source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
           {settings && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} aria-label={t("Settings of {name}", { name: row.name })}
             title={t("Settings of {name}", { name: row.name })} onClick={() => onOpenSettings?.(settings)} />}
-          <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked, row)} />
+          <Switch checked={row.enabled} disabled={disabled || inherited || entry?.disabledByRepository} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked, row)} />
         </>}>
         {(tabs.length > 0 || own.length > 0 || (source?.tags?.length ?? 0) > 0) && <div className="plugin-card-chips">
           {tabs.map(canvas => <Tag key={canvas.id} minimal className="plugin-canvas" icon={<AppIcon name="canvases" size={12} />}>{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</Tag>)}
@@ -239,7 +243,7 @@ function usePluginImages(api: Pick<typeof plugins, "image">, epoch: string | nul
         const key = `${entry.scope}:${entry.id}:${entry.image}`;
         if (read.current.has(key)) continue;
         try {
-          const reply = await api.image({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { signal: abort.signal, timeoutMilliseconds: 15000 });
+          const reply = await api.image({ expectedEpoch: epoch, projectId, scope: entry.scope, id: entry.id }, { signal: abort.signal, timeoutMilliseconds: 15000 });
           if (abort.signal.aborted) return;
           if (reply.status === "ok" && reply.mime && reply.data) { read.current.set(key, `data:${reply.mime};base64,${reply.data}`); publish(); }
         } catch { /* The card draws the picture of a plugin that has none. */ }
@@ -339,10 +343,13 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
     if (sessions > 0) setStopping({ key: pluginRowKey(row), name: row.name, sessions, reload, go });
     else go();
   }
-  const setEnabled = (id: string, enabled: boolean) => void change(
-    () => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, id, enabled }, { timeoutMilliseconds: 120000 }),
+  const setEnabled = (id: string, enabled: boolean, scope: SettingsScope) => void change(
+    () => api.setEnabled({ expectedEpoch: epoch, projectId, scope, id, enabled }, { timeoutMilliseconds: 120000 }),
     result => result.applied ? "Saved." : "Saved. Plugin changes apply the next time CodeAlta starts.");
-  const toggle = (id: string, enabled: boolean, row?: PluginRow) => enabled || !row ? setEnabled(id, enabled) : void guard(row, false, () => setEnabled(id, enabled));
+  const toggle = (id: string, enabled: boolean, row: PluginRow) => {
+    const apply = () => setEnabled(id, enabled, row.builtIn ? "Global" : writeScope);
+    if (enabled) apply(); else void guard(row, false, apply);
+  };
   const reloadEntry = (entry: PluginsEntry) => void change(
     () => api.reload({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { timeoutMilliseconds: 180000 }),
     () => "Plugin reloaded.");

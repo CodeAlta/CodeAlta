@@ -185,12 +185,60 @@ public sealed class MobileLiveTests
         Assert.IsTrue(phone.Reader.TryRead(out var pushed));
         Assert.AreEqual("go ahead", (string?)Data(pushed)["suggestion"]);
 
+        // The status is all the plugin knows of a session it does not follow: another suggestion replaces it, none ends it.
         live.Adopt("s1", "p1", "run the tests");
-        Assert.AreEqual("go ahead", Suggestion(live), "What the session told is kept.");
+        Assert.AreEqual("run the tests", Suggestion(live));
+        live.Adopt("s1", "p1", null);
+        Assert.IsNull(Suggestion(live), "Another process ran the session: its status suggests nothing any more.");
+        live.Flush();
+        Assert.IsTrue(phone.Reader.TryRead(out var ended));
+        Assert.IsNull(Data(ended)["suggestion"]);
+        live.Adopt("s1", "p1", null);
+        live.Flush();
+        Assert.IsFalse(phone.Reader.TryRead(out _), "Nothing changed: nothing is pushed.");
 
         live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-2"), "p1");
         live.Adopt("s1", "p1", "late");
         Assert.IsNull(Suggestion(live), "A session seen running suggests nothing.");
+
+        // A session the plugin follows keeps what its events said: a status neither replaces nor ends it.
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Completed, "turn-2"), "p1");
+        live.Observe(Suggested("commit"));
+        live.Adopt("s1", "p1", "older");
+        live.Adopt("s1", "p1", null);
+        Assert.AreEqual("commit", Suggestion(live));
+        // Detached, it keeps it until a status says otherwise.
+        live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, null, AgentSessionUpdateKind.Shutdown, null));
+        Assert.AreEqual("commit", Suggestion(live));
+        live.Adopt("s1", "p1", null);
+        Assert.IsNull(Suggestion(live));
+    }
+
+    [TestMethod]
+    public async Task ReadingTheStatusOfASession_GivesItsSuggestionToTheLiveState_WhichAListCannot()
+    {
+        // The phone opens a session of its list after the desktop started again: nothing was seen told, the list says no
+        // suggestion, and the status the plugin reads for the session does.
+        var alta = new FakeAlta();
+        var status = FakeAlta.Status("s1", "p1", "work");
+        status["promptSuggestion"] = "commit it";
+        alta.Answer("session status s1", status);
+        var hidden = FakeAlta.Status("s2", "p1", "personal");
+        hidden["promptSuggestion"] = "not for this phone";
+        alta.Answer("session status s2", hidden);
+        var live = new MobileLive();
+        var phone = live.Subscribe();
+        var sessions = new MobileSessions(alta, new FakeSpaces("work"), live);
+
+        Assert.IsNotNull(await sessions.FindAsync("s1", CancellationToken.None));
+        Assert.AreEqual("commit it", Suggestion(live));
+        live.Flush();
+        Assert.IsTrue(phone.Reader.TryRead(out var pushed), "The phone is told, as for a suggestion the plugin saw told.");
+        Assert.AreEqual("commit it", (string?)Data(pushed)["suggestion"]);
+
+        // A session of a space the phone does not see gives nothing.
+        Assert.IsNull(await sessions.FindAsync("s2", CancellationToken.None));
+        Assert.IsNull(live.Describe("s2"));
     }
 
     private static AgentPromptSuggestionEvent Suggested(string text) => new(Provider, "s1", At, text);

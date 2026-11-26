@@ -16,3 +16,14 @@ test("the panel of a plugin provider shows once after the form changes around it
     assert.equal(await page.evaluate(panels), 1);
   }, options);
 });
+
+test("the panel of a plugin provider shows what the provider runs after its update", { skip: !edge, timeout: testLimit(90_000) }, async () => {
+  await withCanvas(async page => {
+    const command = `document.querySelector('.plugin-provider-command code')?.textContent`;
+    await page.until(`${command} === 'copilot --acp'`, "the command before the update");
+    await page.clickText('.plugin-provider-command button', 'Update to 1.0.2');
+    await page.until(`${command} === 'copilot-1.0.2 --acp'`, "the command of the updated provider");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.plugin-provider-command button').length`), 0, "no update is offered any more");
+    assert.match(String(await page.evaluate(`document.querySelector('.plugin-provider-panel').textContent`)), /Updated to 1\.0\.2\./);
+  }, options);
+});

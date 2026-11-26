@@ -3,9 +3,9 @@ import { brandColor, type Brand } from "../brands";
 import { spaceBrand } from "../spaces/spaces";
 
 /**
- * A label: a name the user gives to projects to find them together, shown as a badge of its icon and color. A label
- * can be under another one, and a project can have several. Only a top-level label has a space; its sub-labels are in
- * the same one.
+ * A label: a name the user gives to projects, or to sessions, to find them together, shown as a badge of its icon and
+ * color. A label can be under another one, and a project or a session can have several. Only a top-level label has a
+ * space and says what it is for; its sub-labels are the same.
  */
 export type Label = Readonly<{
   /** Its identifier, worked out from its first name and kept when it is renamed or moved. */
@@ -25,6 +25,8 @@ export type Label = Readonly<{
   projectIds: readonly string[];
   /** The repository project whose map declares it: a label the window shows under that repository and does not change; null for a label of the user. */
   repository?: string | null;
+  /** Whether it is given to sessions rather than to projects (absent for projects): the two are trees of their own, which never show together. */
+  forSessions?: boolean;
 }>;
 
 /** The longest name of a label. */
@@ -51,7 +53,7 @@ export function readLabels(items: readonly LabelItem[] | null | undefined): read
       order: typeof item.order === "number" && Number.isFinite(item.order) ? item.order : 0,
       parent: identifier(item.parent) ? item.parent : null, favorite: item.favorite === true, space: identifier(item.space) ? item.space : null,
       projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [],
-      repository: text(item.repository, 256) ? item.repository : null });
+      repository: text(item.repository, 256) ? item.repository : null, forSessions: item.forSessions === true });
   }
   return labels.map(label => label.parent && !seen.has(label.parent) ? { ...label, parent: null } : label);
 }
@@ -62,7 +64,7 @@ export function sameLabels(left: readonly Label[], right: readonly Label[]): boo
     const other = right[index];
     return label.id === other.id && label.name === other.name && label.description === other.description && label.icon === other.icon
       && label.color === other.color && label.order === other.order && label.parent === other.parent && label.favorite === other.favorite
-      && label.space === other.space && (label.repository ?? null) === (other.repository ?? null)
+      && label.space === other.space && (label.repository ?? null) === (other.repository ?? null) && !!label.forSessions === !!other.forSessions
       && label.projectIds.length === other.projectIds.length && label.projectIds.every((id, at) => id === other.projectIds[at]);
   });
 }
@@ -71,6 +73,32 @@ export function sameLabels(left: readonly Label[], right: readonly Label[]): boo
 export function ownLabels(labels: readonly Label[]): readonly Label[] {
   return labels.some(label => label.repository) ? labels.filter(label => !label.repository) : labels;
 }
+
+/** The labels given to projects, in the order of their tree. */
+export const projectLabelsOnly = (labels: readonly Label[]): readonly Label[] => labels.some(label => label.forSessions) ? labels.filter(label => !label.forSessions) : labels;
+
+/** The labels given to sessions, in the order of their tree. */
+export const sessionLabelsOnly = (labels: readonly Label[]): readonly Label[] => labels.filter(label => label.forSessions);
+
+/** The labels of a session, in the order of their tree: those it names that are listed. */
+export function sessionLabels(session: Readonly<{ labels?: readonly string[] | null }>, labels: readonly Label[]): readonly Label[] {
+  const named = session.labels;
+  return named?.length ? labels.filter(label => named.includes(label.id)) : [];
+}
+
+/** What starts a word of a filter that names a label: `label:audit` keeps the sessions with a label whose id starts with `audit`. */
+export const labelWordPrefix = "label:";
+
+/** The words of a filter, apart: those that name labels (each without its prefix), and the others, which are looked for in the titles. */
+export function splitLabelWords(words: readonly string[]): Readonly<{ words: readonly string[]; labels: readonly string[] }> {
+  if (!words.some(word => word.startsWith(labelWordPrefix))) return { words, labels: [] };
+  return { words: words.filter(word => !word.startsWith(labelWordPrefix)),
+    labels: words.filter(word => word.startsWith(labelWordPrefix)).map(word => word.slice(labelWordPrefix.length).toLowerCase()) };
+}
+
+/** Whether a session has, for each label word of a filter, a label whose id starts with it. */
+export const hasLabelWords = (session: Readonly<{ labels?: readonly string[] | null }>, labelWords: readonly string[]): boolean =>
+  labelWords.every(word => session.labels?.some(id => id.startsWith(word)) ?? false);
 
 /** The labels a space shows: those of that space and those of every space, in the order of their tree. */
 export function labelsOfSpace(labels: readonly Label[], spaceId: string): readonly Label[] {

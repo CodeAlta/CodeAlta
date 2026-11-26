@@ -1151,12 +1151,16 @@ public sealed class GitWorktreeService
         CancellationToken cancellationToken)
         => RunGitAsync(folder, arguments, timeout, progress: null, environment, cancellationToken);
 
+    internal static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, IReadOnlyDictionary<string, string> environment,
+        string input, CancellationToken cancellationToken)
+        => RunGitAsync(folder, arguments, timeout, progress: null, environment, cancellationToken, input);
+
     private static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
-        IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken, string? input = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentNullException.ThrowIfNull(arguments);
-        return AgainWhileConfigurationIsReplacedAsync(() => RunGitOnceAsync(folder, arguments, timeout, progress, environment, cancellationToken), cancellationToken);
+        return AgainWhileConfigurationIsReplacedAsync(() => RunGitOnceAsync(folder, arguments, timeout, progress, environment, input, cancellationToken), cancellationToken);
     }
 
     /// <summary>
@@ -1189,7 +1193,7 @@ public sealed class GitWorktreeService
         => run.ExitCode == 128 && run.Error.Contains("unknown error occurred while reading the configuration files", StringComparison.Ordinal);
 
     private static async Task<GitRun> RunGitOnceAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
-        IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string>? environment, string? input, CancellationToken cancellationToken)
     {
         var start = new ProcessStartInfo("git")
         {
@@ -1199,6 +1203,7 @@ public sealed class GitWorktreeService
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            StandardInputEncoding = input is null ? null : new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
@@ -1249,10 +1254,29 @@ public sealed class GitWorktreeService
         using var stop = limit.Token.Register(static state => Kill((Process)state!), process);
         try
         {
-            process.StandardInput.Close();
             var output = ReadAsync(process.StandardOutput);
             var error = ReadAsync(process.StandardError, progress);
+            IOException? inputFailure = null;
+            try
+            {
+                using var stdin = process.StandardInput;
+                if (input is not null)
+                {
+                    await stdin.WriteAsync(input.AsMemory(), limit.Token).ConfigureAwait(false);
+                }
+            }
+            catch (IOException exception) when (input is not null)
+            {
+                // Git can close its input before reading it to report a failure. Keep that failure if it does.
+                inputFailure = exception;
+            }
+
             await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+            if (process.ExitCode == 0 && inputFailure is not null)
+            {
+                throw new IOException("Git did not read its input.", inputFailure);
+            }
+
             return new(process.ExitCode, await output.ConfigureAwait(false), await error.ConfigureAwait(false));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

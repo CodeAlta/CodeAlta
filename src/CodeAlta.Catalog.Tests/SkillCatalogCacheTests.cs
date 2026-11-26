@@ -291,7 +291,7 @@ public sealed class SkillCatalogCacheTests
     // Puts the times of a tree a minute back, as a tree that nothing changed for a while.
     private static void Settle(string root)
     {
-        var time = DateTime.UtcNow.AddMinutes(-1);
+        var time = DateTime.UtcNow.AddMinutes(-1); // not a limit
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             File.SetLastWriteTimeUtc(file, time);

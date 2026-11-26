@@ -232,7 +232,7 @@ public sealed class ProviderHttpClientSharingTests
         {
             AccessToken = "expired",
             RefreshToken = "refresh-1",
-            ExpiresAtUnixSeconds = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds(),
+            ExpiresAtUnixSeconds = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds(), // not a limit
         }, CancellationToken.None);
 
         // A refresh token is used once: a second refresh with it would be refused, and the credential deleted.

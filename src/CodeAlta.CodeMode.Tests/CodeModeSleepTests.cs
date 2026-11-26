@@ -92,12 +92,12 @@ public sealed class CodeModeSleepTests
     [TestMethod]
     public async Task OnAResume_ASleepWhoseWakeTimePassed_ReturnsAtOnce_AndOnePendingWaitsOnlyTheRest()
     {
-        var passed = new CodeModeReplay([], CodeModeReplayMode.Resume) { Sleeps = new Dictionary<string, DateTimeOffset> { ["sleep#0"] = DateTimeOffset.UtcNow.AddMinutes(-1) } };
+        var passed = new CodeModeReplay([], CodeModeReplayMode.Resume) { Sleeps = new Dictionary<string, DateTimeOffset> { ["sleep#0"] = DateTimeOffset.UtcNow.AddMinutes(-1) } }; // not a limit
         var clock = Stopwatch.StartNew();
         var woke = await RunAsync("""await sleep("1h"); return "woke";""", new CodeModeRunOptions { Replay = passed });
         var atOnce = clock.Elapsed;
 
-        var pending = new CodeModeReplay([], CodeModeReplayMode.Resume) { Sleeps = new Dictionary<string, DateTimeOffset> { ["sleep#0"] = DateTimeOffset.UtcNow.AddSeconds(2) } };
+        var pending = new CodeModeReplay([], CodeModeReplayMode.Resume) { Sleeps = new Dictionary<string, DateTimeOffset> { ["sleep#0"] = DateTimeOffset.UtcNow.AddSeconds(2) } }; // not a limit
         var observer = new SleepObserver();
         clock.Restart();
         var rested = await RunAsync("""await sleep("1h"); return "rested";""", new CodeModeRunOptions { Replay = pending }, observer);

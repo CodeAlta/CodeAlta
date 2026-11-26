@@ -126,7 +126,7 @@ internal sealed partial class NodeAutomations
         CancellationToken cancellationToken)
     {
         if (AssignmentOf(automationId) is not { Tags: not null } assignment)
-            return new(local.TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken, runId);
+            return ClaimLocally();
         if (PoolProblem(assignment) is not null || assignment.Via is not { } link) return new(AutomationPoolClaim.Later, runId);
         // The seats are read outside the gate of the automations: they have a lock of their own.
         var free = HasFreeSeat();
@@ -144,7 +144,11 @@ internal sealed partial class NodeAutomations
 
         // A claim of this event that waits for an answer is asked again by its own run; any other claim means it was taken here.
         if (local.Find(automationId, occurrence) is { Pending: true, EndedAt: null } pending) runId = pending.RunId;
-        else if (!local.TryClaim(automationId, occurrence, runId, now)) return new(AutomationPoolClaim.Taken, runId);
+        else
+        {
+            var localClaim = ClaimLocally();
+            if (localClaim.Outcome != AutomationPoolClaim.Granted) return localClaim;
+        }
         var result = await ClaimAtServerAsync(link, automationId, assignment, occurrence, runId, cancellationToken).ConfigureAwait(false);
         if (result is null)
         {
@@ -163,6 +167,14 @@ internal sealed partial class NodeAutomations
         local.MarkPending(runId, false);
         lock (_gate) _serverClaims[runId] = (link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId, default));
         return new(AutomationPoolClaim.Granted, runId);
+
+        AutomationEventClaim ClaimLocally()
+        {
+            var outcome = local.TryClaim(automationId, occurrence, runId, now);
+            if (outcome == AutomationClaimOutcome.StorageUnavailable)
+                Log($"{AutomationClaimAnswers.StorageUnavailable} An event of the automation {automationId} will be looked at again later.");
+            return AutomationEventClaim.FromLocal(outcome, runId);
+        }
     }
 
     /// <summary>Gets whether an automation this node holds was given to a pool (<see cref="NodeAutomationAssignment.Tags"/>).</summary>
@@ -538,7 +550,7 @@ internal sealed partial class NodeAutomations
 internal sealed class NodeAutomationClaims(AutomationClaimStore local, NodeAutomations automations) : IAutomationClaims
 {
     /// <inheritdoc />
-    public bool TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now) => local.TryClaim(automationId, occurrence, runId, now);
+    public AutomationClaimOutcome TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now) => local.TryClaim(automationId, occurrence, runId, now);
 
     /// <inheritdoc />
     public void Renew(DateTimeOffset now)

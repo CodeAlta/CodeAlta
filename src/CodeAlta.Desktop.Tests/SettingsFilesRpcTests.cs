@@ -150,6 +150,64 @@ public sealed class SettingsFilesRpcTests
     }
 
     [TestMethod]
+    public async Task ASubProjectCanReadAndComposeInheritedPrompts_ButOnlyWriteItsOwn()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var parent = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, "tools")).FullName;
+        var childPath = Directory.CreateDirectory(Path.Combine(parent, "app")).FullName;
+        fixture.Write(fixture.ProjectPath, ".alta/projects.toml", "[projects.tools]\npath = \"tools\"\n");
+        fixture.Write(parent, ".alta/projects.toml", "[projects.app]\npath = \"app\"\n");
+        var child = (await fixture.Projects.LoadAsync()).Single(project => project.DeclaredKey == "app");
+        var repositoryAgent = fixture.Write(fixture.ProjectPath, ".alta/prompts/agents/review.prompt.md", "---\nname: Repository reviewer\n---\nRepository text\n");
+        var nearerAgent = fixture.Write(parent, ".alta/prompts/agents/review.prompt.md", "---\nname: Tools reviewer\n---\nTools text\n");
+        var repositorySystem = fixture.Write(fixture.ProjectPath, ".alta/prompts/system/house.system-prompt.md", "Repository rules\n");
+
+        var listed = await fixture.Prompts.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", listed.Status);
+        var reviews = listed.Prompts.Where(prompt => prompt.Id == "review").ToArray();
+        Assert.HasCount(2, reviews, "Even a shadowed ancestor prompt remains inspectable in Settings.");
+        var near = reviews.Single(prompt => !prompt.Shadowed);
+        var far = reviews.Single(prompt => prompt.Shadowed);
+        Assert.AreNotEqual(near.Scope, far.Scope, "Same-id prompts from distinct ancestors need distinct addresses.");
+        Assert.AreEqual(near.Scope, far.ShadowedByScope);
+        var house = listed.Prompts.Single(prompt => prompt.Id == "house");
+        Assert.IsTrue(reviews.Append(house).All(prompt => prompt.ReadOnly));
+        foreach (var (row, expectedFile, expectedBody) in new[] { (near, nearerAgent, "Tools text"), (far, repositoryAgent, "Repository text"), (house, repositorySystem, "Repository rules") })
+        {
+            var read = await fixture.Prompts.ReadAsync(new(Epoch, child.Id, row.Kind, row.Scope, row.Id), default);
+            Assert.AreEqual("ok", read.Status);
+            Assert.AreEqual((expectedFile, expectedBody, true), (read.Prompt!.File, read.Prompt.Body, read.Prompt.ReadOnly));
+            Assert.AreEqual("read_only", (await fixture.Prompts.DeleteAsync(new(Epoch, child.Id, row.Kind, row.Scope, row.Id, read.Prompt.Revision), default)).Status);
+            Assert.AreEqual("read_only", (await fixture.Prompts.SaveAsync(new(Epoch, child.Id, row.Kind, row.Scope, row.Id, read.Prompt.Revision,
+                "Changed", null, null, "Changed", false), default)).Status);
+        }
+
+        var composed = await fixture.Prompts.ComposeAsync(new(Epoch, child.Id, null, ["review"], "Local text"), default);
+        Assert.AreEqual(("ok", 1), (composed.Status, composed.Parts.Count));
+        Assert.AreEqual(near.Scope, composed.Parts.Single().Scope, "The preview names the same inherited source as the listing.");
+        Assert.AreEqual($"Tools text{Environment.NewLine}{Environment.NewLine}Local text", composed.Body);
+
+        var open = new SettingsFileRequest(Epoch, child.Id, "prompt", far.Scope, far.Id, far.Kind);
+        Assert.AreEqual("ok", (await fixture.Service.OpenAsync(open, default)).Status);
+        var tab = fixture.Shown.Single();
+        Assert.AreEqual("agents/review.prompt.md", tab.Path);
+        var file = await fixture.Files.ReadAsync(new(Epoch, tab.ProjectId, tab.Path), default);
+        Assert.IsTrue(file.ReadOnly);
+        Assert.AreEqual("read_only", (await fixture.Files.WriteAsync(new(Epoch, tab.ProjectId, tab.Path, "Changed", file.Revision, false), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.RevealAsync(open, default)).Status);
+        Assert.AreEqual(repositoryAgent, fixture.Revealed.Single());
+
+        var created = await fixture.Prompts.SaveAsync(new(Epoch, child.Id, "Agent", "Project", "review", null,
+            "Child reviewer", null, null, "Child text", false), default);
+        Assert.AreEqual("ok", created.Status);
+        Assert.IsTrue(File.Exists(Path.Combine(childPath, ".alta", "prompts", "agents", "review.prompt.md")));
+        StringAssert.Contains(File.ReadAllText(repositoryAgent), "Repository text");
+        StringAssert.Contains(File.ReadAllText(nearerAgent), "Tools text");
+        var local = (await fixture.Prompts.ListAsync(new(Epoch, child.Id), default)).Prompts.Single(prompt => prompt.Id == "review" && !prompt.Shadowed);
+        Assert.IsTrue(local is { Scope: "Project", ReadOnly: false });
+    }
+
+    [TestMethod]
     public async Task APrompt_OpensInTheFolderOfPromptsItIsReadFrom_AndAShippedOneIsOnlyRead()
     {
         using var fixture = await Fixture.CreateAsync();

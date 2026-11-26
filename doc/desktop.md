@@ -3,7 +3,7 @@
 CodeAlta Desktop (`src/CodeAlta`, package `CodeAlta`, command `alta`) is the host of CodeAlta in a native
 window: a .NET process that owns the runtime, and a React page in a web view that shows it. This page explains
 how it is put together and why. What the user sees and does is in the user guide under `site/docs`; build and
-run steps are in [`src/CodeAlta/README.md`](../src/CodeAlta/README.md) and `AGENTS.md`.
+run steps are in [`src/CodeAlta/README.md`](../src/CodeAlta/README.md).
 
 ## Responsibilities
 
@@ -44,7 +44,7 @@ Two processes must never write the same session files, so a profile has one runn
 - **The developer instance** (`--dev`) shares the configuration, providers, plugins and project catalog of
   `~/.alta`, and keeps its own sessions, database and lock under `~/.alta/dev/`, its own web view data and its
   own MCP port. It is how CodeAlta is developed with CodeAlta: the instance the user works in builds and drives
-  another one (`AGENTS.md`, "Developer instance").
+  another one (see [Developer instance](../src/CodeAlta/README.md#developer-instance)).
 - **The command line beside it.** `altacli` writes its sessions into the same sessions folder without the lock, and
   each session has a lease ([runtime](runtime.md#sessions-shared-with-other-processes)). The pages tell the host the
   session tabs they have (`spaces.openSessions`, every space for the main page), so a session open in a tab keeps its
@@ -412,7 +412,7 @@ a worker: the same executable started with `--speech-worker` or `--embedding-wor
   the margin one font gives, and press the modifier of the system.
 - **The real window.** Headless Edge is not WebView2, WKWebView or WebKitGTK. A visual or native change is checked in
   the developer instance, driven over its MCP server (`codealta-dev`: snapshot, screenshot, click, `evaluate_script`),
-  in both themes and a narrow window; `AGENTS.md` ("Working on the desktop WebApp") has the loop.
+  in both themes and a narrow window; see the [developer-instance loop](../src/CodeAlta/README.md#developer-instance).
 
 ## Charts
 

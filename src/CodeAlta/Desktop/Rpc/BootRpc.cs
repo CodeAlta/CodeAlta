@@ -13,7 +13,8 @@ internal sealed class BootService
     private readonly bool _commandReview;
     private readonly bool _userInput;
     private readonly bool _developer;
-    internal BootService() { }
+    /// <summary>Creates the service for the configuration recovery window, before the host exists.</summary>
+    internal BootService(bool developer) { _developer = developer; }
     internal BootService(string epoch) { _epoch = epoch; }
     internal BootService(string epoch, bool commandReview) { _epoch = epoch; _commandReview = commandReview; }
     internal BootService(string epoch, bool commandReview, bool userInput) : this(epoch, commandReview) { _userInput = userInput; }
@@ -24,17 +25,8 @@ internal sealed class BootService
     /// </summary>
     internal Action<DesktopAppearance>? RememberAppearance { get; init; }
 
-    /// <summary>
-    /// True while the window repairs a configuration file that cannot be loaded: there is no host yet, and the
-    /// page shows the <c>startupConfig</c> editor instead of the workspace.
-    /// </summary>
-    internal bool ConfigRecovery { get; init; }
-
     /// <summary>True when the application started without any enabled model provider.</summary>
     internal bool ProviderSetup { get; init; }
-
-    /// <summary>True for the developer instance, for a window that has no host.</summary>
-    internal bool Developer { get; init; }
 
     /// <summary>Whether the host is closing: the page says so, and offers to end the process when the close lasts.</summary>
     internal DesktopClosing? Closing { get; init; }
@@ -97,11 +89,9 @@ internal sealed class BootService
     }
 
     [NeoRpcMethod("status")]
-    public BootStatus Status(BootRequest request) => ConfigRecovery
-        ? new("config-recovery", "CodeAlta", DesktopCommandLine.Version, false) { ConfigRecovery = true, DeveloperMode = Developer || _developer }
-        : _epoch is null
-        ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
-        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = Developer || _developer, ProviderSetup = ProviderSetup, Closing = Closing?.Snapshot() };
+    public BootStatus Status(BootRequest request) => _epoch is null
+        ? new("config-recovery", "CodeAlta", DesktopCommandLine.Version, false) { ConfigRecovery = true, DeveloperMode = _developer }
+        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = _developer, ProviderSetup = ProviderSetup, Closing = Closing?.Snapshot() };
 }
 
 internal sealed record BootRequest;
@@ -740,6 +730,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(LabelDeleteRequest))]
 [JsonSerializable(typeof(LabelAssignRequest))]
 [JsonSerializable(typeof(LabelChangeResponse))]
+[JsonSerializable(typeof(LabelSessionAssignRequest))]
+[JsonSerializable(typeof(LabelSessionAssignResponse))]
 [JsonSerializable(typeof(SubProjectsRequest))]
 [JsonSerializable(typeof(SubProjectsMapResponse))]
 [JsonSerializable(typeof(SubProjectsInspectResponse))]

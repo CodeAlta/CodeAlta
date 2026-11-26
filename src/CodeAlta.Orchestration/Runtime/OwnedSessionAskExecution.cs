@@ -24,6 +24,7 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     private bool _bound;
     private bool _closed;
     private bool _committed;
+    private readonly List<CancellationTokenSource> _interactiveWaits = [];
     // Producer work is entirely synchronous and bounded. Retain its original completed task before return.
     private Task<AgentToolResult>? _committedInvocation;
 
@@ -65,7 +66,21 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     public override Task ClosingAsync(AgentRunId runId) { Close(); return Task.CompletedTask; }
 
     // Acquiring the gate joins any synchronous producer body. No answer dispatch is joined here.
-    internal void Close() { lock (_gate) _closed = true; }
+    internal void Close()
+    {
+        CancellationTokenSource[] waits;
+        lock (_gate)
+        {
+            _closed = true;
+            waits = [.. _interactiveWaits];
+        }
+
+        foreach (var wait in waits)
+        {
+            try { wait.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
 
     // Read without the gate: the owner reads it under its own gate, which Queue takes inside this one.
     internal bool IsClosed => Volatile.Read(ref _closed);
@@ -79,10 +94,198 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
         Input = options.Input, AskId = options.AskId, SourceSessionId = options.SourceSessionId, Provenance = options.Provenance,
         OnPermissionRequest = options.OnPermissionRequest,
         OnUserInputRequest = options.OnUserInputRequest,
+        OnConversationHeld = options.OnConversationHeld,
+        OnInteractiveAsk = options.OnInteractiveAsk ?? (_owner.Enabled && !IsClosed ? AskInteractiveAsync : null),
         EnableUserInputTool = options.EnableUserInputTool,
         AdditionalTools = includeTool ? System.Array.AsReadOnly<AgentToolDefinition>([.. (options.AdditionalTools ?? []), Tool]) : options.AdditionalTools,
         RunLifecycle = new Lifecycle(this, options.RunLifecycle),
     };
+
+    // Presents a live interactive question from a running provider (such as ACP elicitation/create) in the ask panel
+    // immediately and returns the user's answer directly to the provider.
+    private async Task<AgentInteractiveAskResponse> AskInteractiveAsync(AgentInteractiveAskRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        OwnedAskHandle origin;
+        CancellationTokenSource linked;
+        lock (_gate)
+        {
+            if (_closed || !_bound || _run is null || !_owner.Enabled
+                || _operationToken.IsCancellationRequested || _runToken.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+            {
+                return new AgentInteractiveAskResponse(Cancelled: true, []);
+            }
+
+            origin = new OwnedAskHandle(_operation, _runtime, _attachment, _provider.Value, _session, _run, "", 0);
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _operationToken, _runToken);
+            _interactiveWaits.Add(linked);
+        }
+
+        try
+        {
+            var askRequest = ToAltaAskRequest(request);
+            if (askRequest is null || askRequest.Questions.Count == 0)
+            {
+                return new AgentInteractiveAskResponse(Cancelled: true, []);
+            }
+
+            var answers = await _owner.AskImmediateAsync(origin, askRequest, linked.Token).ConfigureAwait(false);
+            if (answers is null)
+            {
+                return new AgentInteractiveAskResponse(Cancelled: true, []);
+            }
+
+            return new AgentInteractiveAskResponse(
+                Cancelled: false,
+                [.. answers.Select(static answer => new AgentInteractiveAskAnswer(answer.QuestionIndex, answer.SelectedChoiceIndexes, answer.FreeformText))]);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new AgentInteractiveAskResponse(Cancelled: true, []);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            return new AgentInteractiveAskResponse(Cancelled: true, []);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _interactiveWaits.Remove(linked);
+            }
+
+            linked.Dispose();
+        }
+    }
+
+    // Projects the interactive request into an AltaAskRequest while preserving exact 1:1 question and choice indexes.
+    // Returns null if any question or choice cannot be represented faithfully within CodeAlta's ask limits.
+    private static AltaAskRequest? ToAltaAskRequest(AgentInteractiveAskRequest request)
+    {
+        if (request.Questions.Count is 0 or > 12)
+        {
+            return null;
+        }
+
+        // Reserve room across all text fields so OwnedSessionAskTool.Restrict's 8192-character aggregate budget never fails.
+        const int MaxBudget = 8000;
+        var budget = MaxBudget;
+        var questions = new List<AltaAskQuestion>(request.Questions.Count);
+        var intro = string.IsNullOrWhiteSpace(request.Message) ? null : CleanText(request.Message, 400);
+        foreach (var source in request.Questions)
+        {
+            var sourceChoices = source.Choices ?? [];
+            if (sourceChoices.Count > 20 || budget < 32)
+            {
+                return null;
+            }
+
+            var title = Take(source.Title, 120, ref budget) ?? Take($"Question {questions.Count + 1}", 120, ref budget);
+            var text = Take(source.Question, 1500, ref budget) ?? title;
+            if (title is null || text is null)
+            {
+                return null;
+            }
+
+            var rawDescription = questions.Count == 0 && intro is not null && !string.Equals(intro, text, StringComparison.OrdinalIgnoreCase)
+                ? string.IsNullOrWhiteSpace(source.Description) ? intro : $"{intro}\n{source.Description}"
+                : source.Description;
+            var description = Take(rawDescription, 1000, ref budget);
+
+            var choices = new List<AltaAskChoice>(sourceChoices.Count);
+            for (var choiceIndex = 0; choiceIndex < sourceChoices.Count; choiceIndex++)
+            {
+                var choice = sourceChoices[choiceIndex];
+                var choiceTitle = Take(choice.Title, 120, ref budget) ?? Take($"Option {choiceIndex + 1}", 120, ref budget);
+                if (choiceTitle is null)
+                {
+                    return null;
+                }
+
+                var choiceDescription = Take(choice.Description, 400, ref budget);
+                choices.Add(new AltaAskChoice { Title = choiceTitle, Description = choiceDescription });
+            }
+
+            AltaAskFreeform? freeform = null;
+            if (source.Freeform is not null || choices.Count == 0)
+            {
+                freeform = new AltaAskFreeform
+                {
+                    Title = Take(source.Freeform?.Title, 120, ref budget),
+                    Placeholder = Take(source.Freeform?.Placeholder, 500, ref budget),
+                };
+            }
+
+            questions.Add(new AltaAskQuestion
+            {
+                Title = title,
+                Question = text,
+                Description = description,
+                Choices = choices.AsReadOnly(),
+                AllowMultiSelect = source.AllowMultiSelect && choices.Count > 0,
+                Freeform = freeform,
+            });
+        }
+
+        return new AltaAskRequest { Questions = questions.AsReadOnly() };
+
+        static string? Take(string? raw, int fieldMax, ref int remaining)
+        {
+            if (remaining <= 0)
+            {
+                return null;
+            }
+
+            var cleaned = CleanText(raw, Math.Min(fieldMax, remaining));
+            if (cleaned is null)
+            {
+                return null;
+            }
+
+            remaining -= cleaned.Length;
+            return cleaned;
+        }
+
+        static string? CleanText(string? value, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(value) || maxLength <= 0)
+            {
+                return null;
+            }
+
+            var trimmed = value.Trim();
+            var builder = new System.Text.StringBuilder(Math.Min(trimmed.Length, maxLength));
+            for (var i = 0; i < trimmed.Length && builder.Length < maxLength; i++)
+            {
+                var ch = trimmed[i];
+                if (ch == '\0')
+                {
+                    continue;
+                }
+
+                if (char.IsSurrogate(ch))
+                {
+                    if (char.IsHighSurrogate(ch) && i + 1 < trimmed.Length && char.IsLowSurrogate(trimmed[i + 1]))
+                    {
+                        if (builder.Length + 2 > maxLength)
+                        {
+                            break;
+                        }
+
+                        builder.Append(ch);
+                        builder.Append(trimmed[++i]);
+                    }
+
+                    continue;
+                }
+
+                builder.Append(ch);
+            }
+
+            var result = builder.ToString().Trim();
+            return result.Length == 0 ? null : result;
+        }
+    }
 
     internal string SessionId => _session;
 

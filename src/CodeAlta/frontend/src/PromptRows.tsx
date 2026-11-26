@@ -2,14 +2,14 @@ import { Button, Card, Tag } from "@blueprintjs/core";
 import type { AgentPromptEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import type { MessageKey } from "./localization";
-import { PromptTags } from "./PromptTags";
+import { inheritedPromptScope, PromptTags } from "./PromptTags";
 import { scopedKey } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 /** Whether an agent prompt has spaces of its own: one of a project follows the spaces of its project. */
 export const promptHasSpaces = (entry: Pick<AgentPromptEntry, "kind" | "scope">) =>
-  entry.kind === "Agent" && entry.scope !== "Project" && entry.scope !== "CopilotProject" && entry.scope !== "ClaudeProject";
+  entry.kind === "Agent" && !inheritedPromptScope(entry.scope) && entry.scope !== "Project" && entry.scope !== "CopilotProject" && entry.scope !== "ClaudeProject";
 
 /** Stable list identity of a prompt: its kind, where it is kept and its id. */
 export const promptIdentity = (entry: Pick<AgentPromptEntry, "kind" | "scope" | "id">) => scopedKey(`${entry.kind}:${entry.scope}`, entry.id);
@@ -31,7 +31,7 @@ export function PromptRows({ prompts, title, selected, disabled = false, onSelec
   if (prompts.length === 0) return null;
   return <>
     <h3 className="settings-editor-group">{t(title)}</h3>
-    {prompts.map(prompt => { const id = identity(prompt), name = prompt.name || prompt.id, view = prompt.scope === "BuiltIn";
+    {prompts.map(prompt => { const id = identity(prompt), name = prompt.name || prompt.id, view = prompt.scope === "BuiltIn" || inheritedPromptScope(prompt.scope);
       return <Card key={id} interactive selected={selected === id} aria-current={selected === id ? "true" : undefined}
         onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-button")) onSelect(prompt); }}>
         <span className="settings-editor-name"><strong>{name}</strong><small>{prompt.description || prompt.id}</small></span>

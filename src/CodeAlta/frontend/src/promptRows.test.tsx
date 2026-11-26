@@ -39,6 +39,15 @@ test("a list without prompts shows nothing, and a page that opens no editor has 
   assert.match(rows([prompt("reviewer", "Global")], { disabled: true }), /<button[^>]*disabled=""/);
 });
 
+test("the row of an inherited prompt identifies its scope and opens a read-only file", () => {
+  const inherited = prompt("review", "Inherited:0");
+  const [row] = cards(rows([inherited]));
+  assert.match(row, />Inherited</);
+  assert.match(row, /aria-label="Open in the code editor: review"/);
+  assert.doesNotMatch(row, /Edit review/);
+  assert.ok(!promptHasSpaces(inherited));
+});
+
 test("an agent of a project, of CodeAlta, GitHub Copilot or Claude Code, follows the spaces of its project", () => {
   for (const scope of ["Global", "CopilotGlobal", "ClaudeGlobal", "BuiltIn"]) assert.ok(promptHasSpaces({ kind: "Agent", scope }), scope);
   for (const scope of ["Project", "CopilotProject", "ClaudeProject"]) assert.ok(!promptHasSpaces({ kind: "Agent", scope }), scope);

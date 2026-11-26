@@ -114,6 +114,12 @@ public sealed record AgentSessionViewStateMetadata(
     /// <see langword="null"/> for a session that never ran in the cloud.
     /// </summary>
     public AgentSessionCloud? Cloud { get; init; }
+
+    /// <summary>
+    /// Gets the labels of the session: the identifiers of labels for sessions, each once, in the order they were given;
+    /// <see langword="null"/> for none.
+    /// </summary>
+    public IReadOnlyList<string>? Labels { get; init; }
 }
 
 /// <summary>

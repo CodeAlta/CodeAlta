@@ -2,20 +2,32 @@
 // says the click was heard even where nothing else changes on screen.
 
 const flashMilliseconds = 1700;
+// What ends the mark of each element that is pointed out.
+const flashing = new WeakMap<Element, () => void>();
 
 /**
  * Points an element out for a moment (`data-window-flash`, drawn by windows.css). Asked again while it is pointed out, the
- * mark starts over. The attribute is removed by a timer too, since a window that reduces motion plays no animation.
+ * mark starts over, for its whole time. The attribute is removed by a timer too, since a window that reduces motion plays
+ * no animation.
  */
 export function flashElement(element: Element | null | undefined) {
   if (!element) return;
-  element.removeAttribute("data-window-flash");
+  // The mark that is shown ends first: its timer would cut the new one short.
+  flashing.get(element)?.();
   // Reading the layout restarts the animation of an element that was just marked.
   void (element as HTMLElement).offsetWidth;
   element.setAttribute("data-window-flash", "true");
-  const clear = () => element.removeAttribute("data-window-flash");
-  element.addEventListener("animationend", clear, { once: true });
-  setTimeout(clear, flashMilliseconds);
+  // The animation of the element itself, not one that ends inside it.
+  const ended = (event: Event) => { if (event.target === element) clear(); };
+  const clear = () => {
+    clearTimeout(timer);
+    element.removeEventListener("animationend", ended);
+    element.removeAttribute("data-window-flash");
+    flashing.delete(element);
+  };
+  const timer = setTimeout(clear, flashMilliseconds);
+  element.addEventListener("animationend", ended);
+  flashing.set(element, clear);
 }
 
 /** The rows of the Explorer that list a session, in every scope that shows it. */

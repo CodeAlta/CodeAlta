@@ -499,7 +499,7 @@ test("the folder of a plugin is read from the id the host gave, and nothing else
 });
 
 test("what a tab can do about a plugin that does not run comes from the plugins the host lists", async () => {
-  const entry = (fields: Partial<PluginsEntry>): PluginsEntry => ({ changed: false, description: null, enabled: true, enabledGlobal: null, enabledProject: null, errors: null, folder: "plugin:global:notes",
+  const entry = (fields: Partial<PluginsEntry>): PluginsEntry => ({ changed: false, description: null, enabled: true, enabledGlobal: null, enabledProject: null, disabledByRepository: false, errors: null, folder: "plugin:global:notes",
     id: "notes", kind: "Source", loadable: true, name: "Notes", path: "/home/.alta/plugins/notes", runtime: "stopped", runtimeMessage: null, scope: "Global", state: "Ready",
     icon: null, color: null, version: null, author: null, tags: null, image: null, ...fields });
   const reloads: unknown[] = [];

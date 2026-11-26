@@ -15,8 +15,8 @@ internal interface IAutomationClaims
     /// <param name="occurrence">What is due: a schedule's trigger and due time.</param>
     /// <param name="runId">The run that would take it.</param>
     /// <param name="now">The time of the claim.</param>
-    /// <returns>Whether the run may start: false when the occurrence was already claimed, by this host or another.</returns>
-    bool TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now);
+    /// <returns>Whether the claim was written, the occurrence was already taken, or claim storage was unavailable.</returns>
+    AutomationClaimOutcome TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now);
 
     /// <summary>Extends the leases of the runs of this host still in progress.</summary>
     /// <param name="now">The time of the renewal.</param>
@@ -59,7 +59,7 @@ internal interface IAutomationClaims
     /// <param name="cancellationToken">Cancels the claim.</param>
     /// <returns>Whether the run starts, another machine runs the event, or it is looked at again later; and the run that claimed.</returns>
     ValueTask<AutomationEventClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
-        => ValueTask.FromResult(new AutomationEventClaim(TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken, runId));
+        => ValueTask.FromResult(AutomationEventClaim.FromLocal(TryClaim(automationId, occurrence, runId, now), runId));
 
     /// <summary>
     /// Keeps the claim of a run granted for an event that did not start after all (its automation became busy, or the service
@@ -71,10 +71,32 @@ internal interface IAutomationClaims
     }
 }
 
+/// <summary>What claiming an occurrence on this host gave.</summary>
+internal enum AutomationClaimOutcome
+{
+    /// <summary>The host wrote the claim and may run the occurrence.</summary>
+    Granted,
+
+    /// <summary>The host already knows of a claim for the occurrence.</summary>
+    Taken,
+
+    /// <summary>The host could not read or write its claims.</summary>
+    StorageUnavailable,
+}
+
 /// <summary>What the claim of an event of a pooled automation gave, and the run that claimed it.</summary>
 /// <param name="Outcome">Whether the run starts, another machine runs the event, or it is looked at again later.</param>
 /// <param name="RunId">The run that claimed: the one asked, or the one of an earlier claim whose answer was lost.</param>
-internal readonly record struct AutomationEventClaim(AutomationPoolClaim Outcome, string RunId);
+internal readonly record struct AutomationEventClaim(AutomationPoolClaim Outcome, string RunId)
+{
+    /// <summary>An event whose local claim could not be written is deferred, not taken.</summary>
+    internal static AutomationEventClaim FromLocal(AutomationClaimOutcome claim, string runId) => new(claim switch
+    {
+        AutomationClaimOutcome.Granted => AutomationPoolClaim.Granted,
+        AutomationClaimOutcome.Taken => AutomationPoolClaim.Taken,
+        _ => AutomationPoolClaim.Later,
+    }, runId);
+}
 
 /// <summary>What the claim of an event of a pooled automation gave.</summary>
 internal enum AutomationPoolClaim
@@ -85,7 +107,7 @@ internal enum AutomationPoolClaim
     /// <summary>Another run took it, here or on another machine: it is seen, and runs no more.</summary>
     Taken,
 
-    /// <summary>It is looked at again later: the server did not answer, or the machine lets the others of its pool look first.</summary>
+    /// <summary>It is looked at again later: it could not be claimed, or the machine lets the others of its pool look first.</summary>
     Later,
 }
 
@@ -97,6 +119,9 @@ internal static class AutomationClaimAnswers
     /// time: the run is not recorded on this machine.
     /// </summary>
     internal const string TakenInPool = "Another machine of its pool runs it.";
+
+    /// <summary>Why an occurrence does not run if its host cannot read or write its claims.</summary>
+    internal const string StorageUnavailable = "The automation claim storage is unavailable.";
 }
 
 /// <summary>
@@ -121,10 +146,10 @@ internal sealed class AutomationClaimStore : IAutomationClaims
     private readonly Lock _gate = new();
     private readonly string _path;
     private readonly string _holder;
-    private readonly ClaimFile _file;
+    private ClaimFile? _file;
     private DateTimeOffset _renewedAt;
 
-    /// <summary>Opens the claims kept in a file; a file that is missing or cannot be read starts with none.</summary>
+    /// <summary>Opens the claim file. A missing file starts with no claims; an unreadable one refuses claims until reopened.</summary>
     /// <param name="path">The file.</param>
     /// <param name="holder">Who claims: the id of this host.</param>
     internal AutomationClaimStore(string path, string holder)
@@ -132,29 +157,32 @@ internal sealed class AutomationClaimStore : IAutomationClaims
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(holder);
         (_path, _holder) = (path, holder);
-        _file = Load(path) ?? new ClaimFile();
+        _file = Load(path);
     }
 
     /// <summary>The claim of an occurrence, or null.</summary>
     internal AutomationClaim? Find(string automationId, string occurrence)
     {
-        lock (_gate) return _file.Claims.GetValueOrDefault(Key(automationId, occurrence));
+        lock (_gate) return _file?.Claims.GetValueOrDefault(Key(automationId, occurrence));
     }
 
     /// <inheritdoc />
-    public bool TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now)
+    public AutomationClaimOutcome TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(automationId);
         ArgumentException.ThrowIfNullOrWhiteSpace(occurrence);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
         lock (_gate)
         {
+            if (_file is null) return AutomationClaimOutcome.StorageUnavailable;
             var key = Key(automationId, occurrence);
-            if (_file.Claims.ContainsKey(key)) return false;
-            Prune(now);
-            _file.Claims[key] = new AutomationClaim(automationId, occurrence, runId, _holder, now, now + LeaseDuration);
-            Save();
-            return true;
+            if (_file.Claims.ContainsKey(key)) return AutomationClaimOutcome.Taken;
+            var next = new ClaimFile { Claims = new(_file.Claims, StringComparer.Ordinal) };
+            Prune(next.Claims, now);
+            next.Claims[key] = new AutomationClaim(automationId, occurrence, runId, _holder, now, now + LeaseDuration);
+            if (!Save(next)) return AutomationClaimOutcome.StorageUnavailable;
+            _file = next;
+            return AutomationClaimOutcome.Granted;
         }
     }
 
@@ -163,7 +191,7 @@ internal sealed class AutomationClaimStore : IAutomationClaims
     {
         lock (_gate)
         {
-            if (now - _renewedAt < RenewEvery && now >= _renewedAt) return;
+            if (_file is null || now - _renewedAt < RenewEvery && now >= _renewedAt) return;
             _renewedAt = now;
             var changed = false;
             foreach (var (key, claim) in _file.Claims.ToArray())
@@ -173,7 +201,7 @@ internal sealed class AutomationClaimStore : IAutomationClaims
                 changed = true;
             }
 
-            if (changed) Save();
+            if (changed) Save(_file);
         }
     }
 
@@ -182,11 +210,12 @@ internal sealed class AutomationClaimStore : IAutomationClaims
     {
         lock (_gate)
         {
+            if (_file is null) return;
             foreach (var (key, claim) in _file.Claims.ToArray())
             {
                 if (claim.RunId != runId || claim.EndedAt is not null) continue;
                 _file.Claims[key] = claim with { EndedAt = now, LeaseUntil = now };
-                Save();
+                Save(_file);
                 return;
             }
         }
@@ -205,28 +234,29 @@ internal sealed class AutomationClaimStore : IAutomationClaims
     {
         lock (_gate)
         {
+            if (_file is null) return;
             foreach (var (key, claim) in _file.Claims.ToArray())
             {
                 if (claim.RunId != runId || claim.Pending == pending) continue;
                 _file.Claims[key] = claim with { Pending = pending };
-                Save();
+                Save(_file);
                 return;
             }
         }
     }
 
     // Under the gate: forgets the claims older than they are kept, then the oldest ones beyond the most kept.
-    private void Prune(DateTimeOffset now)
+    private static void Prune(Dictionary<string, AutomationClaim> claims, DateTimeOffset now)
     {
-        foreach (var (key, claim) in _file.Claims.ToArray())
+        foreach (var (key, claim) in claims.ToArray())
         {
-            if (claim.EndedAt is not null && now - claim.ClaimedAt > KeptFor) _file.Claims.Remove(key);
+            if (claim.EndedAt is not null && now - claim.ClaimedAt > KeptFor) claims.Remove(key);
         }
 
-        if (_file.Claims.Count < MaximumClaims) return;
-        foreach (var (key, _) in _file.Claims.Where(static pair => pair.Value.EndedAt is not null).OrderBy(static pair => pair.Value.ClaimedAt)
-            .Take(_file.Claims.Count - MaximumClaims + 1).ToArray())
-            _file.Claims.Remove(key);
+        if (claims.Count < MaximumClaims) return;
+        foreach (var (key, _) in claims.Where(static pair => pair.Value.EndedAt is not null).OrderBy(static pair => pair.Value.ClaimedAt)
+            .Take(claims.Count - MaximumClaims + 1).ToArray())
+            claims.Remove(key);
     }
 
     private static string Key(string automationId, string occurrence) => automationId + "|" + occurrence;
@@ -235,12 +265,12 @@ internal sealed class AutomationClaimStore : IAutomationClaims
     {
         try
         {
-            var file = new FileInfo(path);
-            if (!file.Exists || file.Length > MaximumFileBytes) return null;
-            using var stream = file.OpenRead();
-            if (JsonSerializer.Deserialize(stream, AutomationClaimJsonContext.Default.ClaimFile) is not { Version: 1 } read) return null;
-            read.Claims = (read.Claims ?? []).Where(static pair => pair.Value is { AutomationId.Length: > 0, Occurrence.Length: > 0, RunId.Length: > 0, Holder.Length: > 0 })
-                .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+            using var stream = StagedFileReplacement.OpenReplacedFile(path);
+            if (stream is null) return new ClaimFile();
+            if (stream.Length > MaximumFileBytes ||
+                JsonSerializer.Deserialize(stream, AutomationClaimJsonContext.Default.ClaimFile) is not { Version: 1, Claims: not null } read ||
+                read.Claims.Values.Any(static claim => claim is not { AutomationId.Length: > 0, Occurrence.Length: > 0, RunId.Length: > 0, Holder.Length: > 0 }))
+                return null;
             return read;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
@@ -249,16 +279,20 @@ internal sealed class AutomationClaimStore : IAutomationClaims
         }
     }
 
-    // Under the gate. A claim that cannot be written still holds for this run of the host.
-    private void Save()
+    // Under the gate. A granted claim must be readable after restart.
+    private bool Save(ClaimFile file)
     {
         try
         {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(file, AutomationClaimJsonContext.Default.ClaimFile);
+            if (bytes.Length > MaximumFileBytes) return false;
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            SafeFile.WriteAllBytes(_path, JsonSerializer.SerializeToUtf8Bytes(_file, AutomationClaimJsonContext.Default.ClaimFile));
+            SafeFile.WriteAllBytesWithoutGap(_path, bytes);
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            return false;
         }
     }
 

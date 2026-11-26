@@ -8,6 +8,16 @@ import type { MessageKey } from "../localization";
 import { machineIntent, machineStateLabel, moveProblem, moveReady, moveTargets } from "./machines";
 
 type MoveApi = Pick<typeof machines, "list" | "moveSettings" | "setReceiveMoves" | "movePreview" | "moveSession">;
+type MoveDone = (result: MachineMoveResult, machine: string) => void;
+
+/** Holds the row chosen for a machine move until the picker closes or reports completion. */
+export function useMoveToMachineDialog(epoch: string | null, onMoved: MoveDone) {
+  const [session, setSession] = useState<WorkspaceSession | null>(null);
+  const close = () => setSession(null);
+  const dialog = session && epoch ? <MoveToMachineDialog epoch={epoch} session={session} onClose={close}
+    onMoved={(result, machine) => { close(); onMoved(result, machine); }} /> : null;
+  return { open: (row: WorkspaceSession) => setSession(row), dialog };
+}
 
 /**
  * Move to machine…: the session goes to a paired machine, or from one back to this computer, with its conversation and
@@ -16,7 +26,7 @@ type MoveApi = Pick<typeof machines, "list" | "moveSettings" | "setReceiveMoves"
  */
 export function MoveToMachineDialog({ epoch, session, api = machines, onClose, onMoved }: {
   epoch: string; session: Pick<WorkspaceSession, "id" | "title" | "machineId" | "machineName">; api?: MoveApi;
-  onClose: () => void; onMoved: (result: MachineMoveResult, machine: string) => void;
+  onClose: () => void; onMoved: MoveDone;
 }) {
   const { t } = useShellLanguage();
   const [listed, setListed] = useState<{ machines: readonly MachineView[]; here: string | null } | null>(null);

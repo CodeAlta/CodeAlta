@@ -114,6 +114,9 @@ public sealed record PluginAskQuestion
     /// <summary>Gets the choices; empty for a question answered with text only.</summary>
     public IReadOnlyList<PluginAskChoice> Choices { get; init; } = [];
 
+    /// <summary>Gets whether the user may select more than one choice.</summary>
+    public bool AllowMultiSelect { get; init; }
+
     /// <summary>Gets the text field of the question, or <see langword="null"/> for a question answered with a choice only.</summary>
     public PluginAskFreeform? Freeform { get; init; }
 }

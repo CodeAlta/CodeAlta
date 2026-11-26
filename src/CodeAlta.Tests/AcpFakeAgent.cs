@@ -35,6 +35,9 @@ internal sealed class AcpFakeAgent
 
     public bool McpHttp { get; set; } = true;
 
+    /// <summary>Gets or sets the <c>_meta</c> of the capabilities, where an agent says what the protocol has no place for; none when null.</summary>
+    public JsonObject? CapabilitiesMeta { get; set; }
+
     public bool Images { get; set; } = true;
 
     /// <summary>Gets or sets the error code <c>session/new</c> answers with, or null to start sessions.</summary>
@@ -64,6 +67,9 @@ internal sealed class AcpFakeAgent
     /// </summary>
     public Dictionary<string, Dictionary<string, List<string>>> ParametersByModel { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Gets boolean model options by model and option id, with their initial default.</summary>
+    public Dictionary<string, Dictionary<string, bool>> BooleanParametersByModel { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Gets the options set by the client, in order: <c>configId=value</c>.</summary>
     public System.Collections.Concurrent.ConcurrentQueue<string> ConfigChanges { get; } = new();
 
@@ -72,8 +78,13 @@ internal sealed class AcpFakeAgent
 
     internal Dictionary<string, Dictionary<string, string>> ParameterValues { get; } = new(StringComparer.Ordinal);
 
+    internal Dictionary<string, Dictionary<string, bool>> BooleanParameterValues { get; } = new(StringComparer.Ordinal);
+
     internal string ParameterValue(string model, string id)
         => ParameterValues.TryGetValue(model, out var values) && values.TryGetValue(id, out var value) ? value : ParametersByModel[model][id][0];
+
+    internal bool BooleanParameterValue(string model, string id)
+        => BooleanParameterValues.TryGetValue(model, out var values) && values.TryGetValue(id, out var value) ? value : BooleanParametersByModel[model][id];
 
     /// <summary>Gets or sets what a prompt does; by default it answers "ok".</summary>
     public Func<AcpFakePrompt, Task<string>> OnPrompt { get; set; } = static async prompt =>
@@ -108,7 +119,7 @@ internal sealed class AcpFakeAgent
             var connection = new AcpFakeConnection(agent, toAgent.Reader.AsStream(), fromAgent.Writer.AsStream(), request);
             agent.Connections.Enqueue(connection);
             connection.Start();
-            var client = await AcpClient.ConnectAsync(fromAgent.Reader.AsStream(), toAgent.Writer.AsStream(), AcpClientInfo.CreateInitializeRequest(), messageHandler, cancellationToken);
+            var client = await AcpClient.ConnectAsync(fromAgent.Reader.AsStream(), toAgent.Writer.AsStream(), AcpClientInfo.CreateInitializeRequest(request.EnableElicitationForm), messageHandler, cancellationToken);
             agent.Clients.Enqueue(client);
             return client;
         }
@@ -159,14 +170,31 @@ internal sealed class AcpFakeConnection
             ["params"] = new JsonObject { ["sessionId"] = sessionId, ["update"] = update },
         });
 
-    internal async Task<JsonNode?> RequestAsync(string method, JsonObject parameters)
+    internal Task SendNotificationAsync(string method, JsonObject parameters)
+        => WriteAsync(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["method"] = method,
+            ["params"] = parameters,
+        });
+
+    internal (long RequestId, Task<JsonNode?> Response) StartRequest(string method, JsonObject parameters)
     {
         var id = Interlocked.Increment(ref _nextId);
         var completion = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = completion;
-        await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = parameters });
-        return await completion.Task.WithinAsync(TestTime.Seconds(30));
+        var task = SendAndAwaitAsync(id, method, parameters, completion);
+        return (id, task);
+
+        async Task<JsonNode?> SendAndAwaitAsync(long requestId, string requestMethod, JsonObject requestParams, TaskCompletionSource<JsonNode?> tcs)
+        {
+            await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = requestId, ["method"] = requestMethod, ["params"] = requestParams });
+            return await tcs.Task.WithinAsync(TestTime.Seconds(30));
+        }
     }
+
+    internal Task<JsonNode?> RequestAsync(string method, JsonObject parameters)
+        => StartRequest(method, parameters).Response;
 
     private async Task RunAsync()
     {
@@ -251,16 +279,18 @@ internal sealed class AcpFakeConnection
         if (_agent.DeleteSession) session["delete"] = new JsonObject();
         if (_agent.ResumeSession) session["resume"] = new JsonObject();
         if (_agent.SystemPrompt) session["systemPrompt"] = new JsonObject();
+        var capabilities = new JsonObject
+        {
+            ["loadSession"] = _agent.LoadSession,
+            ["mcpCapabilities"] = new JsonObject { ["http"] = _agent.McpHttp, ["sse"] = false },
+            ["promptCapabilities"] = new JsonObject { ["image"] = _agent.Images, ["embeddedContext"] = true },
+            ["sessionCapabilities"] = session,
+        };
+        if (_agent.CapabilitiesMeta is { } meta) capabilities["_meta"] = meta.DeepClone();
         return new JsonObject
         {
             ["protocolVersion"] = 1,
-            ["agentCapabilities"] = new JsonObject
-            {
-                ["loadSession"] = _agent.LoadSession,
-                ["mcpCapabilities"] = new JsonObject { ["http"] = _agent.McpHttp, ["sse"] = false },
-                ["promptCapabilities"] = new JsonObject { ["image"] = _agent.Images, ["embeddedContext"] = true },
-                ["sessionCapabilities"] = session,
-            },
+            ["agentCapabilities"] = capabilities,
             ["agentInfo"] = new JsonObject { ["name"] = "fake-agent", ["title"] = "Fake Agent", ["version"] = "0.1.0" },
             ["authMethods"] = _agent.AuthMethods.DeepClone(),
         };
@@ -315,10 +345,36 @@ internal sealed class AcpFakeConnection
     {
         var sessionId = parameters["sessionId"]!.GetValue<string>();
         var configId = parameters["configId"]!.GetValue<string>();
-        var value = parameters["value"]!.GetValue<string>();
+        var type = parameters["type"]?.GetValue<string>();
         var current = _sessions[sessionId];
+        var currentModel = current["model"]!.GetValue<string>();
+        if (string.Equals(type, "boolean", StringComparison.Ordinal))
+        {
+            var boolVal = parameters["value"]!.GetValue<bool>();
+            _agent.ConfigChanges.Enqueue($"{configId}:bool={(boolVal ? "true" : "false")}");
+            if (!_agent.BooleanParametersByModel.TryGetValue(currentModel, out var boolParams) || !boolParams.ContainsKey(configId))
+            {
+                throw new FakeRpcException(-32602, $"Invalid boolean config {configId}");
+            }
+
+            lock (_agent.BooleanParameterValues)
+            {
+                if (!_agent.BooleanParameterValues.TryGetValue(currentModel, out var kept))
+                {
+                    _agent.BooleanParameterValues[currentModel] = kept = new Dictionary<string, bool>(StringComparer.Ordinal);
+                }
+
+                kept[configId] = boolVal;
+            }
+
+            var updated = CreateOptions(currentModel, current["effort"]?.GetValue<string>());
+            _sessions[sessionId] = updated;
+            return new JsonObject { ["configOptions"] = updated["list"]!.DeepClone() };
+        }
+
+        var value = parameters["value"]!.GetValue<string>();
         _agent.ConfigChanges.Enqueue($"{configId}={value}");
-        var model = configId == "model" ? value : current["model"]!.GetValue<string>();
+        var model = configId == "model" ? value : currentModel;
         var effort = configId == "reasoning" ? value : current["effort"]?.GetValue<string>();
         if (!_agent.Models.Contains(model))
         {
@@ -379,6 +435,27 @@ internal sealed class AcpFakeConnection
         foreach (var id in parameters.Keys.Where(static id => id != "thinking"))
         {
             list.Add(Parameter(id, "model_config"));
+        }
+
+        if (_agent.BooleanParametersByModel.TryGetValue(model, out var boolParameters))
+        {
+            foreach (var id in boolParameters.Keys)
+            {
+                bool currentBool;
+                lock (_agent.BooleanParameterValues)
+                {
+                    currentBool = _agent.BooleanParameterValue(model, id);
+                }
+
+                list.Add(new JsonObject
+                {
+                    ["id"] = id,
+                    ["name"] = char.ToUpperInvariant(id[0]) + id[1..],
+                    ["category"] = "model_config",
+                    ["type"] = "boolean",
+                    ["currentValue"] = currentBool,
+                });
+            }
         }
 
         return new JsonObject { ["list"] = list, ["model"] = model, ["effort"] = effort };
@@ -476,8 +553,9 @@ internal sealed class AcpFakePrompt(AcpFakeConnection connection, string session
 
     public Task SendUpdateAsync(JsonObject update) => Connection.SendUpdateAsync(SessionId, update);
 
-    public Task StartToolAsync(string id, string title, string kind, JsonObject? rawInput = null, JsonArray? locations = null)
-        => SendUpdateAsync(new JsonObject
+    public Task StartToolAsync(string id, string title, string kind, JsonObject? rawInput = null, JsonArray? locations = null, string? name = null)
+    {
+        var update = new JsonObject
         {
             ["sessionUpdate"] = "tool_call",
             ["toolCallId"] = id,
@@ -486,7 +564,14 @@ internal sealed class AcpFakePrompt(AcpFakeConnection connection, string session
             ["status"] = "pending",
             ["rawInput"] = rawInput,
             ["locations"] = locations,
-        });
+        };
+        if (name is not null)
+        {
+            update["name"] = name;
+        }
+
+        return SendUpdateAsync(update);
+    }
 
     public Task EndToolAsync(string id, string output, bool success = true)
         => SendUpdateAsync(new JsonObject
@@ -499,15 +584,46 @@ internal sealed class AcpFakePrompt(AcpFakeConnection connection, string session
 
     /// <summary>Asks the client the permission of a tool call; returns the outcome object.</summary>
     public async Task<JsonNode?> RequestPermissionAsync(string toolCallId, string title, string kind, JsonObject? rawInput = null)
-        => await Connection.RequestAsync("session/request_permission", new JsonObject
+        => await RequestPermissionRawAsync(new JsonObject { ["toolCallId"] = toolCallId, ["title"] = title, ["kind"] = kind, ["rawInput"] = rawInput });
+
+    /// <summary>Asks the client the permission of a tool call with an arbitrary <c>toolCall</c> object (including minimal toolCallId-only payloads).</summary>
+    public Task<JsonNode?> RequestPermissionRawAsync(JsonObject toolCall)
+        => StartPermissionRaw(toolCall).Response;
+
+    /// <summary>Starts a permission request and returns its JSON-RPC request ID alongside its response task.</summary>
+    public (long RequestId, Task<JsonNode?> Response) StartPermissionRaw(JsonObject toolCall)
+        => Connection.StartRequest("session/request_permission", new JsonObject
         {
             ["sessionId"] = SessionId,
-            ["toolCall"] = new JsonObject { ["toolCallId"] = toolCallId, ["title"] = title, ["kind"] = kind, ["rawInput"] = rawInput },
+            ["toolCall"] = toolCall,
             ["options"] = new JsonArray(
                 new JsonObject { ["optionId"] = "yes", ["name"] = "Allow", ["kind"] = "allow_once" },
                 new JsonObject { ["optionId"] = "always", ["name"] = "Always allow", ["kind"] = "allow_always" },
                 new JsonObject { ["optionId"] = "no", ["name"] = "Reject", ["kind"] = "reject_once" }),
         });
+
+    /// <summary>Sends an <c>elicitation/create</c> request and returns the client response (or error object).</summary>
+    public Task<JsonNode?> RequestElicitationAsync(JsonObject parameters)
+        => StartElicitation(parameters).Response;
+
+    /// <summary>Starts an <c>elicitation/create</c> request and returns its JSON-RPC request ID alongside its response task.</summary>
+    public (long RequestId, Task<JsonNode?> Response) StartElicitation(JsonObject parameters)
+    {
+        if (parameters["sessionId"] is null)
+        {
+            parameters["sessionId"] = SessionId;
+        }
+
+        return Connection.StartRequest("elicitation/create", parameters);
+    }
+
+    /// <summary>Sends a <c>$/cancel_request</c> notification for a pending agent-to-client request.</summary>
+    public Task CancelRequestAsync(long requestId)
+        => Connection.SendNotificationAsync("$/cancel_request", new JsonObject { ["requestId"] = requestId });
+
+    /// <summary>Sends an arbitrary notification to the client.</summary>
+    public Task SendNotificationAsync(string method, JsonObject parameters)
+        => Connection.SendNotificationAsync(method, parameters);
 
     /// <summary>Calls a tool of the MCP server the client gave the session, over HTTP.</summary>
     public Task<JsonNode?> CallMcpToolAsync(string name, JsonObject arguments)

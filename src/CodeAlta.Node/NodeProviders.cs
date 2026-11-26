@@ -151,67 +151,78 @@ internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogS
         var store = Store;
         lock (_gate)
         {
-            var document = store.LoadGlobal();
-            var definitions = (document.Providers ?? []).Select(static pair => { pair.Value.ProviderKey = pair.Key; return pair.Value; }).ToList();
-            var definition = definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
-            var type = Optional(parameters.Type);
-            if (definition is null)
+            var definition = new CodeAltaProviderDocument { ProviderKey = key };
+            using (store.LockGlobalConfig())
             {
-                if (type is null || !OfferedTypes.Contains(type, StringComparer.Ordinal))
-                    throw new ArgumentException($"A new provider has one of the types: {string.Join(", ", OfferedTypes)}.", nameof(parameters));
-                if (definitions.Count >= MaxProviders) throw new ArgumentException($"A node has at most {MaxProviders} providers.", nameof(parameters));
-                definitions.Add(definition = new CodeAltaProviderDocument { ProviderKey = key, ProviderType = type });
-            }
-            else if (type is not null && !string.Equals(type, definition.ProviderType, StringComparison.Ordinal))
-            {
-                if (!OfferedTypes.Contains(type, StringComparer.Ordinal)) throw new ArgumentException($"A provider changed from the desktop has one of the types: {string.Join(", ", OfferedTypes)}.", nameof(parameters));
-                definition.ProviderType = type;
+                store.UpdateGlobalProviderDefinitions(definitions =>
+                {
+                    var existing = definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
+                    var type = Optional(parameters.Type);
+                    if (existing is null)
+                    {
+                        if (type is null || !OfferedTypes.Contains(type, StringComparer.Ordinal))
+                            throw new ArgumentException($"A new provider has one of the types: {string.Join(", ", OfferedTypes)}.", nameof(parameters));
+                        if (definitions.Count >= MaxProviders) throw new ArgumentException($"A node has at most {MaxProviders} providers.", nameof(parameters));
+                        definition.ProviderType = type;
+                        definitions.Add(definition);
+                    }
+                    else
+                    {
+                        definition = existing;
+                        if (type is not null && !string.Equals(type, definition.ProviderType, StringComparison.Ordinal))
+                        {
+                            if (!OfferedTypes.Contains(type, StringComparer.Ordinal)) throw new ArgumentException($"A provider changed from the desktop has one of the types: {string.Join(", ", OfferedTypes)}.", nameof(parameters));
+                            definition.ProviderType = type;
+                        }
+                    }
+
+                    // A value given replaces the one written, an empty one clears it; a value not given stays.
+                    if (parameters.DisplayName is not null) definition.DisplayName = Optional(parameters.DisplayName);
+                    if (parameters.Model is not null) definition.Model = Optional(parameters.Model);
+                    if (parameters.ApiUrl is not null)
+                    {
+                        var url = Optional(parameters.ApiUrl);
+                        if (url is not null && (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("https" or "http")))
+                            throw new ArgumentException("An endpoint is an http or https address.", nameof(parameters));
+                        definition.ApiUrl = url;
+                    }
+
+                    if (parameters.Server is not null)
+                    {
+                        var server = Optional(parameters.Server);
+                        if (server is not null && !CodeAltaConfigStore.IsModelServerReference(server)) throw new ArgumentException("A model server is <machine>/<server>, such as local/coding.", nameof(parameters));
+                        definition.Server = server;
+                        if (server is not null) definition.ApiUrl = null;
+                    }
+
+                    if (parameters.MaxConcurrentRequests is { } limit)
+                    {
+                        if (limit < 0) throw new ArgumentException("The requests at once of a provider are a whole number, 0 for no limit.", nameof(parameters));
+                        definition.MaxConcurrentRequests = limit == 0 ? null : limit;
+                    }
+
+                    definition.Enabled = parameters.Enabled;
+                    if (Optional(parameters.ApiKey) is { } apiKey)
+                    {
+                        // The key goes to the secrets store of the machine; the configuration names the secret, never the key.
+                        var name = KeySecretFor(definitions, definition);
+                        new LocalSecretStore(Root).SetSecret(name, apiKey, setBy);
+                        definition.ApiKeySecret = name;
+                        definition.ApiKey = null;
+                    }
+                    else if (Credential(definition.ProviderType) == "key" && Optional(definition.ApiKey) is null && Optional(definition.ApiKeySecret) is null && Optional(definition.ApiKeyEnv) is null)
+                    {
+                        // A provider given no key yet names the secret its key will be: it says which one it waits for until the key is given.
+                        definition.ApiKeySecret = KeySecretFor(definitions, definition);
+                    }
+
+                    return true;
+                });
+                if (parameters.MakeDefault && parameters.Enabled) store.SaveGlobalDefaultProvider(definition.ProviderKey);
+                else if (!parameters.Enabled && string.Equals(store.GetEffectiveDefaultProvider(), definition.ProviderKey, StringComparison.OrdinalIgnoreCase))
+                    store.SaveGlobalDefaultProvider(null);
             }
 
-            // A value given replaces the one written, an empty one clears it; a value not given stays.
-            if (parameters.DisplayName is not null) definition.DisplayName = Optional(parameters.DisplayName);
-            if (parameters.Model is not null) definition.Model = Optional(parameters.Model);
-            if (parameters.ApiUrl is not null)
-            {
-                var url = Optional(parameters.ApiUrl);
-                if (url is not null && (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("https" or "http")))
-                    throw new ArgumentException("An endpoint is an http or https address.", nameof(parameters));
-                definition.ApiUrl = url;
-            }
-
-            if (parameters.Server is not null)
-            {
-                var server = Optional(parameters.Server);
-                if (server is not null && !CodeAltaConfigStore.IsModelServerReference(server)) throw new ArgumentException("A model server is <machine>/<server>, such as local/coding.", nameof(parameters));
-                definition.Server = server;
-                if (server is not null) definition.ApiUrl = null;
-            }
-
-            if (parameters.MaxConcurrentRequests is { } limit)
-            {
-                if (limit < 0) throw new ArgumentException("The requests at once of a provider are a whole number, 0 for no limit.", nameof(parameters));
-                definition.MaxConcurrentRequests = limit == 0 ? null : limit;
-            }
-
-            definition.Enabled = parameters.Enabled;
-            if (Optional(parameters.ApiKey) is { } apiKey)
-            {
-                // The key goes to the secrets store of the machine; the configuration names the secret, never the key.
-                var name = KeySecretFor(definitions, definition);
-                new LocalSecretStore(Root).SetSecret(name, apiKey, setBy);
-                definition.ApiKeySecret = name;
-                definition.ApiKey = null;
-            }
-            else if (Credential(definition.ProviderType) == "key" && Optional(definition.ApiKey) is null && Optional(definition.ApiKeySecret) is null && Optional(definition.ApiKeyEnv) is null)
-            {
-                // A provider given no key yet names the secret its key will be: it says which one it waits for until the key is given.
-                definition.ApiKeySecret = KeySecretFor(definitions, definition);
-            }
-
-            store.SaveGlobalProviderDefinitions(definitions);
-            if (parameters.MakeDefault && parameters.Enabled) store.SaveGlobalDefaultProvider(definition.ProviderKey);
-            else if (!parameters.Enabled && string.Equals(store.GetEffectiveDefaultProvider(), definition.ProviderKey, StringComparison.OrdinalIgnoreCase))
-                store.SaveGlobalDefaultProvider(null);
             Apply(store, definition.ProviderKey);
             var saved = store.LoadGlobalProviderDefinitions(includeDisabled: true).FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase))
                 ?? definition;
@@ -284,12 +295,13 @@ internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogS
             var store = Store;
             if (definition.Enabled == false)
             {
-                var raw = (store.LoadGlobal().Providers ?? []).Select(static pair => { pair.Value.ProviderKey = pair.Key; return pair.Value; }).ToList();
-                if (raw.FirstOrDefault(value => string.Equals(value.ProviderKey, definition.ProviderKey, StringComparison.OrdinalIgnoreCase)) is { } written)
+                store.UpdateGlobalProviderDefinitions(definitions =>
                 {
+                    if (definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, definition.ProviderKey, StringComparison.OrdinalIgnoreCase)) is not { Enabled: false } written)
+                        return false;
                     written.Enabled = true;
-                    store.SaveGlobalProviderDefinitions(raw);
-                }
+                    return true;
+                });
             }
 
             Apply(store, definition.ProviderKey);
@@ -311,13 +323,19 @@ internal sealed partial class NodeProviders(CodeAltaHost host, ModelsDevCatalogS
         lock (_gate)
         {
             var store = Store;
-            var raw = (store.LoadGlobal().Providers ?? []).Select(static pair => { pair.Value.ProviderKey = pair.Key; return pair.Value; }).ToList();
-            if (raw.FirstOrDefault(provider => string.Equals(provider.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } written) return false;
-            var environment = written.Env is { } current ? new Dictionary<string, string>(current, StringComparer.Ordinal) : new Dictionary<string, string>(StringComparer.Ordinal);
-            if (value is null) environment.Remove(variable); else environment[variable] = value;
-            written.Env = environment.Count > 0 ? environment : null;
-            store.SaveGlobalProviderDefinitions(raw);
-            Apply(store, written.ProviderKey);
+            string? writtenKey = null;
+            store.UpdateGlobalProviderDefinitions(definitions =>
+            {
+                if (definitions.FirstOrDefault(provider => string.Equals(provider.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } written)
+                    return false;
+                var environment = written.Env is { } current ? new Dictionary<string, string>(current, StringComparer.Ordinal) : new Dictionary<string, string>(StringComparer.Ordinal);
+                if (value is null) environment.Remove(variable); else environment[variable] = value;
+                written.Env = environment.Count > 0 ? environment : null;
+                writtenKey = written.ProviderKey;
+                return true;
+            });
+            if (writtenKey is null) return false;
+            Apply(store, writtenKey);
             return true;
         }
     }

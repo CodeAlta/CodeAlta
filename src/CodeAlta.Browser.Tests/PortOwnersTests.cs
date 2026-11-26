@@ -128,7 +128,7 @@ public sealed class PortOwnersTests
             {
                 var owners = new SystemPortOwners();
                 PortOwner? owner = null;
-                for (var deadline = DateTime.UtcNow.AddSeconds(10); owner is null && !listener.HasExited && DateTime.UtcNow < deadline; await Task.Delay(100))
+                for (var deadline = DateTime.UtcNow + TestTime.Seconds(10); owner is null && !listener.HasExited && DateTime.UtcNow < deadline; await Task.Delay(100))
                 {
                     owner = await owners.FindAsync("localhost", port, CancellationToken.None);
                 }

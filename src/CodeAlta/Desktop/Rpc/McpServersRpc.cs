@@ -674,23 +674,33 @@ internal sealed class McpServersService
 /// <summary>Resolves the optional project of a Settings request through the host's project catalog.</summary>
 internal static class SettingsProjectScope
 {
+    /// <summary>The selected project and its normalized local root, or the status of a refused request.</summary>
+    internal readonly record struct Resolution(string Status, string? Root, ProjectDescriptor? Project = null);
+
     /// <summary>
-    /// Returns <c>ok</c> with the project root (null for the global scope), or the refusal for a project
+    /// Returns <c>ok</c> with the project and its root (null for the global scope), or the refusal for a project
     /// that is unknown, archived or whose folder is gone. The frontend only ever names a project id.
     /// </summary>
-    internal static Task<(string Status, string? Root)> ResolveAsync(ProjectCatalog projects, string? projectId, CancellationToken cancellationToken)
+    internal static Task<Resolution> ResolveAsync(ProjectCatalog projects, string? projectId, CancellationToken cancellationToken)
         => ResolveAsync(projects, projectId, allowArchived: false, cancellationToken);
+
+    /// <summary>Resolves only the status and the normalized local root, for callers that do not read project resources.</summary>
+    internal static async Task<(string Status, string? Root)> ResolveRootAsync(ProjectCatalog projects, string? projectId, CancellationToken cancellationToken)
+    {
+        var project = await ResolveAsync(projects, projectId, cancellationToken).ConfigureAwait(false);
+        return (project.Status, project.Root);
+    }
 
     /// <summary>
     /// Resolves like the overload above; with <paramref name="allowArchived"/> an archived project resolves
-    /// to its root too, for requests that only read information about it.
+    /// too, for requests that only read information about it.
     /// </summary>
-    internal static async Task<(string Status, string? Root)> ResolveAsync(ProjectCatalog projects, string? projectId, bool allowArchived,
+    internal static async Task<Resolution> ResolveAsync(ProjectCatalog projects, string? projectId, bool allowArchived,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(projects);
-        if (projectId is null) return ("ok", null);
-        if (projectId.Length is 0 or > 256 || projectId.Trim() != projectId || projectId.Any(char.IsControl)) return ("unknown_project", null);
+        if (projectId is null) return new("ok", null);
+        if (projectId.Length is 0 or > 256 || projectId.Trim() != projectId || projectId.Any(char.IsControl)) return new("unknown_project", null);
         ProjectDescriptor? project;
         try
         {
@@ -700,14 +710,14 @@ internal static class SettingsProjectScope
         {
             // Shared by the pages of Settings: the page says the project could not be read, the log why.
             if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Desktop").Warn(exception, "The project of a Settings page could not be read.");
-            return ("read_failed", null);
+            return new("read_failed", null);
         }
 
-        if (project is null || !string.Equals(project.Id, projectId, StringComparison.Ordinal)) return ("unknown_project", null);
-        if (project.Archived && !allowArchived) return ("archived_project", null);
+        if (project is null || !string.Equals(project.Id, projectId, StringComparison.Ordinal)) return new("unknown_project", null);
+        if (project.Archived && !allowArchived) return new("archived_project", null);
         return Path.IsPathFullyQualified(project.ProjectPath) && Directory.Exists(project.ProjectPath)
-            ? ("ok", Path.GetFullPath(project.ProjectPath))
-            : ("project_unavailable", null);
+            ? new("ok", Path.GetFullPath(project.ProjectPath), project)
+            : new("project_unavailable", null);
     }
 }
 

@@ -57,6 +57,9 @@ public sealed record AltaAskQuestion
     /// <summary>Gets optional fixed choices.</summary>
     public IReadOnlyList<AltaAskChoice> Choices { get; init; } = [];
 
+    /// <summary>Gets whether the user may select more than one choice.</summary>
+    public bool AllowMultiSelect { get; init; }
+
     /// <summary>Gets optional freeform answer configuration.</summary>
     public AltaAskFreeform? Freeform { get; init; }
 }
@@ -530,6 +533,7 @@ public static class AltaAskValidator
             Question = text,
             Description = description,
             Choices = choices,
+            AllowMultiSelect = question.AllowMultiSelect && choices.Length > 0,
             Freeform = freeform,
         };
     }

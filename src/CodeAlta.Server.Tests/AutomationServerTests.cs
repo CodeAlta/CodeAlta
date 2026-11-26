@@ -407,7 +407,7 @@ public sealed class AutomationServerTests
         }));
 
     private static async Task<FleetAutomationClaimResult> ClaimAsync(FleetConnection connection, string runId, string occurrence, long number = 1)
-        => (await connection.SendRequestAsync(FleetAutomationMethods.Claim, new FleetAutomationClaimRequest(Id, number, occurrence, runId, DateTimeOffset.UtcNow.AddMinutes(5)),
+        => (await connection.SendRequestAsync(FleetAutomationMethods.Claim, new FleetAutomationClaimRequest(Id, number, occurrence, runId, DateTimeOffset.UtcNow.AddMinutes(5)), // not a limit
             FleetAutomationServerJsonContext.Default.FleetAutomationClaimRequest, FleetAutomationServerJsonContext.Default.FleetAutomationClaimResult))!;
 
     private static async Task<IReadOnlyList<AutomationDto>> ListAsync(ServerFixture fixture, TestDevice owner)

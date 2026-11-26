@@ -15,20 +15,26 @@ public sealed class ProviderFrontendCoordinatorTests
     [DataRow("codex", "codealta_oauth")]
     [DataRow("copilot", "github_device_flow")]
     [DataRow("xai", "xai_browser_oauth")]
-    public void LoadProviderDefinitions_OmittedSettingsRemainDefaultInEditor(string providerType, string authSource)
+    public async Task LoadProviderDefinitions_OmittedSettingsRemainDefaultInEditor(string providerType, string authSource)
     {
         using var temp = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = temp.Path };
         var content = $$"""
             [providers.{{providerType}}]
             type = "{{providerType}}"
+
+            [providers.local]
+            type = "llama-cpp"
+            enabled = false
+            server = "local/example"
+            context_size = 32768
             """;
         File.WriteAllText(options.ConfigPath, content);
         var coordinator = CreateCoordinator(options);
         var service = new ModelProviderDialogService(coordinator);
 
-        var definition = service.LoadDefinitions().Single();
-        var item = ModelProviderEditorItemViewModel.FromDocument(definition);
+        var items = service.LoadDefinitions().Select(ModelProviderEditorItemViewModel.FromDocument).ToArray();
+        var item = items.Single(item => item.ProviderKey == providerType);
 
         Assert.IsTrue(item.UseDefaultDisplayName);
         Assert.IsTrue(item.UseDefaultModel);
@@ -46,6 +52,8 @@ public sealed class ProviderFrontendCoordinatorTests
         Assert.IsTrue(coordinator.HasAnyEnabledProviders());
         Assert.AreEqual(content, File.ReadAllText(options.ConfigPath), "Loading the editor must not rewrite configuration.");
 
+        item.UseDefaultModel = false;
+        item.Model = "edited-model";
         var edited = item.ToDocument();
         Assert.IsNull(edited.DisplayName);
         Assert.IsNull(edited.ApiUrl);
@@ -64,14 +72,20 @@ public sealed class ProviderFrontendCoordinatorTests
             Assert.AreEqual("http", runtimeDefinition.ResponseTransport);
         }
 
-        store.SaveGlobalProviderDefinitions([edited]);
+        await service.SaveDefinitionsAsync(items.Select(item => item.ToDocument()).ToArray());
         var saved = store.LoadGlobalConfigContent();
         Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
         Assert.IsFalse(saved.Contains("api_url", StringComparison.Ordinal));
         Assert.IsFalse(saved.Contains("auth_source", StringComparison.Ordinal));
         Assert.IsFalse(saved.Contains("model_discovery", StringComparison.Ordinal));
         Assert.IsFalse(saved.Contains("response_transport", StringComparison.Ordinal));
-        Assert.IsTrue(ModelProviderEditorItemViewModel.FromDocument(service.LoadDefinitions().Single()).UseDefaultModelDiscovery);
+        var reopened = service.LoadDefinitions();
+        var savedProvider = reopened.Single(provider => provider.ProviderKey == providerType);
+        Assert.AreEqual("edited-model", savedProvider.Model);
+        Assert.IsTrue(ModelProviderEditorItemViewModel.FromDocument(savedProvider).UseDefaultModelDiscovery);
+        var untouched = reopened.Single(provider => provider.ProviderKey == "local");
+        Assert.AreEqual("local/example", untouched.Server);
+        Assert.AreEqual(32768, untouched.ContextSize);
     }
 
     [TestMethod]
@@ -112,6 +126,38 @@ public sealed class ProviderFrontendCoordinatorTests
         Assert.AreEqual("static", definition.ModelDiscovery);
         Assert.AreEqual("websocket_with_http_fallback", definition.ResponseTransport);
         Assert.AreEqual(2, definition.MaxConcurrentRequests);
+    }
+
+    [TestMethod]
+    public async Task SaveDefinitions_RefusesToReplaceProvidersThatChangedSinceLoad()
+    {
+        using var temp = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = temp.Path };
+        var otherWriter = new CodeAltaConfigStore(options);
+        otherWriter.SaveGlobalConfigContent("""
+            [providers.codex]
+            type = "codex"
+            """);
+        var service = new ModelProviderDialogService(CreateCoordinator(options));
+        var draft = service.LoadDefinitions();
+        draft.Single().Model = "draft-model";
+
+        otherWriter.UpdateGlobalProviderDefinitions(providers =>
+        {
+            providers.Add(new CodeAltaProviderDocument { ProviderKey = "other", ProviderType = "copilot", Enabled = false });
+            return true;
+        });
+        var onDisk = otherWriter.LoadGlobalConfigContent();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => service.SaveDefinitionsAsync(draft));
+        Assert.AreEqual(onDisk, otherWriter.LoadGlobalConfigContent());
+
+        var reloaded = service.LoadDefinitions();
+        reloaded.Single(provider => provider.ProviderKey == "codex").Model = "draft-model";
+        await service.SaveDefinitionsAsync(reloaded);
+        var saved = otherWriter.LoadGlobal().Providers!;
+        Assert.AreEqual("draft-model", saved["codex"].Model);
+        Assert.IsFalse(saved["other"].Enabled);
     }
 
     [TestMethod]

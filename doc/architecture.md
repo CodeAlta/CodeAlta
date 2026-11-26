@@ -1,6 +1,6 @@
 # Architecture
 
-CodeAlta runs AI coding agents on local projects. One profile (`~/.alta`) is shared by two frontends: CodeAlta Desktop (`src/CodeAlta`, the `alta` executable, where new features go) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`, kept working). A third executable, CodeAlta CLI (`src/CodeAlta.Cli`, `altacli`), runs the same harness without a user: a prompt to its end for scripts, or an ACP agent for editors. Everything else is shared, headless libraries.
+CodeAlta runs AI coding agents on local projects. One profile (`~/.alta`) is shared by two frontends: CodeAlta Desktop (`src/CodeAlta`, the `alta` executable, where new features go) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`, kept working). CodeAlta CLI (`src/CodeAlta.Cli`, `altacli`) runs the same harness without a user: a prompt to its end for scripts, or an ACP agent for editors. The fleet adds two headless executables: CodeAlta Node (`altanode`) and CodeAlta Server (`altaserver`).
 
 ## Principles
 
@@ -31,7 +31,7 @@ flowchart LR
     Agent --> Providers
 ```
 
-`CodeAltaHost.CreateAsync` (`src/CodeAlta.Orchestration/Hosting`) composes the shared services; each executable adds its own process concerns (logging, the window or the terminal, the configured providers through `CodeAlta.Hosting`). Provider initialization and session listing are independent tracks: sessions show while providers are still being probed, and a failing provider is a provider state, never a startup failure.
+`CodeAltaHost.CreateAsync` (`src/CodeAlta.Orchestration/Hosting`) composes the shared services; each executable that hosts agents adds its own process concerns (logging, the window or the terminal, the configured providers through `CodeAlta.Hosting`). Provider initialization and session listing are independent tracks: sessions show while providers are still being probed, and a failing provider is a provider state, never a startup failure.
 
 ## Projects
 
@@ -40,9 +40,11 @@ flowchart LR
 | `CodeAlta` | Desktop executable: native window (NeoAstra over WebView2), host RPC services, React frontend in `frontend/`. See [desktop](desktop.md). |
 | `CodeAlta.Tui` | Terminal executable. |
 | `CodeAlta.Cli` | Headless executable: `run` (text, or ACP notifications as JSON Lines, with exit codes), `acp` (an ACP agent over stdio), `alta`. It writes journals and markers, never the shared database, the settings or the instance lock. See [runtime](runtime.md#headless-runs). |
+| `CodeAlta.Node`, `CodeAlta.Server`, `CodeAlta.Fleet*` | Headless agent host, fleet coordinator and their libraries. See [fleet architecture](fleet/architecture.md#components). |
 | `CodeAlta.Orchestration` | Headless runtime: `SessionRuntimeService`, `AgentHub`, session actors, queues, skills, plugin bridges, `CodeAltaHost`. See [runtime](runtime.md). |
 | `CodeAlta.Agent` | Provider-neutral contracts and the agent runtime: sessions, events, tools, journals, compaction, provider contracts, the harness for agents that run their own loop. |
 | `CodeAlta.Agent.*` | One package per provider family (OpenAI, Anthropic, Google, Mistral, Copilot, xAI, Claude Code). See [providers](providers.md). |
+| `CodeAlta.CodexAppServer` | Codex app-server protocol, consumed by the Codex CLI plugin. See [Codex CLI](providers.md#codex-cli). |
 | `CodeAlta.Automations` | The automation engine: definitions in the configuration files, schedules, triggers, runs and their state, for any host (CodeAlta Desktop, CodeAlta Node). It starts runs through the runtime and knows no window and no network; a host adds what is its own: what it checks before a run starts, who claims a due time, where an automation placed on another machine runs. |
 | `CodeAlta.Hosting` | Composition only: registering configured providers, their defaults, sign-in flows the frontends share, and the export of traces (OpenTelemetry). |
 | `CodeAlta.Catalog` | `~/.alta` and project `.alta`: config, projects, spaces, session views, skills, the application database. See [catalog and config](catalog-and-config.md). |
@@ -65,7 +67,7 @@ Dependencies point down: frontends → Automations/Orchestration/LiveTool/Hostin
 
 1. The frontend (or an agent through `alta`) sends a command to `SessionRuntimeService`, bound to the exact session it targets.
 2. The session actor admits it; `AgentHub` attaches the session to its provider runtime.
-3. The agent runtime builds the request from the journal's last compaction, calls the provider or the turn executor, runs tool calls through the plugins' tool hooks and then the session's guards and permissions, and appends every event to the journal; the database row follows in the same write. The request of a confidential session (its project is pseudonymized, or a session of its lineage was) passes through the provider boundary a plugin gives, which pseudonymizes what goes out and restores what comes back; without a boundary, or when it cannot analyze the request, nothing is sent. The journal and the tools keep the real values.
+3. The agent runtime builds the request from the journal's last compaction, calls the provider or the turn executor, runs tool calls through the plugins' tool hooks and then the session's guards and permissions, and appends every event to the journal; the database row follows in the same write. The request of a confidential session (its project is pseudonymized, or a session of its lineage was) passes through a provider boundary. The built-in plugin uses `CodeAlta.Pseudonymization` at that boundary to pseudonymize what goes out and restore what comes back. Without a boundary, or when it cannot analyze the request, nothing is sent. The journal and the tools keep the real values.
 4. Events flow back as `SessionRuntimeEvent`s to every frontend and plugin that observes them.
 
 ## State

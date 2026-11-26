@@ -88,17 +88,21 @@ public sealed class SkillsRpcTests
     public async Task TheSkillsOfMcpServers_AreListedReadOnly_WithTheirSwitchTheirApprovalAndTheirContent()
     {
         using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
         var home = Path.GetDirectoryName(fixture.GlobalRoot)!;
-        File.WriteAllText(Path.Combine(fixture.ProjectPath, ".alta", "mcp.json"), System.Text.Json.JsonSerializer.Serialize(new
+        var settings = Directory.CreateDirectory(Path.Combine(child.ProjectPath, ".alta")).FullName;
+        File.WriteAllText(Path.Combine(settings, "mcp.json"), System.Text.Json.JsonSerializer.Serialize(new
         {
             mcpServers = new Dictionary<string, object>
             {
                 ["tiny"] = new { command = "dotnet", args = new[] { Path.Combine(AppContext.BaseDirectory, "CodeAlta.Tests.TinyMcpServer.dll") }, env = new Dictionary<string, string> { ["MCP_TEST_SKILLS"] = "1" } },
             },
         }));
-        // A local skill has the name of a skill of the server.
-        var local = Directory.CreateDirectory(Path.Combine(fixture.GlobalRoot, "skills", "document-conversion")).FullName;
-        File.WriteAllText(Path.Combine(local, "SKILL.md"), "---\nname: document-conversion\ndescription: Local conversion\n---\n\n# Local\n");
+        // The sub-project sees both skills the repository defines and those from the library it configured.
+        Fixture.WriteSkill(Path.Combine(fixture.ProjectPath, ".alta", "skills"), "document-conversion", "Repository conversion");
+        var library = Path.Combine(home, "library");
+        Fixture.WriteSkill(library, "refunds", "Local refunds");
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await fixture.Projects.UpdateSkillFoldersAsync(fixture.Project.Id, _ => [library]));
         await using var plugin = new CodeAlta.Plugin.Mcp.McpPlugin(createPresentation: null, home, new CodeAlta.Plugin.Mcp.McpPluginOptions { LoadsSkills = true });
         var service = new SkillsService(fixture.Projects, new SkillCatalog([new UserCodeAltaSkillRootProvider(), new ProjectCodeAltaSkillRootProvider()]), home, Epoch)
         {
@@ -108,13 +112,13 @@ public sealed class SkillsRpcTests
         const string pdf = "skill://pdf-processing/SKILL.md";
 
         // A server CodeAlta never listed has no skill to show.
-        Assert.AreEqual(0, (await service.ListMcpAsync(new(Epoch, fixture.Project.Id), default)).Servers.Count);
+        Assert.AreEqual(0, (await service.ListMcpAsync(new(Epoch, child.Id), default)).Servers.Count);
         await using (var runtime = new CodeAlta.Plugin.Mcp.McpRuntimeService(home, configCache: null, advertiseApps: false, loadsSkills: true))
         {
-            await runtime.ListToolsForServersAsync(new CodeAlta.Plugin.Mcp.McpRuntimeRequest { ProjectDirectory = fixture.ProjectPath }, ["tiny"], default);
+            await runtime.ListToolsForServersAsync(new CodeAlta.Plugin.Mcp.McpRuntimeRequest { ProjectDirectory = child.ProjectPath }, ["tiny"], default);
         }
 
-        var listed = await service.ListMcpAsync(new(Epoch, fixture.Project.Id), default);
+        var listed = await service.ListMcpAsync(new(Epoch, child.Id), default);
         var server = listed.Servers.Single();
         var skills = server.Skills.ToDictionary(static skill => skill.Uri);
 
@@ -122,7 +126,8 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("tiny", server.Server);
         Assert.AreEqual(6, server.Skills.Count);
         StringAssert.Contains(server.Problems.Single(), "skill://broken/mismatch/SKILL.md");
-        Assert.IsTrue(skills["skill://tools/document-conversion/SKILL.md"].NamedLikeLocal);
+        Assert.IsTrue(skills["skill://tools/document-conversion/SKILL.md"].NamedLikeLocal, "The skill of the repository has this name.");
+        Assert.IsTrue(skills["skill://acme/billing/refunds/SKILL.md"].NamedLikeLocal, "The skill of the inherited library has this name.");
         Assert.IsTrue(skills[pdf] is { NamedLikeLocal: false, Enabled: true, Approval: "not_approved", Dynamic: false, FileCount: 3, TotalBytes: 215 });
         CollectionAssert.AreEqual(new[] { "SKILL.md", "templates/invoice.md", "templates/purchase-order.md" }, skills[pdf].Files.Select(static file => file.Path).ToArray());
         Assert.AreEqual(new SkillsMcpField("allowed-tools", "Bash(curl:*)", true), skills["skill://acme/billing/refunds/SKILL.md"].Frontmatter.Single(static field => field.Name == "allowed-tools"));
@@ -130,24 +135,131 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("{\"version\":2,\"beta\":true}", skills["skill://reports/daily/SKILL.md"].Frontmatter.Single(static field => field.Name == "metadata").Value);
 
         // The switch writes the MCP policy of the server.
-        var off = await service.SetMcpEnabledAsync(new(Epoch, fixture.Project.Id, "Project", "tiny", pdf, false), default);
+        var off = await service.SetMcpEnabledAsync(new(Epoch, child.Id, "Project", "tiny", pdf, false), default);
         Assert.AreEqual(("ok", 1), (off.Status, off.Changed));
-        StringAssert.Contains(File.ReadAllText(fixture.ProjectConfig), "disabled_skills = [\"skill://pdf-processing/SKILL.md\"]");
-        Assert.IsFalse((await service.ListMcpAsync(new(Epoch, fixture.Project.Id), default)).Servers.Single().Skills.Single(static skill => skill.Uri == pdf).Enabled);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(settings, "config.toml")), "disabled_skills = [\"skill://pdf-processing/SKILL.md\"]");
+        Assert.IsFalse((await service.ListMcpAsync(new(Epoch, child.Id), default)).Servers.Single().Skills.Single(static skill => skill.Uri == pdf).Enabled);
 
         // Its `SKILL.md`, read and checked for the user, without loading it.
-        var content = await service.McpContentAsync(new(Epoch, fixture.Project.Id, "tiny", pdf), default);
+        var content = await service.McpContentAsync(new(Epoch, child.Id, "tiny", pdf), default);
         Assert.AreEqual("ok", content.Status, content.Message);
         Assert.IsTrue(content.Verified);
         StringAssert.Contains(content.Content, "# PDF processing");
-        Assert.AreEqual(("ok", 0), ((await service.ForgetMcpApprovalAsync(new(Epoch, fixture.Project.Id, "tiny", pdf), default)) is var forgot ? (forgot.Status, forgot.Changed) : default));
+        Assert.AreEqual(("ok", 0), ((await service.ForgetMcpApprovalAsync(new(Epoch, child.Id, "tiny", pdf), default)) is var forgot ? (forgot.Status, forgot.Changed) : default));
 
         // What is refused, and a host without the plugin.
-        Assert.AreEqual("invalid", (await service.McpContentAsync(new(Epoch, fixture.Project.Id, "tiny", "file:///etc/hosts"), default)).Status);
-        Assert.AreEqual("invalid", (await service.SetMcpEnabledAsync(new(Epoch, fixture.Project.Id, "Global", " tiny", pdf, false), default)).Status);
+        Assert.AreEqual("invalid", (await service.McpContentAsync(new(Epoch, child.Id, "tiny", "file:///etc/hosts"), default)).Status);
+        Assert.AreEqual("invalid", (await service.SetMcpEnabledAsync(new(Epoch, child.Id, "Global", " tiny", pdf, false), default)).Status);
         Assert.AreEqual("stale_epoch", (await service.ListMcpAsync(new("another", null), default)).Status);
         Assert.AreEqual("unavailable", (await new SkillsService().ListMcpAsync(new(Epoch, null), default)).Status);
-        Assert.AreEqual(0, (await fixture.Service.ListMcpAsync(new(Epoch, fixture.Project.Id), default)).Servers.Count);
+        Assert.AreEqual(0, (await fixture.Service.ListMcpAsync(new(Epoch, child.Id), default)).Servers.Count);
+    }
+
+    [TestMethod]
+    public async Task ARepositoryCanDisableAUserSkillForItsSubProject_WithoutWritingTheSubProjectConfig()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var childConfig = Path.Combine(child.ProjectPath, ".alta", "config.toml");
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        config.SaveProjectDisabledSkillNames(fixture.ProjectPath, ["alpha"]);
+        var repositoryConfig = File.ReadAllText(fixture.ProjectConfig);
+
+        var listing = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", listing.Status);
+        var alpha = listing.Skills.Single(skill => skill.Name == "alpha");
+        Assert.IsTrue(alpha is { Enabled: false, EnabledGlobal: true, EnabledProject: false }, "The repository disabled this skill.");
+        var detail = await fixture.Service.DetailAsync(new(Epoch, child.Id, null, alpha.Source, alpha.Id), default);
+        Assert.AreEqual("ok", detail.Status);
+        Assert.IsFalse(detail.ModelVisible);
+
+        var enable = await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "alpha", true), default);
+        Assert.AreEqual(0, enable.Changed);
+        Assert.IsFalse((await fixture.Service.ListAsync(new(Epoch, child.Id), default)).Skills.Single(skill => skill.Name == "alpha").Enabled);
+        Assert.IsFalse(File.Exists(childConfig));
+        Assert.AreEqual(repositoryConfig, File.ReadAllText(fixture.ProjectConfig));
+    }
+
+    [TestMethod]
+    public async Task ASubProjectReportsItsBrokenRepositoryConfigAndCanStillSwitchItsOwnSkill()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        Assert.AreEqual("ok", (await fixture.Service.CreateAsync(new(Epoch, child.Id, "Project", "child-skill", "A local skill"), default)).Status);
+        config.SaveProjectDisabledSkillNames(child.ProjectPath, ["keep"]);
+        const string broken = "[skills\nbroken";
+        File.WriteAllText(fixture.ProjectConfig, broken);
+
+        var listing = await fixture.Service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual("ok", listing.Status);
+        var problem = listing.Problems.Single();
+        Assert.AreEqual(("config", "Inherited", fixture.ProjectConfig), (problem.Kind, problem.Scope, problem.Path));
+        Assert.IsFalse(string.IsNullOrWhiteSpace(problem.Message));
+        Assert.IsTrue(listing.Skills.Single(skill => skill.Name == "child-skill").Enabled);
+        foreach (var enabled in new[] { false, true })
+        {
+            var toggle = await fixture.Service.SetEnabledAsync(new(Epoch, child.Id, "Project", "child-skill", enabled), default);
+            Assert.AreEqual(("ok", 1), (toggle.Status, toggle.Changed));
+            CollectionAssert.AreEquivalent(enabled ? new[] { "keep" } : ["keep", "child-skill"],
+                config.LoadProjectDisabledSkillNames(child.ProjectPath).ToArray());
+        }
+        Assert.AreEqual(broken, File.ReadAllText(fixture.ProjectConfig));
+    }
+
+    [TestMethod]
+    public async Task ASubProjectListsAndOffersRepositorySkillsAndFolders_WithoutEditingTheirFilesOrSettings()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var library = Path.Combine(Path.GetDirectoryName(fixture.ProjectPath)!, "library");
+        Fixture.WriteSkill(library, "borrowed", "A skill from a folder added for the repository");
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await fixture.Projects.UpdateSkillFoldersAsync(fixture.Project.Id, _ => [library]));
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        var service = new SkillsService(fixture.Projects, fixture.Catalog, null, Epoch, fixture.Trash)
+        {
+            PromptSkills = (project, _, token) => fixture.Catalog.ListAsync(
+                SkillCatalogQuery.ForProject(config, fixture.GlobalRoot, null, project, null, null) with { ModelVisibleOnly = true }, token),
+        };
+        fixture.Trash.Available = true;
+
+        var listed = await service.ListAsync(new(Epoch, child.Id), default);
+        var offered = await service.OfferedAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual(("ok", "ok"), (listed.Status, offered.Status));
+        CollectionAssert.AreEquivalent(new[] { "alpha", "beta", "borrowed" }, offered.Skills.Select(skill => skill.Name).ToArray());
+        CollectionAssert.AreEquivalent(offered.Skills.Select(skill => skill.Name).ToArray(), listed.Skills.Select(skill => skill.Name).ToArray());
+        var folder = listed.Folders.Single();
+        Assert.AreEqual(("Inherited", library, 1), (folder.Scope, folder.Path, folder.Skills));
+        foreach (var inherited in listed.Skills.Where(skill => skill.Name != "alpha"))
+        {
+            Assert.AreEqual("Inherited", inherited.Scope);
+            Assert.IsNull(inherited.Folder, "The child's editor never gets a writable handle to an inherited skill.");
+            var request = new SkillsDetailRequest(Epoch, child.Id, null, inherited.Source, inherited.Id);
+            var detail = await service.DetailAsync(request, default);
+            Assert.AreEqual(("ok", true, false), (detail.Status, detail.ModelVisible, detail.Linked));
+            Assert.IsNull(detail.Folder);
+            StringAssert.Contains(detail.Content, $"# {inherited.Name}");
+            Assert.AreEqual("read_only", (await service.DeleteAsync(request, default)).Status);
+            Assert.IsTrue(File.Exists(detail.SkillFilePath));
+        }
+
+        Assert.AreEqual(0, (await service.SetMatchingEnabledAsync(new(Epoch, child.Id, "Project", "beta", false), default)).Changed);
+        Assert.IsFalse(File.Exists(Path.Combine(child.ProjectPath, ".alta", "config.toml")));
+        Assert.AreEqual("not_found", (await service.RemoveFolderAsync(new(Epoch, child.Id, null, "Project", library), default)).Status);
+        Assert.AreEqual(library, (await fixture.Projects.GetByIdAsync(fixture.Project.Id))!.SkillFolders.Single());
+        Assert.IsEmpty(fixture.Trash.Moved);
+
+        var localLibrary = Path.Combine(Path.GetDirectoryName(fixture.ProjectPath)!, "own-library");
+        Fixture.WriteSkill(localLibrary, "own", "A skill from a folder added for the child");
+        Assert.AreEqual("ok", (await service.AddFolderAsync(new(Epoch, child.Id, null, "Project", localLibrary), default)).Status);
+        Assert.AreEqual("ok", (await service.CreateAsync(new(Epoch, child.Id, "Project", "beta", "A local override"), default)).Status);
+        var local = await service.ListAsync(new(Epoch, child.Id), default);
+        Assert.AreEqual(("Project", localLibrary), (local.Folders.Single().Scope, local.Folders.Single().Path));
+        Assert.IsFalse(local.Skills.Any(skill => skill.Name == "borrowed"));
+        Assert.IsTrue(local.Skills.Single(skill => skill is { Name: "beta", Scope: "Inherited" }).Shadowed);
+        var own = local.Skills.Single(skill => skill is { Name: "beta", Scope: "Project" });
+        Assert.IsFalse(own.Shadowed);
+        Assert.IsNotNull(own.Folder, "The local skill is editable even when it has an inherited namesake.");
     }
 
     [TestMethod]
@@ -227,6 +339,26 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("invalid", (await fixture.Service.SetAllEnabledAsync(new(Epoch, project, "Both", ["alpha"], false), default)).Status);
         Assert.AreEqual("invalid", (await fixture.Service.SetEnabledAsync(new(Epoch, null, "Project", "alpha", false), default)).Status, "The project scope requires a project.");
         Assert.AreEqual("invalid", (await fixture.Service.SetEnabledAsync(new(Epoch, null, "Global", null, false), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task AGlobalBulkSwitchIncludesUserSkillsTheRepositoryDisabled()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.AddSubProjectAsync();
+        var config = new CodeAltaConfigStore(fixture.Projects.Options);
+        config.SaveProjectDisabledSkillNames(fixture.ProjectPath, ["alpha"]);
+        var repositoryConfig = File.ReadAllText(fixture.ProjectConfig);
+        foreach (var enabled in new[] { false, true })
+        {
+            var changed = await fixture.Service.SetMatchingEnabledAsync(new(Epoch, child.Id, "Global", "alpha", enabled), default);
+            Assert.AreEqual(("ok", 1), (changed.Status, changed.Changed));
+            Assert.AreEqual(!enabled, config.LoadGlobalDisabledSkillNames().Contains("alpha"));
+            var alpha = (await fixture.Service.ListAsync(new(Epoch, child.Id), default)).Skills.Single(skill => skill.Name == "alpha");
+            Assert.AreEqual((false, enabled), (alpha.Enabled, alpha.EnabledGlobal), "The project continues to inherit the repository's off.");
+        }
+        Assert.AreEqual(repositoryConfig, File.ReadAllText(fixture.ProjectConfig));
+        Assert.IsFalse(File.Exists(Path.Combine(child.ProjectPath, ".alta", "config.toml")));
     }
 
     [TestMethod]
@@ -850,7 +982,8 @@ public sealed class SkillsRpcTests
             }
 
             Trash = new RecordingFileTrash(Path.Combine(root, "trash"));
-            Service = new SkillsService(projects, new SkillCatalog(providers), Path.Combine(root, "home"), Epoch, Trash);
+            Catalog = new SkillCatalog(providers);
+            Service = new SkillsService(projects, Catalog, Path.Combine(root, "home"), Epoch, Trash);
         }
 
         public RecordingFileTrash Trash { get; }
@@ -866,13 +999,21 @@ public sealed class SkillsRpcTests
         public string BuiltinRoot => Path.Combine(_root, "builtin");
         public ProjectCatalog Projects { get; }
         public ProjectDescriptor Project { get; }
+        public SkillCatalog Catalog { get; }
         public SkillsService Service { get; }
         public string GlobalRoot => Projects.Options.GlobalRoot;
         public string ProjectPath => Project.ProjectPath;
         public string GlobalConfig => Projects.Options.ConfigPath;
         public string ProjectConfig => Path.Combine(ProjectPath, ".alta", "config.toml");
 
-        private static void WriteSkill(string root, string name, string description)
+        public async Task<ProjectDescriptor> AddSubProjectAsync()
+        {
+            Directory.CreateDirectory(Path.Combine(ProjectPath, "app"));
+            await File.WriteAllTextAsync(ProjectManifest.PathOf(ProjectPath), "[projects.app]\npath = \"app\"\n");
+            return (await Projects.LoadAsync()).Single(project => project.DeclaredKey == "app");
+        }
+
+        public static void WriteSkill(string root, string name, string description)
         {
             var directory = Directory.CreateDirectory(Path.Combine(root, name)).FullName;
             File.WriteAllText(Path.Combine(directory, "SKILL.md"), $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n\nUse this skill.\n");

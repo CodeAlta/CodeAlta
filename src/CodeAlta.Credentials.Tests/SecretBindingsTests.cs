@@ -157,6 +157,38 @@ public sealed class SecretBindingsTests
             .Resolve("${secret:TOKEN}"), "A restriction left by an absent machine secret doesn't apply to the fleet copy.");
     }
 
+    [TestMethod]
+    public void AResolverTellsTheSecretsOnlyTheProjectOfTheWorkGets()
+    {
+        using var vault = new FakeVault();
+        var store = new LocalSecretStore(vault.Profile,
+            new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(vault.Profile, "secrets", "key"))));
+        var projectId = ProjectId.NewVersion7().ToString();
+        store.SetSecret("ACME_TOKEN", "acme-value", "alice");
+        store.Bindings.SetProjects("ACME_TOKEN", [new(projectId, "acme-app")]);
+        store.SetSecret("SHARED_TOKEN", "shared-value", "alice");
+        store.ReplaceFleetCopies("server",
+        [
+            new("server", "id-project", FleetSecretValue.SecretKind, "FLEET_PROJECT_TOKEN", FleetSecretScopes.Project, projectId, 1, false, "fleet-project-value"),
+            new("server", "id-person", FleetSecretValue.SecretKind, "FLEET_PERSON_TOKEN", FleetSecretScopes.Person, null, 1, false, "fleet-person-value"),
+        ]);
+        var resolver = SecretReferenceResolver.ForScope(vault.Profile, new SecretScope(null, projectId, null), shell: true);
+        bool ProjectOnly(string name)
+        {
+            Assert.IsTrue(resolver.TryGet(new(SecretReferenceKind.Secret, name), out _, out var only), name);
+            return only;
+        }
+
+        Assert.IsTrue(ProjectOnly("ACME_TOKEN"), "a secret of the machine limited to projects");
+        Assert.IsFalse(ProjectOnly("SHARED_TOKEN"), "a secret every project gets");
+        Assert.IsTrue(ProjectOnly("FLEET_PROJECT_TOKEN"), "a secret the fleet gave for the project");
+        Assert.IsFalse(ProjectOnly("FLEET_PERSON_TOKEN"), "a secret the fleet gave for every work of the person");
+        Assert.AreEqual("acme-value", resolver.Read("secret:ACME_TOKEN", out _, out var read));
+        Assert.IsTrue(read);
+        Assert.IsNotNull(resolver.Read("PATH", out _, out read));
+        Assert.IsFalse(read, "a variable of the environment is no secret of the project");
+    }
+
     internal sealed class Source : IBoundSecretSource
     {
         public Dictionary<string, string> Values { get; } = new(StringComparer.OrdinalIgnoreCase);

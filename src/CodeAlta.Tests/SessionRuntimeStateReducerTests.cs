@@ -289,7 +289,7 @@ public sealed class SessionRuntimeStateReducerTests
         var session = CreateSession();
         var tab = CreateOpenSessionState(session);
         tab.ActiveRunId = new AgentRunId("run-1");
-        tab.ActiveRunStartedAt = DateTimeOffset.UtcNow.AddSeconds(-10);
+        tab.ActiveRunStartedAt = DateTimeOffset.UtcNow.AddSeconds(-10); // not a limit
         var reducer = new SessionRuntimeStateReducer();
 
         var reduction = reducer.ReduceAgentEvent(

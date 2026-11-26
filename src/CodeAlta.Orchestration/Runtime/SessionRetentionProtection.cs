@@ -157,6 +157,24 @@ public sealed class SessionRetentionProtection : ISessionRetentionAdmission
         }
     }
 
+    /// <summary>
+    /// Tells whether a session is kept from what CodeAlta changes in sessions by itself without deleting them, such as an
+    /// archive policy: an owner names it (a window shows it, a bookmark marks it), work claims it, or it is being retired.
+    /// Every session is kept while an owner is not ready. It reserves nothing: the change checks again what it needs.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns><see langword="true"/> when the session is to be left as it is.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public bool IsSessionKept(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate)
+        {
+            return !IsReady || _participants.Values.Any(state => state.Ids.Contains(sessionId)) || _claims.ContainsKey(sessionId)
+                || _retiring.Contains(sessionId) || _retired.Contains(sessionId);
+        }
+    }
+
     // Called under the gate.
     private void SignalChanged()
     {

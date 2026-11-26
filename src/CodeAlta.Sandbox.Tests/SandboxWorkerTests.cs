@@ -205,6 +205,60 @@ public sealed class SandboxWorkerTests
         StringAssert.Contains(Text(result), "read on with offset=");
     }
 
+    // The host decides which tools a session has, from the whole description of its provider; the worker runs the ones it is
+    // sent. A worker that decided again, knowing the id of the provider alone, refused apply_patch to Codex (#493).
+    [TestMethod]
+    [DataRow("codex")]
+    [DataRow("openai-responses")]
+    [DataRow("a-provider-of-the-user")]
+    public async Task ApplyPatch_RunsInTheWorker_WhateverTheProviderOfTheSession(string providerId)
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        await using var worker = await WorkerOnPipes.StartAsync(project, providerId: providerId);
+        var asked = 0;
+        var allow = Host((_, _) => { Interlocked.Increment(ref asked); return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)); });
+
+        var patched = await worker.Client.InvokeAsync(Call("apply_patch", new { input = "*** Begin Patch\n*** Add File: note.txt\n+from a patch\n*** End Patch\n" }), allow, CancellationToken.None)
+            .WithinAsync(Deadline);
+
+        Assert.IsTrue(patched.Success, patched.Error + Text(patched));
+        Assert.AreEqual("from a patch", File.ReadAllText(Path.Combine(project, "note.txt")).TrimEnd());
+        Assert.AreEqual(1, asked, "the change was asked to CodeAlta, as for any file tool");
+
+        // What the user says with the denial crosses the worker both ways: the request says it takes it, and the result the
+        // model reads carries it (#489).
+        AgentPermissionRequest? asking = null;
+        var deny = Host((request, _) => { asking = request; return Task.FromResult(AgentPermissionDecision.DeniedByUser("patch the copy under tmp instead")); });
+        var refused = await worker.Client.InvokeAsync(Call("apply_patch", new { input = "*** Begin Patch\n*** Add File: other.txt\n+no\n*** End Patch\n" }), deny, CancellationToken.None)
+            .WithinAsync(Deadline);
+        Assert.IsFalse(refused.Success);
+        Assert.IsFalse(File.Exists(Path.Combine(project, "other.txt")), "a patch the user denies changes nothing");
+        Assert.IsTrue(asking?.DenialTakesFeedback);
+        Assert.AreEqual("apply_patch was not run. The user denied this action in CodeAlta. The user said: patch the copy under tmp instead", refused.Error);
+
+        var guarded = await worker.Client.InvokeAsync(Call("apply_patch", new { input = "*** Begin Patch\n*** Add File: .git/hooks/pre-commit\n+evil\n*** End Patch\n" }), allow, CancellationToken.None)
+            .WithinAsync(Deadline);
+        Assert.IsFalse(guarded.Success, "a patch keeps the rules of the file tools of a sandbox");
+        Assert.IsFalse(File.Exists(Path.Combine(project, ".git", "hooks", "pre-commit")));
+    }
+
+    [TestMethod]
+    public async Task EveryToolTheHostSendsToTheWorker_HasAHandlerThere()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        await using var worker = await WorkerOnPipes.StartAsync(project, providerId: "codex");
+        var allow = Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
+
+        foreach (var tool in SandboxWorker.Tools)
+        {
+            // Without arguments a tool fails on what it misses: it is the worker that must know it.
+            var result = await worker.Client.InvokeAsync(Call(tool, new { }), allow, CancellationToken.None).WithinAsync(Deadline);
+            Assert.DoesNotContain("does not run the tool", result.Error + Text(result), tool);
+        }
+    }
+
     private static SandboxToolHost Host(Func<AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> permission)
         => new((request, token) => permission(request, token), null);
 
@@ -233,7 +287,7 @@ public sealed class SandboxWorkerTests
 
         public SandboxWorkerClient Client { get; private set; } = null!;
 
-        public static async Task<WorkerOnPipes> StartAsync(string project, bool commandGuard = false)
+        public static async Task<WorkerOnPipes> StartAsync(string project, bool commandGuard = false, string providerId = "test")
         {
             var toWorker = new AnonymousPipeServerStream(PipeDirection.Out);
             var workerInput = new AnonymousPipeClientStream(PipeDirection.In, toWorker.ClientSafePipeHandle);
@@ -242,7 +296,7 @@ public sealed class SandboxWorkerTests
             var worker = Task.Run(() => SandboxWorker.RunAsync(workerInput, fromWorker, CancellationToken.None));
             var pipes = new WorkerOnPipes(toWorker, workerInput, fromWorker, hostInput, worker);
             pipes.Client = await SandboxWorkerClient.ConnectAsync(hostInput, toWorker,
-                new SandboxWorkerInit("session-1", "test", project, [project], null, null, commandGuard), CancellationToken.None);
+                new SandboxWorkerInit("session-1", providerId, project, [project], null, null, commandGuard), CancellationToken.None);
             return pipes;
         }
 

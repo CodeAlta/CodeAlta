@@ -267,6 +267,7 @@ internal sealed partial class RemoteSessionHost
         {
             Title = question.Title, Question = question.Question, Description = question.Description,
             Choices = [.. question.Choices.Select(static choice => new AltaAskChoice { Title = choice.Title, Description = choice.Description })],
+            AllowMultiSelect = question.AllowMultiSelect,
             Freeform = question.AllowsText ? new AltaAskFreeform { Title = question.FreeformTitle, Placeholder = question.FreeformPlaceholder } : null,
         })],
     };
@@ -340,9 +341,14 @@ internal sealed partial class RemoteSessionHost
     };
 
     /// <inheritdoc />
-    public async ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, CancellationToken cancellationToken)
+    /// <remarks>
+    /// The answer a node takes carries no words of the user: its requests never offer them
+    /// (<see cref="SessionPermissionSnapshot.DenialTakesFeedback"/>), and the window sends them as a prompt instead.
+    /// </remarks>
+    public async ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, string? userFeedback, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(handle);
+        if (!string.IsNullOrWhiteSpace(userFeedback)) return false;
         var answer = decision switch
         {
             AgentPermissionDecisionKind.AllowOnce => "allow_once",

@@ -62,7 +62,14 @@ public sealed record AgentProviderRunContext(
     AgentPermissionRequestHandler OnPermissionRequest,
     AgentUserInputRequestHandler? OnUserInputRequest,
     bool ProviderInitiated = false,
-    AgentConversationHeldHandler? OnConversationHeld = null);
+    AgentConversationHeldHandler? OnConversationHeld = null)
+{
+    /// <summary>
+    /// Gets or initializes a handler that presents an interactive question form while the run is active
+    /// (such as ACP <c>elicitation/create</c>); <see langword="null"/> when the host cannot show live questions.
+    /// </summary>
+    public AgentInteractiveAskHandler? OnInteractiveAsk { get; init; }
+}
 
 /// <summary>
 /// A turn executor whose provider can start a turn by itself while its session has no run (an agent CLI whose
@@ -480,9 +487,17 @@ public sealed record AgentTurnRequest
 
     /// <summary>
     /// Gets or initializes the built-in tools the session does without, by name (such as <c>shell_command</c>); a
-    /// provider that runs its own tools turns off its counterparts. <see langword="null"/> or empty for none.
+    /// provider that runs its own tools turns off its counterparts and any of its own tools named here.
+    /// <see langword="null"/> or empty for none.
     /// </summary>
     public IReadOnlySet<string>? DisabledTools { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the session's disabled tool patterns (<see cref="AgentToolPatterns"/>), for a provider to
+    /// check against the names of tools it runs itself. The session already filters the tools in <see cref="Tools"/>.
+    /// <see langword="null"/> or empty for none.
+    /// </summary>
+    public IReadOnlyList<string>? DisabledToolPatterns { get; init; }
 
     /// <summary>
     /// Gets or initializes where the file tools of the session may write, for a session that does without

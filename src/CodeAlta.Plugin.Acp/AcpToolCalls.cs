@@ -22,9 +22,10 @@ internal static class AcpToolCalls
         string workingDirectory)
     {
         var title = AcpJson.GetString(update, "title");
+        var toolName = AcpJson.GetString(update, "name");
         var kind = AcpJson.GetString(update, "kind");
         update.TryGetProperty("rawInput", out var rawInput);
-        if (FindCodeAltaTool(title, rawInput, codeAltaTools) is { } tool)
+        if (kind is null or "other" && FindCodeAltaTool(toolName, title, rawInput, codeAltaTools) is { } tool)
         {
             return (tool.Name, tool.Arguments, true);
         }
@@ -40,7 +41,10 @@ internal static class AcpToolCalls
             "fetch" => "fetch",
             "think" => "think",
             "switch_mode" => "switch_mode",
-            _ => HarnessToolCallBridge.SanitizeName(title is { Length: > 0 and <= 40 } ? title : "tool"),
+            _ => HarnessToolCallBridge.SanitizeName(
+                toolName is { Length: > 0 and <= 40 } ? toolName
+                : title is { Length: > 0 and <= 40 } ? title
+                : "tool"),
         };
         var arguments = AcpJson.Build(writer =>
         {
@@ -123,6 +127,24 @@ internal static class AcpToolCalls
         return builder.Length == 0 ? "Plan updated." : builder.ToString().TrimEnd();
     }
 
+    /// <summary>Renders a <c>plan_update</c> payload (either structured <c>items</c> or <c>markdown</c>).</summary>
+    public static string RenderPlanUpdate(JsonElement plan)
+    {
+        if (string.Equals(AcpJson.GetString(plan, "type"), "markdown", StringComparison.Ordinal))
+        {
+            var content = AcpJson.GetString(plan, "content");
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                return content.Trim();
+            }
+
+            var path = AcpJson.GetString(plan, "path");
+            return string.IsNullOrWhiteSpace(path) ? "Plan updated." : path.Trim();
+        }
+
+        return RenderPlan(plan);
+    }
+
     /// <summary>Returns the command of the input of a call that runs one, or <see langword="null"/>.</summary>
     public static string? FindCommand(JsonElement input)
     {
@@ -187,6 +209,7 @@ internal static class AcpToolCalls
     // matched to it and runs with the session's run, where a call matched to none runs by itself, without the run's
     // tools (a script of `exec` would have no `tools`).
     private static (string Name, JsonElement Arguments)? FindCodeAltaTool(
+        string? toolName,
         string? title,
         JsonElement rawInput,
         IReadOnlyDictionary<string, AgentToolDefinition> tools)
@@ -202,6 +225,11 @@ internal static class AcpToolCalls
             (FirstString(rawInput, WrappedServerKeys) ?? AcpPrompts.McpServerName) == AcpPrompts.McpServerName)
         {
             return (wrappedName, WrappedArguments(rawInput));
+        }
+
+        if (toolName is not null && MatchName(toolName.Trim(), tools) is { } matchedName)
+        {
+            return (matchedName, rawInput.ValueKind == JsonValueKind.Object ? rawInput.Clone() : AcpJson.EmptyObject);
         }
 
         if (title is null || MatchName(title.Trim(), tools) is not { } name)
@@ -318,9 +346,14 @@ internal static class AcpConfigOptions
         return byId;
     }
 
-    /// <summary>Lists the values of a select option, flattening its groups; a value listed twice is kept once.</summary>
+    /// <summary>Lists the values of a select or boolean option, flattening groups; a value listed twice is kept once.</summary>
     public static IReadOnlyList<AcpOptionValue> Values(JsonElement option)
     {
+        if (string.Equals(AcpJson.GetString(option, "type"), "boolean", StringComparison.Ordinal))
+        {
+            return [new AcpOptionValue("false", "Off", null, default), new AcpOptionValue("true", "On", null, default)];
+        }
+
         var values = new List<AcpOptionValue>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         if (option.TryGetProperty("options", out var items) && items.ValueKind == JsonValueKind.Array)
@@ -347,6 +380,23 @@ internal static class AcpConfigOptions
                 }
             }
         }
+    }
+
+    /// <summary>Returns the current value of a select or boolean config option as a string, or <see langword="null"/>.</summary>
+    public static string? CurrentValue(JsonElement option)
+    {
+        if (option.ValueKind != JsonValueKind.Object || !option.TryGetProperty("currentValue", out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -409,8 +459,32 @@ internal static class AcpConfigOptions
             var id = AcpJson.GetString(option, "id");
             var category = AcpJson.GetString(option, "category");
             if (string.IsNullOrWhiteSpace(id) || category is not ("model_config" or "thought_level") ||
-                string.Equals(id, effort, StringComparison.Ordinal) ||
-                AcpJson.GetString(option, "type") is { } type && !string.Equals(type, "select", StringComparison.Ordinal))
+                string.Equals(id, effort, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var type = AcpJson.GetString(option, "type");
+            if (string.Equals(type, "boolean", StringComparison.Ordinal))
+            {
+                var currentBool = CurrentValue(option);
+                if (currentBool is not ("true" or "false"))
+                {
+                    continue;
+                }
+
+                listed.Add(new AgentModelOption(
+                    id,
+                    AcpJson.GetString(option, "name") is { Length: > 0 } boolName ? boolName : id,
+                    [new AgentModelOptionValue("false", "Off"), new AgentModelOptionValue("true", "On")],
+                    currentBool)
+                {
+                    Description = AcpJson.GetString(option, "description"),
+                });
+                continue;
+            }
+
+            if (type is not null && !string.Equals(type, "select", StringComparison.Ordinal))
             {
                 continue;
             }
@@ -467,6 +541,21 @@ internal static class AcpConfigOptions
             }),
         };
 
+    /// <summary>Creates the request that sets a boolean option of a session.</summary>
+    public static SetSessionConfigOptionRequest CreateSetBooleanRequest(string sessionId, string configId, bool value)
+        => new()
+        {
+            Value = AcpJson.Build(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("sessionId", sessionId);
+                writer.WriteString("configId", configId);
+                writer.WriteString("type", "boolean");
+                writer.WriteBoolean("value", value);
+                writer.WriteEndObject();
+            }),
+        };
+
     public static AgentReasoningEffort? ToEffort(string? value)
         => value?.Trim().ToLowerInvariant() switch
         {
@@ -490,6 +579,7 @@ internal static class AcpStopReasons
             "max_tokens" => $"_{agentName} stopped: its output limit was reached._",
             "max_turn_requests" => $"_{agentName} stopped: the limit of its model requests for one turn was reached._",
             "refusal" => $"_{agentName} refused to go on with this request._",
+            "error" => $"_{agentName} stopped because of an error._",
             _ => null,
         };
 }

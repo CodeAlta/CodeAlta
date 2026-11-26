@@ -311,8 +311,20 @@ public sealed class SecretReferenceResolver
     /// <param name="value">Its value when it is set.</param>
     /// <returns><see langword="true"/> when it is set.</returns>
     /// <exception cref="SecretReferenceException">The store holds the secret but cannot read it back.</exception>
-    public bool TryGet(SecretReference reference, [NotNullWhen(true)] out string? value)
+    public bool TryGet(SecretReference reference, [NotNullWhen(true)] out string? value) => TryGet(reference, out value, out _);
+
+    /// <summary>Gets the value of a reference, and whether it is a secret given to the project of the work alone.</summary>
+    /// <param name="reference">The reference.</param>
+    /// <param name="value">Its value when it is set.</param>
+    /// <param name="projectOnly">
+    /// Whether the value is the one of a secret that only the project of the work gets: a secret of the machine limited to
+    /// projects, or one the fleet gave for the project. Such a secret may enter the sandbox of a session of that project.
+    /// </param>
+    /// <returns><see langword="true"/> when it is set.</returns>
+    /// <exception cref="SecretReferenceException">The store holds the secret but cannot read it back.</exception>
+    public bool TryGet(SecretReference reference, [NotNullWhen(true)] out string? value, out bool projectOnly)
     {
+        projectOnly = false;
         if (reference.Kind == SecretReferenceKind.Environment)
         {
             value = _environment(reference.Name);
@@ -326,7 +338,12 @@ public sealed class SecretReferenceResolver
                 if (reference.Kind == SecretReferenceKind.Secret ? source.TryGetSecret(reference.Name, out value) : source.TryGetVariable(reference.Name, out value))
                 {
                     // Masked before anything gets it.
-                    if (reference.Kind == SecretReferenceKind.Secret) Issued?.Invoke(value);
+                    if (reference.Kind == SecretReferenceKind.Secret)
+                    {
+                        Issued?.Invoke(value);
+                        projectOnly = source is IProjectSecretLookup project && project.IsGivenToProjectAlone(reference.Name);
+                    }
+
                     return true;
                 }
             }
@@ -354,10 +371,22 @@ public sealed class SecretReferenceResolver
     /// <param name="problem">Why a known reference has no value, without including any secret values.</param>
     /// <returns>The value, or null when it is not set or cannot be read.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
-    public string? Read(string key, out string? problem)
+    public string? Read(string key, out string? problem) => Read(key, out problem, out _);
+
+    /// <summary>
+    /// Reads a value by the key a reader of variables is given, as <see cref="Read(string, out string?)"/> does, and tells whether it
+    /// is a secret given to the project of the work alone (<see cref="TryGet(SecretReference, out string?, out bool)"/>).
+    /// </summary>
+    /// <param name="key">The name of an environment variable, <c>env:NAME</c>, <c>secret:NAME</c> or <c>var:NAME</c>.</param>
+    /// <param name="problem">Why a known reference has no value, without including any secret values.</param>
+    /// <param name="projectOnly">Whether the value is the one of a secret that only the project of the work gets.</param>
+    /// <returns>The value, or null when it is not set or cannot be read.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
+    public string? Read(string key, out string? problem, out bool projectOnly)
     {
         ArgumentNullException.ThrowIfNull(key);
         problem = null;
+        projectOnly = false;
         var colon = key.IndexOf(':');
         var reference = colon < 0 ? new SecretReference(SecretReferenceKind.Environment, key)
             : key.AsSpan(0, colon) is "secret" ? new SecretReference(SecretReferenceKind.Secret, key[(colon + 1)..])
@@ -367,7 +396,7 @@ public sealed class SecretReferenceResolver
         if (reference is not { } known) return null;
         try
         {
-            if (TryGet(known, out var value)) return value;
+            if (TryGet(known, out var value, out projectOnly)) return value;
             problem = SecretReferences.MissingMessage(known);
         }
         catch (SecretReferenceException exception)

@@ -296,11 +296,8 @@ public sealed class DesktopOwnedSessionTests
     }
 
     [TestMethod]
-    public void LegacyBranches_DoNotComposeOwnedHost()
+    public void UnconfiguredSessionOperations_RefuseSendAndReceipts()
     {
-        var root = OperatingSystem.IsWindows() ? @"Q:\literal" : "/literal";
-        Assert.IsTrue(DesktopCommandLine.TryParse(["--data-root", root], _ => false, _ => false, out var options, out _));
-        Assert.IsNull(options!.Owned);
         var disabled = new SessionOperationsService();
         Assert.AreEqual("unconfigured", disabled.Send(new("epoch", "key", "session", "text"), CancellationToken.None).Status);
         Assert.AreEqual("unconfigured", disabled.Receipts(new("epoch", 0)).Status);

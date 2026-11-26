@@ -27,13 +27,14 @@ const entry = (id: string, scope: "Global" | "Project", change: Partial<PluginsE
   id, name: id, description: `What ${id} does.`, kind: "Source", scope, enabledGlobal: null, enabledProject: null, enabled: true, state: "Enabled", runtime: "running",
   runtimeMessage: null, folder: scope === "Project" ? `plugin:project:p:${id}` : `plugin:global:${id}`, path: `${scope === "Project" ? work : home}\\${id}`,
   loadable: true, changed: false, errors: null,
-  icon: null, color: null, version: null, author: null, tags: null, image: null, ...change });
+  icon: null, color: null, version: null, author: null, tags: null, image: null, disabledByRepository: false, ...change });
 const skill = (id: string, name: string, source: string, change: Partial<SkillsEntry> = {}): SkillsEntry => ({ id, name, title: name, description: `What ${name} is for.`, source,
-  scope: source.startsWith("Project") ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true,
+  scope: source.startsWith("Project") ? "Project" : "User", enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true, disabledByRepository: false,
   folder: `skill:global:${source}:${name}`, path: `C:\\skills\\${id}`, ...change });
 const query = new URLSearchParams(location.search);
 const invalidSkills = query.get("skills") === "invalid";
 const manySkills = query.get("skills") === "many";
+const inheritedSkills = query.get("skills") === "inherited";
 const mcpSkills = query.get("skills") === "mcp", mcpFailed = query.get("skills") === "mcp-failed";
 const mcpSkill = (server: string, name: string, change: Partial<SkillsMcpEntry> = {}): SkillsMcpEntry => ({ server, name, description: `What ${name} of ${server} is for.`,
   uri: `skill://${server}/${name}/SKILL.md`, enabled: true, namedLikeLocal: false, approval: "not_approved", dynamic: false, fileCount: 2, totalBytes: 3072,
@@ -55,7 +56,9 @@ const state = {
     skill("broken-second", "", "ProjectAlta", { title: "Broken second", valid: false, folder: null }),
     skill("duplicate-first", "duplicate", "ProjectAlta", { title: "Duplicate first", folder: null }),
     skill("duplicate-second", "duplicate", "ProjectAlta", { title: "Duplicate second", folder: null }),
-  ] : manySkills ? many : [skill("release-notes", "release-notes", "UserAlta"), skill("triage", "triage", "ProjectAlta")],
+  ] : manySkills ? many : inheritedSkills
+    ? [skill("release-notes", "release-notes", "UserAlta", { enabled: false, enabledProject: false, disabledByRepository: true })]
+    : [skill("release-notes", "release-notes", "UserAlta"), skill("triage", "triage", "ProjectAlta")],
   holdDetails: false, pendingDetails: [] as { resolve: () => void }[],
   mcp: [
     { server: "billing", listedAt: "2026-10-23T10:00:00Z", problems: [], skills: [

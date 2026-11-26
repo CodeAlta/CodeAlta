@@ -27,6 +27,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private readonly AgentInstructionTemplateProvider _instructionTemplateProvider;
     private readonly SessionDiscoveryScope? _discoveryScope;
     private readonly CatalogOptions _catalogOptions;
+    private readonly string? _scratchpadRoot;
     private readonly CodeAltaConfigStore _configStore;
     private readonly SkillCatalog _skillCatalog;
     private readonly SpaceCatalog _spaceCatalog;
@@ -234,11 +235,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public bool ShowsPromptSuggestions { get; init; }
 
     /// <summary>
-    /// Gets or initializes the folder of the scratchpad files of the sessions, where the file tools of a session without
-    /// the shell may write; null, the default, for the <c>scratchpad</c> folder of the state root. It is the folder the
-    /// instructions name (<see cref="AgentInstructionTemplateProvider.ScratchpadRoot"/>).
+    /// Gets or initializes the folder of the scratchpad files of the sessions: where the file tools of a session without
+    /// the shell may write, where a sandboxed session has a folder of its own, and where the scripts of the sessions are
+    /// kept. Null or blank, the default, initializes it to the <c>scratchpad</c> folder of the state root. It is the
+    /// folder the instructions name (<see cref="AgentInstructionTemplateProvider.ScratchpadRoot"/>).
     /// </summary>
-    public string? ScratchpadRoot { get; init; }
+    [System.Diagnostics.CodeAnalysis.AllowNull]
+    public string ScratchpadRoot
+    {
+        // One default for every reader: a reader that had its own, or none, disagreed with what the instructions name.
+        get => _scratchpadRoot ?? Path.GetFullPath(Path.Combine(_catalogOptions.StateRoot, "scratchpad"));
+        init => _scratchpadRoot = string.IsNullOrWhiteSpace(value) ? null : Path.GetFullPath(value);
+    }
 
     /// <summary>
     /// Gets or initializes what gives a session the identity of its space (its Git author, its GitHub profile), read
@@ -1337,6 +1345,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
+            Labels = localState.Labels is { Count: > 0 } labels ? [.. labels] : null,
             MessageCount = localState.MessageCount,
             ParentSessionId = localState.ParentSessionId,
             CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),
@@ -2776,6 +2785,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         AdditionalTools = sendOptions.AdditionalTools,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
                         OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permissionExecution),
+                        OnConversationHeld = sendOptions.OnConversationHeld,
+                        OnInteractiveAsk = sendOptions.OnInteractiveAsk,
                         EnableUserInputTool = permissionExecution.EnableUserInput,
                         RunLifecycle = OwnedSessionAskExecution.Combine(sendOptions.RunLifecycle, Permissions.CreateOwnedRunLifecycle(permissionExecution)),
                     };
@@ -4922,8 +4933,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return new Agent.Runtime.Tools.AgentWriteGuard(
             roots.Where(static root => !string.IsNullOrWhiteSpace(root))!,
             codeAlta.Where(static root => !string.IsNullOrWhiteSpace(root))!,
-            !string.IsNullOrWhiteSpace(ScratchpadRoot) ? [ScratchpadRoot]
-                : string.IsNullOrWhiteSpace(_catalogOptions.StateRoot) ? [] : [Path.Combine(_catalogOptions.StateRoot, "scratchpad")],
+            [ScratchpadRoot],
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
 

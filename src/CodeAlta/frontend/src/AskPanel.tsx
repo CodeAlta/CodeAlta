@@ -13,7 +13,7 @@ import { AppIcon } from "./AppIcon";
 import { inHiddenPane } from "./keptPanes";
 import { showToast } from "./appToaster";
 import { FileReview, type FileReviewHandle } from "./FileReview";
-import { questionTabTitle, selectedChoice, submitStep } from "./askReview";
+import { questionTabTitle, selectedChoices, submitStep, toggleChoice } from "./askReview";
 import { modalDialogOpen } from "./modalDialogs";
 import { ReviewVerdictPicker } from "./review/SubmitReviewForm";
 import { canSubmitReview, defaultVerdict, threadCounts, type ReviewVerdict } from "./review/reviewThreads";
@@ -224,10 +224,11 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     if (blocked || reading || !pageUsable || !head || !source || sourceAuthority.current !== source
       || draftSource(epoch, sessionId, head) !== source) return;
     try {
-      const answers = kind === "cancel" ? [] : head.request.questions.map((item, index) => {
-        const choice = selectedChoice(item, active?.choices[index]);
-        return { questionIndex: index, selectedChoiceIndexes: choice === null ? [] : [choice], freeformText: active?.text[index] || null };
-      });
+      const answers = kind === "cancel" ? [] : head.request.questions.map((item, index) => ({
+        questionIndex: index,
+        selectedChoiceIndexes: selectedChoices(item, active?.choices[index]),
+        freeformText: active?.text[index] || null,
+      }));
       const reviewAnswer = kind === "answer" && head.request.review ? { verdict: verdict, overall: active?.overall || null } : null;
       const original = captureAskAction(epoch, head.handle, answers, crypto.randomUUID(), reviewAnswer);
       void actions.submit(kind, original, () => capability.canSubmit({ expectedEpoch: epoch }),
@@ -263,12 +264,14 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     const target = event.target;
     if (!(target instanceof HTMLElement) || target.matches(":disabled")) return;
     const key = event.key.toLowerCase();
-    const text = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "radio");
+    const text = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "radio" && target.type !== "checkbox");
     const handled = () => { event.preventDefault(); event.stopPropagation(); };
-    const options = head.request.questions[questionIndex]?.choices.length ?? 0;
+    const currentQuestion = head.request.questions[questionIndex];
+    const options = currentQuestion?.choices.length ?? 0;
     if (!text && !event.ctrlKey && !event.shiftKey && /^[1-9]$/.test(event.key) && Number(event.key) <= options && !target.closest('[role="tablist"]')) {
       const value = Number(event.key) - 1;
-      edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: [value] } }));
+      const multi = currentQuestion?.allowMultiSelect === true;
+      edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: toggleChoice(current.choices[questionIndex], value, multi) } }));
       form.current?.querySelector<HTMLElement>(`[data-ask-question] input[value="${value}"]`)?.focus();
       handled();
     } else if (event.ctrlKey && !event.shiftKey && (key === "n" || key === "p")) {
@@ -303,9 +306,13 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     setNotice(head ? "pending" : "empty");
   }, [notice, head, t]);
   const question = head?.request.questions[questionIndex];
-  const choice = question ? selectedChoice(question, active?.choices[questionIndex]) : null;
+  const multiSelect = question?.allowMultiSelect === true;
+  const pickedChoices = question ? selectedChoices(question, active?.choices[questionIndex]) : [];
   const remaining = submitStep(seen, questionIndex, count).kind === "show";
-  const choose = (value: number) => edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: [value] } }));
+  const choose = (value: number) => edit(current => ({
+    ...current,
+    choices: { ...current.choices, [questionIndex]: toggleChoice(current.choices[questionIndex], value, multiSelect) },
+  }));
   const reviewName = requested?.kind === "file" && requested.path ? requested.path.slice(requested.path.lastIndexOf("/") + 1) : null;
   const reviewSendable = !requested || canSubmitReview(reviewCounts, verdict, active?.overall ?? "");
   const questions = asking && head && (question || requested) ? <fieldset className="ask-card ask-form" ref={form} disabled={blocked} onKeyDown={formKey} data-ask-keys=""
@@ -337,9 +344,9 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     </div>}
     {question && <div className="ask-question" data-ask-question={questionIndex} role="group" aria-label={question.title}>
       <h4>{question.question}</h4>{question.description && <p className="detail">{question.description}</p>}
-      {question.choices.length > 0 && <div className="ask-choices" role="radiogroup" aria-label={question.title}>
-        {question.choices.map((item, choiceIndex) => <label key={choiceIndex} className="ask-choice" data-selected={choice === choiceIndex || undefined}>
-          <input type="radio" className="sr-only" name={`ask-${head.handle.askId}-${questionIndex}`} value={choiceIndex} checked={choice === choiceIndex} disabled={blocked}
+      {question.choices.length > 0 && <div className="ask-choices" role={multiSelect ? "group" : "radiogroup"} aria-label={question.title}>
+        {question.choices.map((item, choiceIndex) => <label key={choiceIndex} className="ask-choice" data-selected={pickedChoices.includes(choiceIndex) || undefined}>
+          <input type={multiSelect ? "checkbox" : "radio"} className="sr-only" name={`ask-${head.handle.askId}-${questionIndex}`} value={choiceIndex} checked={pickedChoices.includes(choiceIndex)} disabled={blocked}
             onChange={() => choose(choiceIndex)} />
           <span className="ask-choice-number" aria-hidden="true">{choiceIndex + 1}</span>
           <span className="ask-choice-text"><strong>{item.title}</strong>{item.description && <small>{item.description}</small>}</span>

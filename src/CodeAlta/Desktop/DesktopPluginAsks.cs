@@ -158,6 +158,7 @@ internal sealed class DesktopPluginAsks : IPluginAskRuntimeService
             Question = question.Question ?? "",
             Description = question.Description,
             Choices = [.. question.Choices.Select(static choice => new PluginAskChoice { Title = choice.Title ?? "", Description = choice.Description })],
+            AllowMultiSelect = question.AllowMultiSelect,
             Freeform = question.Freeform is { } freeform ? new PluginAskFreeform { Title = freeform.Title, Placeholder = freeform.Placeholder } : null,
         })],
         Review = head.Request.Review is { Kind: { } kind } review

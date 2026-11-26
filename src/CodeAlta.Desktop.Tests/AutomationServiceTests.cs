@@ -327,6 +327,73 @@ public sealed class AutomationServiceTests
     }
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void State_StaysReadableByTrimmingTheOldestCompletedRun_CallsFirst(bool hasCalls)
+    {
+        const int limit = 8 * 1024 * 1024;
+        using var root = new AutomationTempRoot();
+        var path = Path.Combine(root.Path, "automations.json");
+        var store = new AutomationStateStore(path, pausedByDefault: true);
+        store.Paused = false;
+        store.Alive(Noon);
+        store.Allow(First, "allowed-definition");
+        store.SetWatermark(First, "issue:opened:trusted", new() { Since = Noon, Seen = ["issue/1"] });
+        store.Add(new AutomationRun("active", First, Noon, "manual"));
+        var payload = new string('a', limit - 2048);
+        store.Add(new AutomationRun("oldest", Second, Noon.AddMinutes(1), "manual")
+        {
+            Status = AutomationRun.Completed, Calls = hasCalls ? [payload] : null, Output = hasCalls ? null : payload,
+        });
+        store.Add(new AutomationRun("recent", First, Noon.AddMinutes(2), "manual") { Status = AutomationRun.Completed, Calls = ["kept"] });
+        var before = new FileInfo(path).Length;
+        Assert.IsTrue(before > limit - 2048 && before <= limit, $"The starting state is just under the limit: {before} bytes.");
+
+        // The calls take more bytes than characters after JSON escaping.
+        var newestCall = new string('\u00e9', 400);
+        store.Add(new AutomationRun("newest", First, Noon.AddMinutes(3), "manual") { Status = AutomationRun.Completed, Calls = [newestCall] });
+
+        var reopened = new AutomationStateStore(path, pausedByDefault: true);
+        Assert.IsFalse(reopened.Paused, "Writing a new run must not make the next start lose the pause choice.");
+        Assert.IsTrue(new FileInfo(path).Length <= limit);
+        Assert.IsTrue(reopened.IsAllowed(First, "allowed-definition"));
+        Assert.AreEqual("issue/1", reopened.Watermark(First, "issue:opened:trusted")?.Seen.Single());
+        Assert.AreEqual(AutomationRun.Running, store.Run("active")?.Status);
+        Assert.AreEqual(AutomationRun.Interrupted, reopened.Run("active")?.Status);
+        Assert.AreEqual("newest", reopened.Runs(null, 1).Single().Id);
+        Assert.AreEqual(hasCalls ? 4 : 3, reopened.Runs(null, 10).Count);
+        Assert.AreEqual(newestCall, reopened.Run("newest")?.Calls?.Single());
+        Assert.AreEqual("kept", reopened.Run("recent")?.Calls?.Single());
+        Assert.AreEqual(hasCalls, reopened.Run("oldest") is not null, "Keep an old run if dropping its calls is enough.");
+        Assert.IsNull(reopened.Run("oldest")?.Calls);
+    }
+
+    [TestMethod]
+    public void State_LeavesTheLastReadableFileWhenAProtectedRunAloneExceedsTheLimit()
+    {
+        using var root = new AutomationTempRoot();
+        var path = Path.Combine(root.Path, "automations.json");
+        var store = new AutomationStateStore(path, pausedByDefault: false);
+        store.Add(new AutomationRun("active", First, Noon, "manual"));
+        var before = File.ReadAllBytes(path);
+        var payload = new string('a', 8 * 1024 * 1024);
+
+        store.Update("active", run => run with { Calls = [payload] });
+
+        Assert.AreEqual(payload, store.Run("active")?.Calls?.Single(), "The active run still has its calls in memory.");
+        Assert.AreEqual(before.Length, new FileInfo(path).Length, "An oversize save must not replace the last readable file.");
+        CollectionAssert.AreEqual(before, File.ReadAllBytes(path));
+        var ended = store.Update("active", run => run with { Status = AutomationRun.Completed });
+        Assert.AreEqual(AutomationRun.Completed, ended?.Status);
+        var reopened = new AutomationStateStore(path, pausedByDefault: true);
+        Assert.IsFalse(reopened.Paused);
+        var savedRun = reopened.Run("active");
+        Assert.IsNotNull(savedRun);
+        Assert.AreEqual(AutomationRun.Completed, savedRun.Status);
+        Assert.IsNull(savedRun.Calls);
+    }
+
+    [TestMethod]
     public async Task TriggersOfAnAutomationThatCameWithAProject_WaitUntilTheUserAllowsIt_AsItIs()
     {
         await using var fixture = new Fixture();

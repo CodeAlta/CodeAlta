@@ -6,6 +6,7 @@ import { AppIcon } from "./AppIcon";
 import { ClaudeTag, claudePromptScope } from "./ClaudeTag";
 import { CopilotTag, copilotPromptScope } from "./CopilotTag";
 import { PromptRows, promptHasSpaces, promptIdentity as identity } from "./PromptRows";
+import { inheritedPromptScope } from "./PromptTags";
 import { CodeEditor } from "./monaco/CodeEditor";
 import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
@@ -142,7 +143,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
         {start.detail ?? (form ? <Section className="settings-editor-form prompt-settings-form settings-split-detail" title={selected === added ? t("New prompt") : entry?.name || form.id}
           subtitle={`${t(form.kind === "System" ? "System prompt" : "Agent prompt")} · ${form.id || "…"}`}
           rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : claudePromptScope(document?.scope ?? "") ? <ClaudeTag />
-            : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
+            : <Tag minimal round>{t(inheritedPromptScope(document?.scope ?? "") ? "Inherited" : "Built-in")}</Tag> : undefined}>
           {document?.file && selected !== added && <SectionCard className="settings-editor-file">
             <SettingsFileLocation path={document.file} readOnly={readOnly && !copilotPromptScope(document.scope) && !claudePromptScope(document.scope)} platform={files.platform} disabled={busy}
               onOpen={files.open ? () => files.open!({ kind: "prompt", scope: document.scope, id: document.id, part: document.kind }) : undefined}

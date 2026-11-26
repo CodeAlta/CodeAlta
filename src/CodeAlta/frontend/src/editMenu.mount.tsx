@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { EditMenu } from "./EditMenu";
 import { fixtureClipboard, middleOf, readEditMenu } from "./editMenu.probe";
@@ -32,7 +33,8 @@ document.addEventListener("copy", event => {
   event.clipboardData?.setData("text/plain", state.copied);
   event.preventDefault();
 });
-createRoot(document.getElementById("root")!).render(<Fixture />);
+// Rendered at once, effects included: the menu listens by the time `ready` sees the page.
+flushSync(() => createRoot(document.getElementById("root")!).render(<Fixture />));
 
 const field = (id: string) => document.getElementById(id) as HTMLInputElement;
 Object.assign(window, { textFieldFixture: {

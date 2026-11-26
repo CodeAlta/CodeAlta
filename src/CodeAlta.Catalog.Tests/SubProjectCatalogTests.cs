@@ -369,7 +369,7 @@ public sealed class SubProjectCatalogTests
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllTextAsync(path, map);
             // A stamp the cache cannot take for the one of the text before.
-            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(-10 - Random.Shared.Next(1000)));
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(-10 - Random.Shared.Next(1000))); // not a limit
         }
 
         public void Dispose() => Directory.Delete(Root, true);

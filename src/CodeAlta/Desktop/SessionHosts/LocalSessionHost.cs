@@ -150,8 +150,8 @@ internal sealed class LocalSessionHost : ISessionHost
         => Runtime.Permissions.ListOwnedCommandsAsync(sessionId, cancellationToken);
 
     /// <inheritdoc />
-    public ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, CancellationToken cancellationToken)
-        => Runtime.Permissions.ResolveOwnedCommandAsync(handle, decision, cancellationToken);
+    public ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, string? userFeedback, CancellationToken cancellationToken)
+        => Runtime.Permissions.ResolveOwnedCommandAsync(handle, decision, userFeedback, cancellationToken);
 
     /// <inheritdoc />
     public ValueTask<SessionOwnedUserInputPage> ListUserInputsAsync(string sessionId, CancellationToken cancellationToken)

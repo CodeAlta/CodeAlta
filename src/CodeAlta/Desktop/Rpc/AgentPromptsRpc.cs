@@ -1,3 +1,4 @@
+using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
@@ -70,24 +71,34 @@ internal sealed class AgentPromptsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var query = Query(project.Root);
+            var query = ReadQuery(project);
+            var roots = _catalog.ResolveRoots(query);
+            string ScopeOf(AgentPromptSourceKind kind, string path) => Scope(kind, path, roots);
             var agents = _catalog.ListPrompts(query);
             var systems = _catalog.ListSystemPrompts(query);
-            var sources = agents.Select(static prompt => (prompt.SourcePath, prompt.SourceKind))
-                .Concat(systems.Select(static prompt => (prompt.SourcePath, prompt.SourceKind)))
+            var sources = agents.Select(prompt => (prompt.SourcePath, Scope: ScopeOf(prompt.SourceKind, prompt.SourcePath)))
+                .Concat(systems.Select(prompt => (prompt.SourcePath, Scope: ScopeOf(prompt.SourceKind, prompt.SourcePath))))
                 .GroupBy(static source => source.SourcePath, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(static group => group.Key, static group => group.First().SourceKind, StringComparer.OrdinalIgnoreCase);
-            string? ShadowedBy(string? path) => path is not null && sources.TryGetValue(path, out var kind) ? Scope(kind) : null;
-            var rows = agents.Select(prompt => new AgentPromptEntry(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
-                    Bound(prompt.Description, MaximumDescriptionLength), nameof(PromptResourceKind.Agent), Scope(prompt.SourceKind),
-                    prompt.IsBuiltIn || prompt.IsExternal, prompt.IsShadowed, ShadowedBy(prompt.ShadowedByPath), Bound(prompt.SystemPromptName, MaximumIdLength),
-                    prompt.Mode == PromptCompositionMode.Append)
+                .ToDictionary(static group => group.Key, static group => group.First().Scope, StringComparer.OrdinalIgnoreCase);
+            string? ShadowedBy(string? path) => path is null ? null : sources.GetValueOrDefault(path);
+            var rows = agents.Select(prompt =>
                 {
-                    Inherits = prompt.Inherits,
+                    var scope = ScopeOf(prompt.SourceKind, prompt.SourcePath);
+                    return new AgentPromptEntry(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
+                        Bound(prompt.Description, MaximumDescriptionLength), nameof(PromptResourceKind.Agent), scope,
+                        prompt.IsBuiltIn || prompt.IsExternal || IsInheritedScope(scope), prompt.IsShadowed, ShadowedBy(prompt.ShadowedByPath),
+                        Bound(prompt.SystemPromptName, MaximumIdLength), prompt.Mode == PromptCompositionMode.Append)
+                    {
+                        Inherits = prompt.Inherits,
+                    };
                 })
-                .Concat(systems.Select(prompt => new AgentPromptEntry(prompt.PromptName, Bound(prompt.PromptName, MaximumNameLength)!, null,
-                    nameof(PromptResourceKind.System), Scope(prompt.SourceKind), prompt.IsBuiltIn, prompt.IsShadowed,
-                    ShadowedBy(prompt.ShadowedByPath), null, prompt.Mode == PromptCompositionMode.Append)))
+                .Concat(systems.Select(prompt =>
+                {
+                    var scope = ScopeOf(prompt.SourceKind, prompt.SourcePath);
+                    return new AgentPromptEntry(prompt.PromptName, Bound(prompt.PromptName, MaximumNameLength)!, null,
+                        nameof(PromptResourceKind.System), scope, prompt.IsBuiltIn || IsInheritedScope(scope), prompt.IsShadowed,
+                        ShadowedBy(prompt.ShadowedByPath), null, prompt.Mode == PromptCompositionMode.Append);
+                }))
                 // An id the store cannot address is counted, never shortened into another prompt's id.
                 .Where(static row => ValidId(row.Id)).ToArray();
             var listed = rows.Take(MaximumPrompts).ToArray();
@@ -107,20 +118,24 @@ internal sealed class AgentPromptsService
         if (_projects is null) return new("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null);
         if (ExternalKind(request.Scope) is { } external) return await ReadExternalAgentAsync(request, external, cancellationToken).ConfigureAwait(false);
-        if (Identify(request.Kind, request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
+        var inherited = IsInheritedScope(request.Scope);
+        if (Identify(request.Kind, inherited ? "Project" : request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, null, null);
         if (project.Root is null && identity.Scope == PromptResourceScope.Project) return new("invalid", null, ProjectRequired);
         try
         {
-            var store = Store(project.Root);
+            var roots = _catalog.ResolveRoots(inherited ? ReadQuery(project) : Query(project.Root));
+            var promptRoot = inherited ? InheritedPromptRoot(request.Scope!, roots) : roots.ProjectPromptRoot;
+            if (inherited && promptRoot is null) return new("not_found", null, null);
+            var store = new PromptResourceStore(roots.ShippedPromptRoot, roots.GlobalPromptRoot, promptRoot, _textFiles);
             var snapshot = store.Load(identity);
             var content = snapshot.Content;
             // An editable value is returned whole or not at all: a shortened one would be saved back shortened.
             if (content.Body.Length > MaximumBodyLength || content.Name?.Length > MaximumNameLength
                 || content.Description?.Length > MaximumDescriptionLength || content.SystemPromptName?.Length > MaximumIdLength)
                 return new("too_large", null, null);
-            return new("ok", new(identity.Id, identity.Kind.ToString(), identity.Scope.ToString(), identity.Scope == PromptResourceScope.BuiltIn,
+            return new("ok", new(identity.Id, identity.Kind.ToString(), inherited ? request.Scope! : identity.Scope.ToString(), inherited || identity.Scope == PromptResourceScope.BuiltIn,
                 content.Name, content.Description, identity.Kind == PromptResourceKind.Agent ? content.SystemPromptName : null,
                 content.Body, content.Append, snapshot.File.Revision.ContentHash!, store.GetPath(identity))
             {
@@ -145,7 +160,7 @@ internal sealed class AgentPromptsService
 
     /// <summary>
     /// Creates a global or project prompt when no revision is expected, or replaces the prompt whose file
-    /// still has the expected revision. Built-in prompts are refused.
+    /// still has the expected revision. Built-in and inherited prompts are refused.
     /// </summary>
     [NeoRpcMethod("save")]
     public async Task<AgentPromptMutationResponse> SaveAsync(AgentPromptSaveRequest request, CancellationToken cancellationToken)
@@ -153,7 +168,7 @@ internal sealed class AgentPromptsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null) return new("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null);
-        if (ExternalKind(request.Scope) is not null) return new("read_only", null, null);
+        if (ExternalKind(request.Scope) is not null || IsInheritedScope(request.Scope)) return new("read_only", null, null);
         if (Identify(request.Kind, request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
         if (identity.Scope == PromptResourceScope.BuiltIn) return new("read_only", null, null);
         if (request.Body is null) return new("invalid", null, "A prompt body is required.");
@@ -219,7 +234,7 @@ internal sealed class AgentPromptsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null) return new("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null);
-        if (ExternalKind(request.Scope) is not null) return new("read_only", null, null);
+        if (ExternalKind(request.Scope) is not null || IsInheritedScope(request.Scope)) return new("read_only", null, null);
         if (Identify(request.Kind, request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
         if (identity.Scope == PromptResourceScope.BuiltIn) return new("read_only", null, null);
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
@@ -268,9 +283,11 @@ internal sealed class AgentPromptsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var inheritance = _catalog.ResolveInheritance(Query(project.Root), request.Id, inherits);
+            var query = ReadQuery(project);
+            var inheritance = _catalog.ResolveInheritance(query, request.Id, inherits);
+            var roots = _catalog.ResolveRoots(query);
             var parts = inheritance.Prompts.Select(prompt => new AgentPromptComposedPart(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
-                Scope(prompt.SourceKind), (int)TokenEstimator.Estimate(prompt.Body))).ToArray();
+                Scope(prompt.SourceKind, prompt.SourcePath, roots), (int)TokenEstimator.Estimate(prompt.Body))).ToArray();
             // The text as a session reads it: what is written for a tool the prompt turns off is left out.
             var disabledTools = new HashSet<string>(inheritance.DisabledTools.Concat((request.DisabledTools ?? []).Take(SpaceTools.MaximumTools)), StringComparer.Ordinal);
             var body = PromptToolConditions.Apply(string.Join(Environment.NewLine + Environment.NewLine,
@@ -323,22 +340,25 @@ internal sealed class AgentPromptsService
 
     /// <summary>
     /// The file of a listed prompt and the folder of prompts it is in, or null when no prompt has that kind, scope
-    /// and id. The scope is one a listing gives; a file of the shipped prompts is only read.
+    /// and id. The scope is one a listing gives; a shipped or inherited prompt is only read.
     /// </summary>
-    internal (string File, string Root, bool ReadOnly)? Locate(string? kind, string? scope, string? id, string? projectRoot)
+    internal (string File, string Root, bool ReadOnly)? Locate(string? kind, string? scope, string? id, SettingsProjectScope.Resolution project)
     {
         if (_projects is null || !ValidId(id)) return null;
         var system = string.Equals(kind, nameof(PromptResourceKind.System), StringComparison.OrdinalIgnoreCase);
         if (!system && !string.Equals(kind, nameof(PromptResourceKind.Agent), StringComparison.OrdinalIgnoreCase)) return null;
-        var query = Query(projectRoot);
+        var query = ReadQuery(project);
         var roots = _catalog.ResolveRoots(query);
-        bool Named(AgentPromptSourceKind source, string name) => string.Equals(Scope(source), scope, StringComparison.OrdinalIgnoreCase) && string.Equals(name, id, StringComparison.OrdinalIgnoreCase);
+        bool Named(AgentPromptSourceKind source, string name, string path) => string.Equals(name, id, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Scope(source, path, roots), scope, StringComparison.OrdinalIgnoreCase);
         var (file, source) = system
-            ? _catalog.ListSystemPrompts(query).Where(prompt => Named(prompt.SourceKind, prompt.PromptName)).Select(static prompt => (prompt.SourcePath, (AgentPromptSourceKind?)prompt.SourceKind)).FirstOrDefault()
-            : _catalog.ListPrompts(query).Where(prompt => Named(prompt.SourceKind, prompt.PromptName)).Select(static prompt => (prompt.SourcePath, (AgentPromptSourceKind?)prompt.SourceKind)).FirstOrDefault();
+            ? _catalog.ListSystemPrompts(query).Where(prompt => Named(prompt.SourceKind, prompt.PromptName, prompt.SourcePath)).Select(static prompt => (prompt.SourcePath, (AgentPromptSourceKind?)prompt.SourceKind)).FirstOrDefault()
+            : _catalog.ListPrompts(query).Where(prompt => Named(prompt.SourceKind, prompt.PromptName, prompt.SourcePath)).Select(static prompt => (prompt.SourcePath, (AgentPromptSourceKind?)prompt.SourceKind)).FirstOrDefault();
+        var inherited = IsInheritedScope(scope);
         var root = source switch
         {
             AgentPromptSourceKind.UserGlobal => roots.GlobalPromptRoot,
+            AgentPromptSourceKind.Project when inherited => InheritedPromptRoot(scope!, roots),
             AgentPromptSourceKind.Project => roots.ProjectPromptRoot,
             AgentPromptSourceKind.CopilotUser => roots.CopilotUserAgentsRoot,
             AgentPromptSourceKind.CopilotProject => roots.CopilotProjectAgentsRoot,
@@ -347,16 +367,20 @@ internal sealed class AgentPromptsService
             AgentPromptSourceKind.BuiltIn => roots.ShippedPromptRoot,
             _ => null,
         };
-        return file is null || root is null ? null : (file, root, source == AgentPromptSourceKind.BuiltIn);
+        return file is null || root is null ? null : (file, root, inherited || source == AgentPromptSourceKind.BuiltIn);
     }
 
-    private AgentPromptCatalogQuery Query(string? projectRoot) => new()
+    private AgentPromptCatalogQuery ReadQuery(SettingsProjectScope.Resolution project)
+        => Query(project.Root, ProjectResourceRoots.Inherited(project.Project));
+
+    private AgentPromptCatalogQuery Query(string? projectRoot, IReadOnlyList<string>? inheritedRoots = null) => new()
     {
         AppBaseDirectory = _applicationRoot,
         UserCodeAltaRoot = _projects!.Options.GlobalRoot,
         // The profile is only where the agents of GitHub Copilot and Claude Code of the user are: without one, a folder that has none.
         UserProfileRoot = _userProfileRoot ?? _projects.Options.GlobalRoot,
         ProjectRoot = projectRoot,
+        InheritedProjectRoots = inheritedRoots ?? [],
         ProjectPromptResourcesTrusted = projectRoot is not null,
     };
 
@@ -424,6 +448,28 @@ internal sealed class AgentPromptsService
         _ => nameof(PromptResourceScope.BuiltIn),
     };
 
+    // The ordinal gives even shadowed prompts of the same id their own address without accepting a path from the UI.
+    private const string InheritedScopePrefix = "Inherited:";
+
+    private static bool IsInheritedScope(string? scope) => scope?.StartsWith(InheritedScopePrefix, StringComparison.OrdinalIgnoreCase) == true;
+
+    private static string Scope(AgentPromptSourceKind kind, string? path, SystemPromptContentRoots roots)
+    {
+        if (kind == AgentPromptSourceKind.Project && path is not null)
+        {
+            var promptRoot = Path.GetDirectoryName(Path.GetDirectoryName(path));
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            for (var index = 0; index < roots.InheritedProjectPromptRoots.Count; index++)
+                if (string.Equals(promptRoot, roots.InheritedProjectPromptRoots[index], comparison))
+                    return InheritedScopePrefix + index.ToString(CultureInfo.InvariantCulture);
+        }
+        return Scope(kind);
+    }
+
+    private static string? InheritedPromptRoot(string scope, SystemPromptContentRoots roots)
+        => int.TryParse(scope.AsSpan(InheritedScopePrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var index)
+            && (uint)index < (uint)roots.InheritedProjectPromptRoots.Count ? roots.InheritedProjectPromptRoots[index] : null;
+
     private static AgentPromptSourceKind? ExternalKind(string? scope)
         => string.Equals(scope, CopilotGlobalScope, StringComparison.OrdinalIgnoreCase) ? AgentPromptSourceKind.CopilotUser
             : string.Equals(scope, CopilotProjectScope, StringComparison.OrdinalIgnoreCase) ? AgentPromptSourceKind.CopilotProject
@@ -452,7 +498,7 @@ internal sealed record AgentPromptsListResponse(string Status, string? ProjectId
 /// <summary>
 /// One prompt file: kind is <c>Agent</c> or <c>System</c>, scope is <c>BuiltIn</c>, <c>Global</c> or <c>Project</c>, or
 /// <c>CopilotGlobal</c> or <c>CopilotProject</c> for a custom agent of GitHub Copilot, <c>ClaudeGlobal</c> or <c>ClaudeProject</c>
-/// for a subagent of Claude Code, which are read-only.
+/// for a subagent of Claude Code, or <c>Inherited:&lt;ordinal&gt;</c> for a read-only project ancestor.
 /// </summary>
 internal sealed record AgentPromptEntry(string Id, string Name, string? Description, string Kind, string Scope, bool ReadOnly,
     bool Shadowed, string? ShadowedByScope, string? SystemPromptId, bool Append)

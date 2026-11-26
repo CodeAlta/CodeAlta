@@ -340,6 +340,11 @@ export function AutomationEditor({ hub, initial, projects, providers, spaces = n
         {/* What most automations leave as it is: how many of its runs work at once on a machine. */}
         <Button className="automation-more-options" size="small" variant="minimal" disabled={busy} endIcon={<AppIcon name={more ? "chevronDown" : "chevronRight"} size={13} />}
           text={t(more ? "Fewer options" : "More options")} aria-expanded={more} onClick={() => setMore(value => !value)} />
+        {more && !form.withoutModel && <FormGroup label={t("Label of its runs")} labelFor="automation-label"
+          helperText={t("Every session of a run gets this label for sessions, created at the first run when there is none. Empty: a label of the name of the automation.")}>
+          <InputGroup id="automation-label" value={form.label ?? ""} disabled={busy} maxLength={64} spellCheck={false} placeholder={form.name.trim() || undefined}
+            onChange={event => edit({ label: event.target.value })} />
+        </FormGroup>}
         {more && <FormGroup label={t("Runs at once on a machine")} labelFor="automation-max-runs"
           helperText={t("How many runs of this automation work at the same time on one machine; with 1, a run waits for the previous one to end.")}>
           <NumericInput id="automation-max-runs" min={1} max={maximumRunsAtOnce} stepSize={1} minorStepSize={null} majorStepSize={null} clampValueOnBlur disabled={busy}

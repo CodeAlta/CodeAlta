@@ -35,6 +35,13 @@ export function testLimit(milliseconds: number): number {
 export const pageWaitLimit = testLimit(20_000);
 
 /**
+ * How long a browser test waits for the browser it started to open its DevTools port, in milliseconds. Edge starts in
+ * about a second on its own; `npm test` runs two files at once, each with a browser of its own, beside the .NET tests
+ * that AGENTS.md runs with it, and there a start took more than 5 s.
+ */
+export const browserStartLimit = testLimit(20_000);
+
+/**
  * How long a browser test waits for the answer to a DevTools command, in milliseconds. A command can carry a wait of
  * {@link pageWaitLimit} inside the page: this limit is above it, so that the wait says what was missing before the
  * command fails without saying it.

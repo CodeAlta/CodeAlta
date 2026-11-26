@@ -161,7 +161,11 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         if (result.OfType("alta.session.status").FirstOrDefault() is not { } status) return null;
         var assigned = Spaces;
         // A session written before sessions had a space is in every space of its project.
-        return VisibleSpace(status, assigned) ? status : null;
+        if (!VisibleSpace(status, assigned)) return null;
+        // Only a status says what an idle session suggests (a list does not): each read of one gives it to the live state,
+        // which pushes it to the phone as it does a suggestion it saw told. Opening a session reads its status.
+        live.Adopt(sessionId, MobileAlta.Text(status, "projectId"), MobileAlta.Text(status, "promptSuggestion"));
+        return status;
     }
 
     /// <summary>Whether a session is in the spaces of the phone, by the rule its own read follows.</summary>
@@ -365,8 +369,6 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         var id = MobileAlta.Text(item, "sessionId")!;
         var projectId = MobileAlta.Text(item, "projectId");
         var at = LastActivity(item);
-        // Only a status says what the model of an idle session suggested: the plugin keeps it, to push it as it does the others.
-        live.Adopt(id, projectId, MobileAlta.Text(item, "promptSuggestion"));
         var selection = item["modelSelection"] as JsonObject;
         var provider = MobileAlta.Text(selection, "providerKey") ?? MobileAlta.Text(item, "providerKey");
         var model = MobileAlta.Text(selection, "modelId");

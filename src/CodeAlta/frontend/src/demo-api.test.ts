@@ -46,6 +46,15 @@ test("browser demo stands in for every service of the generated client", t => {
   assert.deepEqual(services.filter(name => !(name in demo)), []);
 });
 
+test("browser demo rejects host-only calls and keeps explicit empty results", async () => {
+  assert.ok(Object.isFrozen(demo.releaseNotes));
+  assert.deepEqual(Object.keys(demo.releaseNotes), ["list", "read", "picture"]);
+  for (const invoke of Object.values(demo.releaseNotes))
+    await assert.rejects(invoke, { message: "This operation requires the packaged desktop host." });
+
+  assert.deepEqual(await demo.labels.list(), { status: "unavailable", labels: [] });
+});
+
 test("browser demo keeps the user's color schemes in the browser", async () => {
   const stored = new Map<string, string>();
   const storage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value); } };

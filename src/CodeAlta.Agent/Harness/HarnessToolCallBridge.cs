@@ -41,6 +41,9 @@ public sealed class HarnessToolCall
 
     internal List<string> BufferedProgress { get; } = [];
 
+    /// <summary>Gets whether an actual invocation from CodeAlta's MCP server has been matched to this call.</summary>
+    public bool IsMcpMatched => McpCall.Task.IsCompleted;
+
     /// <summary>Gets whether the call has its result.</summary>
     public bool IsCompleted => Result.Task.IsCompleted;
 }

@@ -53,12 +53,12 @@ test("the projects shown are those whose name, a session or a Claude Code sessio
 });
 
 test("the filter box says what it filters, offers to clear what is typed, and says when nothing matches", () => {
-  const render = (props: object) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
-    { value: { locale: "fr", choice: "fr", setLanguage: () => { } } }, createElement(SidebarFilterBox as never, props as never)));
-  const empty = render({ value: "", onChange: () => { } });
+  const render = (applied: string, empty = false) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
+    { value: { locale: "fr", choice: "fr", setLanguage: () => { } } }, createElement(SidebarFilterBox, { applied, onApply: () => { }, empty })));
+  const empty = render("");
   assert.match(empty, /placeholder="Filtrer les sessions"/);
   assert.doesNotMatch(empty, /sidebar-filter-clear/, "nothing typed: nothing to clear");
-  const typed = render({ value: "shader", onChange: () => { }, empty: true });
+  const typed = render("shader", true);
   assert.match(typed, /aria-label="Effacer le filtre"/);
   assert.match(typed, /Aucun résultat\./);
 });
@@ -73,4 +73,12 @@ test("a scope the filter opens is folded apart from the tree, and opened again b
   assert.deepEqual([...folded], ["p1"]);
   assert.deepEqual([...toggleFilterFold(folded, "p1")], []);
   assert.deepEqual([...toggleFilterFold(folded, null)], ["p1", null]);
+});
+
+test("a word label: keeps the sessions with a label whose id starts with it, with the other words in their title", () => {
+  const audit = { title: "Weekly audit", fullTitle: "Weekly audit", labels: ["audit"] };
+  assert.equal(sessionMatches(audit, ["label:aud"]), true);
+  assert.equal(sessionMatches(audit, ["label:audit", "weekly"]), true);
+  assert.equal(sessionMatches(audit, ["label:audit", "monthly"]), false);
+  assert.equal(sessionMatches({ title: "Weekly audit", fullTitle: "Weekly audit" }, ["label:audit"]), false);
 });

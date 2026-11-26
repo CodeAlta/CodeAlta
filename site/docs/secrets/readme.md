@@ -62,6 +62,8 @@ To use a separate GitHub token in each repository:
 2. On each machine that runs sessions for a repository, add the matching secret with that repository's token, or bind its name to a vault item. Limit **Projects** to that repository before using the secret. On a CodeAlta Node you can set both together with `altanode secrets set ACME_GH_TOKEN --project acme-web`, where `acme-web` is the catalog slug.
 3. Start a new session in each project. **Session info** shows the project environment variable names, not the tokens.
 
+A [sandboxed](../sessions/sandbox.md#secrets-of-a-project) session, such as the sessions of a machine of the fleet, gets a secret of the project environment only when the secret is limited to projects: it then runs in a home folder of its project. A secret every project may use does not enter a sandbox because a repository names it.
+
 ## Keep the key of a provider as a secret
 
 In **Settings > Providers**, a provider whose key is in the configuration file, or in the environment variable `api_key_env` names, offers **Keep as a secret…** under its key. Choose a name (`OPENAI_API_KEY` for `openai`) and **Keep**: the key moves into a secret of this computer, and the configuration file names it with `api_key_secret` instead of holding it.
@@ -110,7 +112,7 @@ The value of every secret of the computer is replaced by `***` before it is writ
 > [!WARNING]
 > A secret given to a session's environment can be read by commands the agent runs. CodeAlta masks the output of tools it runs itself. An agent that runs its own tools, such as Claude Code, Codex CLI or an ACP agent, gets the variables in the environment of its program: what its own shell prints goes to its model and into its own files without passing through CodeAlta. Masking catches a value shown by mistake, not a command that encodes it.
 >
-> So give a profile only the secrets its work needs, in the space or the project that needs them. [Ask before use](#ask-before-use) lets you decide which sessions get one, and a [sandboxed](../sessions/sandbox.md) session gets no value kept in a vault.
+> So give a profile only the secrets its work needs, in the space or the project that needs them. [Ask before use](#ask-before-use) lets you decide which sessions get one, and a [sandboxed](../sessions/sandbox.md) session gets, of the secrets its space and its project name, only those limited to its project.
 >
 > The key of a provider, the `env` of a `claude-code` provider, and the `env` and headers of an MCP server go to their program, never to a shell the model drives.
 

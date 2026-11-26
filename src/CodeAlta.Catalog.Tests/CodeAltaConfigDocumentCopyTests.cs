@@ -152,6 +152,16 @@ public sealed class CodeAltaConfigDocumentCopyTests
             if (type == typeof(List<int>)) return new List<int> { number, number + 1 };
             if (type == typeof(IReadOnlyList<CodeAltaUnsupportedProvider>)) return new[] { new CodeAltaUnsupportedProvider($"key{number}", "future") };
             if (type == typeof(TomlTable)) return Table(number);
+            // A list of tables of the document, such as the archive policies: two items, each filled.
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>) && type.GetGenericArguments()[0] is { IsClass: true } item
+                && item.Namespace == typeof(CodeAltaConfigDocument).Namespace)
+            {
+                var list = (IList)Activator.CreateInstance(type)!;
+                list.Add(Fill(item, $"{path}[0]"));
+                list.Add(Fill(item, $"{path}[1]"));
+                return list;
+            }
+
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>) && type.GetGenericArguments()[0] == typeof(string))
             {
                 var dictionary = (IDictionary)Activator.CreateInstance(type, StringComparer.OrdinalIgnoreCase)!;

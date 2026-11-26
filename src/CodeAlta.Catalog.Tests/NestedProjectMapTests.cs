@@ -263,7 +263,7 @@ public sealed class NestedProjectMapTests
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllTextAsync(path, map);
             // A stamp the cache cannot take for the one of the text before.
-            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(-10 - Random.Shared.Next(1000)));
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(-10 - Random.Shared.Next(1000))); // not a limit
         }
 
         // A link to a folder: a junction on Windows, which needs no permission; a symbolic link elsewhere.

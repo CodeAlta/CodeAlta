@@ -148,11 +148,15 @@ internal static class SandboxOutsideCommands
     /// <summary>What the agent is told of its sandbox, and the value that says it was told.</summary>
     /// <param name="sandbox">The sandbox of the session, as it applies now.</param>
     /// <param name="scratchpad">The scratchpad folder of the sandboxed session, or null.</param>
+    /// <param name="hasShell">
+    /// Whether the session runs its commands with the <c>shell_command</c> of CodeAlta, which takes the parameter to run
+    /// one outside the sandbox. False for an agent that runs its own shell: it is told of no parameter it does not have.
+    /// </param>
     /// <returns>The text of the note, and a short value that changes with it (<c>off</c> for a session that is not sandboxed).</returns>
-    public static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad) => Note(sandbox, scratchpad, SandboxPlatforms.Current);
+    public static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad, bool hasShell = true) => Note(sandbox, scratchpad, SandboxPlatforms.Current, hasShell);
 
     /// <summary>What the agent is told of its sandbox on the given platform.</summary>
-    internal static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad, SandboxPlatform platform)
+    internal static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad, SandboxPlatform platform, bool hasShell = true)
     {
         if (!sandbox.IsSandboxed) return ("<codealta-context>Sandbox: off. Commands and file tools run on this computer, as the permissions of the session allow.</codealta-context>", "off");
         string text;
@@ -169,7 +173,7 @@ internal static class SandboxOutsideCommands
                 _ => profile.Hosts.Count == 0 ? "reach no host"
                     : $"reach {string.Join(", ", profile.Hosts.Take(4))}{(profile.Hosts.Count > 4 ? " and the other hosts of the profile" : string.Empty)}, and no other host",
             };
-            var outside = profile.Outside == SandboxOutside.Ask
+            var outside = profile.Outside == SandboxOutside.Ask && hasShell
                 ? $" A command that needs more can run outside with `{Parameter}: \"<why>\"` on `shell_command`: the user is asked each time."
                 : " No command runs outside it: ask the user for what needs more.";
             var platformNote = platform switch

@@ -225,7 +225,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
     public string Label => string.IsNullOrWhiteSpace(DisplayName) ? ProviderKey ?? string.Empty : DisplayName.Trim();
 
     public static ModelProviderEditorItemViewModel FromDocument(CodeAltaProviderDocument definition)
-        => new(Clone(definition));
+        => new(CodeAltaConfigStore.CloneProviderDefinition(definition));
 
     public static ModelProviderEditorItemViewModel Create(string providerKey)
         => new(new CodeAltaProviderDocument
@@ -240,7 +240,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
 
     public CodeAltaProviderDocument ToDocument()
     {
-        var definition = Clone(_source);
+        var definition = CodeAltaConfigStore.CloneProviderDefinition(_source);
         definition.ProviderKey = (ProviderKey ?? string.Empty).Trim().ToLowerInvariant();
         definition.Enabled = Enabled;
         definition.ProviderType = ProviderType;
@@ -374,70 +374,6 @@ internal sealed partial class ModelProviderEditorItemViewModel
     partial void OnUseDefaultModelDiscoveryChanged(bool value) => ClearTestResultOnEdit();
     partial void OnResponseTransportChanged(string? value) => ClearTestResultOnEdit();
     partial void OnUseDefaultResponseTransportChanged(bool value) => ClearTestResultOnEdit();
-    private static CodeAltaProviderDocument Clone(CodeAltaProviderDocument definition)
-    {
-        return new CodeAltaProviderDocument
-        {
-            ProviderKey = definition.ProviderKey,
-            Enabled = definition.Enabled,
-            DisplayName = definition.DisplayName,
-            // Not edited here: kept as the file has them.
-            Icon = definition.Icon,
-            Color = definition.Color,
-            ProviderType = definition.ProviderType,
-            Model = definition.Model,
-            ReasoningEffort = definition.ReasoningEffort,
-            ApiKey = definition.ApiKey,
-            ApiKeyEnv = definition.ApiKeyEnv,
-            ApiKeySecret = definition.ApiKeySecret,
-            ApiUrl = definition.ApiUrl,
-            NetworkTimeoutSeconds = definition.NetworkTimeoutSeconds,
-            Command = definition.Command,
-            Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
-            PermissionMode = definition.PermissionMode,
-            AnthropicApiKey = definition.AnthropicApiKey,
-            RefusalFallback = definition.RefusalFallback,
-            PromptCacheTtl = definition.PromptCacheTtl,
-            ConfigDir = definition.ConfigDir,
-            Env = definition.Env is null ? null : new Dictionary<string, string>(definition.Env, StringComparer.Ordinal),
-            CodexHome = definition.CodexHome,
-            GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
-            GitHubTokenEnv = definition.GitHubTokenEnv,
-            CopilotTokenEnv = definition.CopilotTokenEnv,
-            EnableModelPolicies = definition.EnableModelPolicies,
-            IncludePreviewModels = definition.IncludePreviewModels,
-            ProtocolTrace = definition.ProtocolTrace,
-            OrganizationId = definition.OrganizationId,
-            ProjectId = definition.ProjectId,
-            Project = definition.Project,
-            Location = definition.Location,
-            ModelsDevProviderId = definition.ModelsDevProviderId,
-            SingleModelId = definition.SingleModelId,
-            ModelsIncludeRegex = definition.ModelsIncludeRegex,
-            SortModels = definition.SortModels,
-            ModelsOrder = definition.ModelsOrder,
-            ModelsHide = definition.ModelsHide is null ? null : [.. definition.ModelsHide],
-            ModelsShow = definition.ModelsShow is null ? null : [.. definition.ModelsShow],
-            ExtraBody = definition.ExtraBody,
-            Profile = definition.Profile,
-            Compaction = definition.Compaction,
-            ModelOverrides = definition.ModelOverrides,
-            AuthSource = definition.AuthSource,
-            AccountId = definition.AccountId,
-            MaxConcurrentRequests = definition.MaxConcurrentRequests,
-            TextVerbosity = definition.TextVerbosity,
-            Api = definition.Api,
-            ServiceTier = definition.ServiceTier,
-            WebSearch = definition.WebSearch,
-            IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
-            ModelDiscovery = definition.ModelDiscovery,
-            ResponseTransport = definition.ResponseTransport,
-            SendResponsesBetaHeader = definition.SendResponsesBetaHeader,
-            SendInstallationId = definition.SendInstallationId,
-            InstallationIdSource = definition.InstallationIdSource,
-            Experimental = definition.Experimental,
-        };
-    }
 
     private static string? NormalizeText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

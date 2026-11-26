@@ -1,0 +1,209 @@
+{
+  "title": "Health review of Parcel",
+  "repo": "parcel-app",
+  "commit": "4f2a91c",
+  "date": "2026-03-14",
+  "scope": "whole repository",
+  "links": { "root": "../../..", "blob": "" },
+  "verdict": "Parcel is in fair shape: the domain code is small and well tested. The cost is at its edges: one CI run in seven fails on a browser test that passes when run again, and every change of a shipment field touches five files in three areas. The five changes to make remove about 2,900 lines and the timing waits; none adds a layer.",
+  "metrics": [
+    { "label": "strong findings", "value": "4", "note": "of 6, found or confirmed by two analysts", "tone": "good" },
+    { "label": "files to edit for one new shipment field", "value": "5", "note": "in 3 areas; 2 of the last 9 fields were lost in one of them", "tone": "bad" },
+    { "label": "CI runs that a flaky test failed", "value": "29 of 200", "note": "last 200 runs of `main`, first attempts", "tone": "bad" },
+    { "label": "words in the contributor docs", "value": "9,400", "note": "5,100 after the rewrite", "tone": "warn" }
+  ],
+  "analysts": [
+    { "id": "lead", "name": "Lead", "model": "provider-a:model-one@high", "role": "driver", "analysis": "analysis/model-one.md" },
+    { "id": "second", "name": "Second", "model": "provider-b:model-two@high", "role": "analyst", "analysis": "analysis/model-two.md", "review": "analysis/model-two.review.md" },
+    { "id": "third", "name": "Third", "model": "provider-c:model-three@high", "role": "analyst", "analysis": "analysis/model-three.md", "review": "analysis/model-three.review.md" }
+  ],
+  "themes": [
+    { "id": "tests", "title": "Tests that cannot be trusted", "thesis": "Refactoring needs tests that fail only for a reason. These come first.", "findings": ["F01", "F02"] },
+    { "id": "shipment", "title": "One decision known in five places", "thesis": "The shape of a shipment is repeated instead of owned.", "findings": ["F03", "F04"] },
+    { "id": "reading", "title": "Text that costs more to read than it gives", "findings": ["F05", "F06"] }
+  ],
+  "findings": [
+    {
+      "id": "F01",
+      "title": "Wait for the map to be ready instead of sleeping",
+      "lens": "tests",
+      "area": "web/tests",
+      "action": "fix",
+      "strength": "strong",
+      "impact": "high",
+      "effort": "S",
+      "risk": "low",
+      "claim": "Eleven browser tests sleep 500 ms before reading the map; on CI the map takes up to 1.8 s, so they fail about one run in seven.",
+      "candidates": ["C01", "C04"],
+      "evidence": [
+        { "text": "34 of the last 200 runs of `main` failed and passed on the second attempt.", "command": "gh run list --branch main --limit 200 --json databaseId,attempt,conclusion,headSha" },
+        { "text": "In 29 of these 34, the first attempt failed in a test of `tracking.spec.ts` that passed in the second; the 5 others were cancelled jobs. The table is in `signals/ci-first-attempts.md`.", "command": "gh run view <id> --attempt 1 --log-failed" },
+        { "text": "`await page.waitForTimeout(500)` before the first assertion, in 11 tests.", "file": "web/tests/tracking.spec.ts", "line": "41" },
+        { "text": "The map already announces that it is ready, and no test listens.", "file": "web/src/map/MapView.tsx", "line": "88" },
+        { "text": "Reproduced: 7 failures in 40 runs with 2 workers, 0 in 40 with the wait for the attribute, tried in a worktree.", "command": "npx playwright test tracking --repeat-each 40 --workers 2" }
+      ],
+      "change": "Replace the eleven sleeps by one helper that waits for the `data-map-ready` attribute, with the default deadline of the suite. Delete the retry of the CI job once 200 runs are green.",
+      "balance": {
+        "removes": ["11 fixed waits (5.5 s of every run)", "the `retries: 2` of the CI job, which hides new flaky tests"],
+        "adds": ["one helper of 6 lines, `waitForMap(page)`"],
+        "delta": { "lines": -16, "seconds": -5 }
+      },
+      "before": { "type": "flow", "items": [{ "label": "open page" }, { "label": "sleep 500 ms", "tone": "bad", "note": "map needs 0.3 to 1.8 s" }, { "label": "assert", "note": "sometimes too early" }] },
+      "after": { "type": "flow", "items": [{ "label": "open page" }, { "label": "wait for `data-map-ready`", "tone": "good", "note": "as long as it takes, 10 s at most" }, { "label": "assert" }] },
+      "firstStep": "Add `waitForMap` to `web/tests/helpers.ts` and use it in the first test of `tracking.spec.ts`; run it 40 times with 2 workers.",
+      "steps": ["Replace the ten other sleeps.", "Remove `retries: 2` from `ci.yml` after 200 green runs."],
+      "verify": ["`npx playwright test tracking --repeat-each 40 --workers 2` passes 40 times.", "No `waitForTimeout` is left under `web/tests`."],
+      "risks": ["A test may rely on the sleep for something else than the map: read each assertion that follows."],
+      "ifNot": "One CI run in seven keeps failing, and the retry keeps hiding the next flaky test.",
+      "votes": { "lead": "found", "second": "found", "third": "confirmed" },
+      "files": ["web/tests/tracking.spec.ts", "web/tests/helpers.ts", ".github/workflows/ci.yml"]
+    },
+    {
+      "id": "F02",
+      "title": "Give each API test its own database file",
+      "lens": "tests",
+      "area": "api/tests",
+      "action": "fix",
+      "strength": "worth-exploring",
+      "impact": "medium",
+      "effort": "M",
+      "risk": "medium",
+      "claim": "The API tests share one SQLite file, so they pass or fail with the order in which they run.",
+      "evidence": [
+        { "text": "One module-level connection for all tests.", "file": "api/tests/conftest.py", "line": "12" },
+        { "text": "3 failures in 10 shuffled runs, 0 in 10 in the default order.", "command": "pytest api -p no:cacheprovider -p randomly" }
+      ],
+      "change": "Create the database per test from the schema file, in memory. Remove the cleanup code of the tests.",
+      "balance": { "removes": ["the shared connection", "14 `DELETE FROM` cleanups at the end of tests"], "adds": ["one fixture that builds an in-memory database"], "delta": { "lines": -60 } },
+      "firstStep": "Run the suite shuffled 10 times and keep the list of the tests that fail.",
+      "verify": ["10 shuffled runs pass."],
+      "risks": ["The suite may get slower: measure it before and after."],
+      "votes": { "lead": "unreviewed", "second": "found", "third": "refined" },
+      "dissent": "The third analyst expects the per-test database to cost about 20 s per run and prefers one transaction per test, rolled back. Not measured yet: the first step decides."
+    },
+    {
+      "id": "F03",
+      "title": "Merge the three shipment mappers into the repository",
+      "lens": "boundaries",
+      "area": "api/shipments",
+      "action": "merge",
+      "strength": "strong",
+      "impact": "high",
+      "effort": "M",
+      "risk": "medium",
+      "claim": "A shipment crosses three mapping layers that each copy every field; adding a field takes five files, and two of the last nine fields were forgotten in one layer.",
+      "evidence": [
+        { "text": "`ShipmentDto`, `ShipmentRecord` and `ShipmentRow` have the same 23 fields.", "file": "api/shipments/mappers.py", "line": "1-310" },
+        { "text": "31 of the 36 commits that changed `mappers.py` in the last year also changed the four other files.", "command": "git log --since=\"12 months ago\" --format=%h --name-only -- api/shipments/mappers.py" },
+        { "text": "Fixes for a field lost in a mapper: `a41c9e0`, `77d0b12`." }
+      ],
+      "change": "Keep one `Shipment` type. The repository reads and writes it; the two intermediate types and their mappers go away.",
+      "balance": { "removes": ["2 types, 3 mapper modules, their 41 tests", "the place where a field gets lost"], "adds": [], "delta": { "lines": -1900, "files": -6, "concepts": -2 } },
+      "before": { "type": "layers", "items": [{ "label": "HTTP handler" }, { "label": "DtoMapper", "tone": "warn", "note": "copies 23 fields" }, { "label": "ShipmentService" }, { "label": "RecordMapper", "tone": "warn", "note": "copies 23 fields" }, { "label": "RowMapper", "tone": "warn", "note": "copies 23 fields" }, { "label": "ShipmentRepository" }] },
+      "after": { "type": "layers", "items": [{ "label": "HTTP handler" }, { "label": "ShipmentService" }, { "label": "ShipmentRepository", "tone": "deep", "note": "owns the shape of a shipment" }] },
+      "firstStep": "Add a test that sends a shipment with every field through the HTTP handler and reads it back.",
+      "steps": ["Make the repository return `Shipment`; delete `RowMapper`.", "Delete `RecordMapper`, then `DtoMapper`, one commit each.", "Delete the tests of the mappers."],
+      "verify": ["The round-trip test passes after each commit.", "`rg \"ShipmentRecord|ShipmentRow\"` finds nothing."],
+      "risks": ["The public JSON uses `snake_case` names produced by `DtoMapper`: keep them with the serializer settings."],
+      "ifNot": "Every new field keeps costing five edits and risks the bug seen twice this year.",
+      "outOfScope": ["Do not split or rename `ShipmentService`.", "Do not change the names of the public JSON fields."],
+      "votes": { "lead": "found", "second": "confirmed", "third": "found" },
+      "dependsOn": ["F02"],
+      "files": ["api/shipments/mappers.py", "api/shipments/repository.py", "api/shipments/service.py"]
+    },
+    {
+      "id": "F04",
+      "title": "Delete the unused carrier plug-in interface",
+      "lens": "dead code",
+      "area": "api/carriers",
+      "action": "delete",
+      "strength": "strong",
+      "impact": "medium",
+      "effort": "S",
+      "risk": "low",
+      "claim": "`CarrierPlugin` has one implementation since it was added two years ago; callers pay a registry, a factory and a configuration key to reach it.",
+      "evidence": [
+        { "text": "One class implements it; the registry holds one entry.", "file": "api/carriers/registry.py", "line": "9" },
+        { "text": "No commit added a second carrier since `2024-02`.", "command": "git log --oneline -- api/carriers" }
+      ],
+      "change": "Call `PostalCarrier` directly. Delete the interface, the registry, the factory and the `carrier.plugin` setting.",
+      "balance": { "removes": ["an interface with one implementation", "a registry and a factory", "one setting"], "adds": [], "delta": { "lines": -420, "files": -3, "concepts": -3 } },
+      "before": { "type": "mass", "items": [{ "label": "carriers", "interface": 9, "implementation": 11 }] },
+      "after": { "type": "mass", "items": [{ "label": "PostalCarrier", "interface": 2, "implementation": 11 }] },
+      "firstStep": "Replace the two calls of `registry.get(\"postal\")` by `PostalCarrier()`.",
+      "verify": ["The tests of `api/carriers` pass without the registry."],
+      "risks": ["A deployment may set `carrier.plugin`: reading it should fail with a clear message for one release."],
+      "ifNot": "Small, but every reader of the carrier code pays for it.",
+      "votes": { "lead": "confirmed", "second": "found", "third": "confirmed" }
+    },
+    {
+      "id": "F05",
+      "title": "Rewrite the contributor guide around what a contributor does first",
+      "lens": "docs",
+      "area": "docs",
+      "action": "rewrite",
+      "strength": "strong",
+      "impact": "medium",
+      "effort": "S",
+      "risk": "low",
+      "claim": "The guide answers \"how do I run the tests\" on its fourth screen, after the history of the build system; a reader without context needed 2,100 words to find it.",
+      "evidence": [
+        { "text": "3,900 words; the commands to build and test start at word 2,100.", "file": "docs/contributing.md", "line": "141" },
+        { "text": "Two of its commands no longer exist: `make seed`, `make e2e-fast`.", "file": "docs/contributing.md", "line": "163" },
+        { "text": "A reader with only the guide answered 2 of 5 questions correctly." }
+      ],
+      "change": "Lead with build, test and submit in one screen. Move the build internals to their own page, linked. Delete the history and the two dead commands.",
+      "balance": { "removes": ["2,300 words: history, repeated warnings, dead commands"], "adds": ["one linked page for the build internals, moved not written"], "delta": { "words": -2300 } },
+      "before": { "type": "text", "text": "Before you begin it is important to understand that, historically, the project used to rely on a set of shell scripts which have since been replaced, although some of them remain for compatibility reasons, and you should therefore be careful, when running the tests, to make sure that you are using the new entry point, which is described further below." },
+      "after": { "type": "text", "text": "Run the tests with `make test`." },
+      "firstStep": "Write the five questions the guide must answer; keep the reader test as the check.",
+      "verify": ["A reader with only the guide answers the 5 questions.", "Every command of the guide runs."],
+      "risks": ["The history explains two odd choices of the build: keep each as one sentence where the choice is."],
+      "votes": { "lead": "found", "second": "confirmed", "third": "confirmed" }
+    },
+    {
+      "id": "F06",
+      "title": "Check the import direction of `web/src/domain` in CI",
+      "lens": "boundaries",
+      "area": "web/src",
+      "action": "guard",
+      "strength": "speculative",
+      "impact": "low",
+      "effort": "S",
+      "risk": "low",
+      "claim": "`domain` must not import from `ui`; it did once, and the import was removed a week later.",
+      "evidence": [{ "text": "One violation in two years.", "command": "git log -S\"from '../ui\" -- web/src/domain" }],
+      "change": "Add one lint rule that forbids the import.",
+      "balance": { "removes": ["a review comment that has to be remembered"], "adds": ["one lint rule to maintain"] },
+      "ifNot": "Nothing, as long as reviews keep catching it.",
+      "votes": { "lead": "disputed", "second": "found", "third": "disputed" },
+      "dissent": "Two analysts find one violation in two years too little to pay for a rule. Kept as speculative: reopen if it happens again."
+    }
+  ],
+  "roadmap": [
+    { "title": "Now", "note": "Make the tests trustworthy, and take the deletion that needs nothing.", "items": [{ "finding": "F01", "note": "Half a day; removes the retry that hides the rest." }, { "finding": "F04" }, { "finding": "F05" }] },
+    { "title": "Next", "items": [{ "finding": "F02", "note": "Measure first: per-test database or transaction." }, { "finding": "F03", "note": "After F02: the merge needs tests that do not depend on order." }] }
+  ],
+  "healthy": [
+    { "title": "`api/pricing`", "note": "One module, a small interface, tests through that interface. 4 commits in a year, no fix." },
+    { "title": "The release script", "note": "Long, but one reason to change and it works: leave it." }
+  ],
+  "dropped": [
+    { "title": "Split `ShipmentService` (1,400 lines) into four services", "reason": "It has one reason to change and few fixes; four services would add three interfaces and move no complexity.", "raisedBy": "second" },
+    { "title": "Raise test coverage of `web/src/ui` to 80%", "reason": "A number, not a problem: no defect or change points at untested code there.", "raisedBy": "third" }
+  ],
+  "signals": {
+    "note": "Last 12 months, 1,240 commits.",
+    "hotspots": [
+      { "path": "api/shipments/mappers.py", "commits": 36, "loc": 310, "fixes": 9, "tone": "bad" },
+      { "path": "web/src/map/MapView.tsx", "commits": 31, "loc": 640, "fixes": 6 },
+      { "path": "api/shipments/service.py", "commits": 28, "loc": 1400, "fixes": 3 },
+      { "path": "web/tests/tracking.spec.ts", "commits": 22, "loc": 480, "fixes": 11, "tone": "bad" }
+    ],
+    "coupling": [{ "a": "api/shipments/mappers.py", "b": "web/src/api/types.ts", "shared": 19, "degree": 0.61 }]
+  },
+  "method": {
+    "text": "Three models analyzed the repository independently from the same signals, then each reviewed the findings of the two others without knowing who wrote them. The driver checked every finding in the code before it entered this report.",
+    "notExamined": ["`infra/` (Terraform)", "performance", "security"]
+  }
+}

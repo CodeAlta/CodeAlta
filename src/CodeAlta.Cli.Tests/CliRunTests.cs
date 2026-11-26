@@ -356,6 +356,10 @@ public sealed class CliRunTests
         Assert.AreEqual("Edited b.txt.", result.GetProperty("finalMessage").GetString());
         Assert.AreEqual(170, result.GetProperty("usage").GetProperty("inputTokens").GetInt32(), result.GetRawText());
         Assert.AreEqual("beta and 5", File.ReadAllText(Path.Combine(root.ProjectRoot, "b.txt")));
+        // The source of the run is kept in the scratchpad of the run, deleted with it: an ephemeral run that kept it in the
+        // scratchpad of the profile left it there (#492).
+        Assert.AreEqual(0, CliTestRoot.Files(root.Profile).Length, string.Join(", ", CliTestRoot.Files(root.Profile)));
+        Assert.AreEqual(0, CliTestRoot.Files(root.TempRoot).Length, string.Join(", ", CliTestRoot.Files(root.TempRoot)));
     }
 
     [TestMethod]

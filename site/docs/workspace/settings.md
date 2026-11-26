@@ -163,7 +163,7 @@ Code Mode, on by default, lets agents write scripts that call their tools; each 
 
 A request appears on top of the prompt of its session, with the command and its folder, or the folder a change writes under. When an agent asks several at once, such as for calls it makes together, they all wait: the oldest shows first, and each answer brings the next.
 
-- `Enter` allows once; `2` or `Esc` denies. Or write what the agent should do instead and press `Enter`: the request is denied and your text is sent. A denial does not stop the agent: use Stop.
+- `Enter` allows once; `2` or `Esc` denies. Or write what the agent should do instead and press `Enter`, or **Deny**: the agent reads your text with the denial. A denial does not stop the agent: use Stop.
 - A command longer than 4,096 characters is shown cut, with a red warning: deny it unless you know what it does.
 - A session that waits is marked in the Explorer and on its tab, and a message with **Show** goes to it. A sub-session's request also shows on the sessions above it, where **Allow once** and **Deny** answer it.
 
@@ -181,6 +181,8 @@ A session can do without some built-in tools, such as `shell_command` when you g
 | The editor of an agent prompt, **Tools turned off** | the sessions of that agent | `disabled_tools: [...]` in the front matter of the prompt |
 
 Click **Turn off a tool** to choose a built-in tool, or type the name of another. A change applies from the next turn.
+
+For tools that Claude Code runs itself, including claude.ai connectors, use the tool's Claude Code name (such as `mcp__claude_ai_Slack__slack_send_message`). Turning off a tool takes precedence over an automation's allowed tools.
 
 Without `shell_command`, a session runs no program of its choice:
 
@@ -256,7 +258,7 @@ Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt` (**Settings > Agent pr
 
 Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta finds Agent Skills `SKILL.md` packages in your folders and the project's. Inspect them, create one with **New skill**, and enable or disable each for every project (`~/.alta/config.toml`) or the selected one (`.alta/config.toml`). A disabled skill is not offered to models. To use a skill yourself, see [Use a skill](readme.md#use-a-skill).
 
-CodeAlta comes with built-in skills: `codealta-plugin-runtime` to write [plugins](../plugins/developers.md), `codealta-fleet` to let agents use your [machines](../fleet/sessions.md#let-agents-use-the-fleet), `document-conversion` to read PDF and Office documents, and `ultra-profiler` to profile the CPU of a .NET or native application with [Ultra](https://github.com/xoofx/ultra), run with `dotnet dnx` of the .NET SDK 10 or later.
+CodeAlta comes with built-in skills: `codealta-plugin-runtime` to write [plugins](../plugins/developers.md), `codealta-fleet` to let agents use your [machines](../fleet/sessions.md#let-agents-use-the-fleet), `document-conversion` to read PDF and Office documents, `improve-codebase-health` to [review the health of a codebase](#health-review-of-a-codebase), and `ultra-profiler` to profile the CPU of a .NET or native application with [Ultra](https://github.com/xoofx/ultra), run with `dotnet dnx` of the .NET SDK 10 or later.
 
 A folder of skills can hold symbolic links, for example to a library of skills shared with other tools: CodeAlta finds the skills where the links lead, offers them to agents and sees a change made there; a broken link is skipped. Skills management lists them, shows their details with a **Linked** tag and switches them on or off, but does not edit or remove a skill through a link: change it where the link leads.
 
@@ -280,6 +282,15 @@ The folder holds skill folders, each with its `SKILL.md`, as `~/.agents/skills` 
 Of two skills with the same name, the one closest to the work wins: the project's own folders (`.alta/skills`, `.agents/skills`, `.github/skills`), then the folders added for the project, those added for the space, your folders (`~/.alta/skills`, `~/.agents/skills`, `~/.copilot/skills`), those added for every space, then the skills of plugins and of CodeAlta. In one list, the first folder wins.
 
 A [sandboxed session](../sessions/sandbox.md) reads your skill folders and the ones you added, and never writes them.
+
+### Health review of a codebase
+
+Ask an agent of a project to review the health of its codebase, of one folder, or only of its tests or its docs: `/improve-codebase-health`, or in your own words.
+
+- The agent asks which other models review with its own, each with its provider and reasoning effort. Choose none to keep the review to the model of the session.
+- Each model analyzes alone, then tries to refute the findings of the others. The agent checks every finding in the code before it keeps it.
+- The report is in `.alta/report/<date>-<name>/` of the project: `index.html` to read, with the evidence, what each change removes and adds, the order of work and a first step per finding; `report.md` and `report.json` for agents; the analysis of each model beside them.
+- Nothing else of the project is changed. Tell the agent what to do, defer or reject: it creates the [tasks and plans](../work-items.md) of what you chose, and keeps your decisions in `.alta/report/ledger.md`, so that the next review does not propose again what you rejected.
 
 In `SKILL.md`, `disable-model-invocation: true` makes a skill manual: it is used only with `/` and its name. `argument-hint`, `user-invocable`, `context`, `triggers` and `version` are accepted and ignored; any other unknown field makes the skill **Invalid**, except in a [GitHub Copilot](../copilot-layout.md#skills) folder.
 

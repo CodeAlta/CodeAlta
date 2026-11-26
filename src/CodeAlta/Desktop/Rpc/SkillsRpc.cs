@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Catalog.Worktrees;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
 
@@ -132,8 +133,7 @@ internal sealed partial class SkillsService
         if (scope.Status != "ok") return Failed(scope.Status);
         try
         {
-            var project = string.IsNullOrWhiteSpace(request.ProjectId) ? null : await _projects.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
-            var skills = await PromptSkills(project, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var skills = await PromptSkills(scope.Project, request.SpaceId, cancellationToken).ConfigureAwait(false);
             return new("ok", [.. skills.Take(MaximumSkills).Select(static skill => new SkillsOffered(
                 Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength), skill.SourceKind.ToString()))]);
         }
@@ -158,19 +158,23 @@ internal sealed partial class SkillsService
         {
             // A configuration file that cannot be read hides nothing: the skills are listed as if it disabled none,
             // and the file is named above the list.
-            var context = await FolderContextAsync(request.ProjectId, project.Root, request.SpaceId, cancellationToken).ConfigureAwait(false);
-            var listing = await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, context, cancellationToken).ConfigureAwait(false);
+            var context = await FolderContextAsync(project.Project, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var listing = await _management.LoadProjectListingAsync(SkillListingScope.Combined, project.Project, context, cancellationToken).ConfigureAwait(false);
             var descriptors = listing.Skills;
             var skills = descriptors.Take(MaximumSkills).Select(skill => new SkillsEntry(
                 IdOf(skill), Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength),
-                skill.SourceKind.ToString(), skill.Scope.ToString(), !skill.IsDisabledGlobally, !skill.IsDisabledForProject,
+                skill.SourceKind.ToString(), IsInheritedSkill(skill, project.Project) ? "Inherited" : skill.Scope.ToString(), !skill.IsDisabledGlobally, !skill.IsDisabledForProject,
                 skill.IsEnabled, skill.IsValid, skill.IsShadowed, skill.IsTrusted,
                 // The row opens the folder of its skill in the code editor: the id the editor names it by, and its path.
-                EditorFolderOf(skill, descriptors, request.ProjectId, project.Root, context.SpaceId), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
+                EditorFolderOf(skill, descriptors, project, context.SpaceId), Bound(skill.SkillRootPath, MaximumPathLength))
+            {
+                DisabledByRepository = listing.InheritedDisabledSkillNames.Contains(skill.NormalizedName),
+            }).ToArray();
             return new("ok", request.ProjectId, skills, descriptors.Count - skills.Length)
             {
-                Problems = [.. listing.Problems.Select(static problem => new PluginsProblem("config", Bound(problem.Path, MaximumPathLength), Clean(problem.Message), problem.IsProject ? "Project" : "Global"))],
-                Folders = FoldersOf(context, project.Root is not null, descriptors),
+                Problems = [.. listing.Problems.Select(static problem => new PluginsProblem("config", Bound(problem.Path, MaximumPathLength), Clean(problem.Message),
+                    problem.IsInherited ? "Inherited" : problem.IsProject ? "Project" : "Global"))],
+                Folders = FoldersOf(context, project.Project, descriptors),
             };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -196,17 +200,19 @@ internal sealed partial class SkillsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var context = await FolderContextAsync(request.ProjectId, project.Root, request.SpaceId, cancellationToken).ConfigureAwait(false);
-            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, context, cancellationToken).ConfigureAwait(false)).Skills;
+            var context = await FolderContextAsync(project.Project, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var descriptors = (await _management.LoadProjectListingAsync(SkillListingScope.Combined, project.Project, context, cancellationToken).ConfigureAwait(false)).Skills;
             var (status, skill) = FindSkill(descriptors, request, source);
             if (skill is null) return Failed(status);
             // A skill reached through a link (a library shared with other tools) is shown, read where the link leads; the
             // document lookup of the editor refuses it, so it is not given to the code editor: it is edited in its own folder.
             var linked = false;
-            string path;
+            var path = skill.SkillFilePath;
             try
             {
-                path = (await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, context, cancellationToken).ConfigureAwait(false)).FullPath;
+                // An inherited skill is only previewed. It is deliberately not a document the child's editor can open.
+                if (!IsInheritedSkill(skill, project.Project))
+                    path = (await _management.GetFileDocumentAsync(path, null, project.Root, context, cancellationToken).ConfigureAwait(false)).FullPath;
             }
             catch (IOException)
             {
@@ -231,7 +237,7 @@ internal sealed partial class SkillsService
                 content, truncated || content is null && file.Exists,
                 [.. related.Take(MaximumRelatedFiles).Select(static item => new SkillsRelatedFile(Bound(item.Category, 64), Bound(item.RelativePath, 512)))],
                 [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
-                Math.Max(0, related.Count - MaximumRelatedFiles), linked ? null : EditorFolderOf(skill, descriptors, request.ProjectId, project.Root, context.SpaceId)) { Linked = linked };
+                Math.Max(0, related.Count - MaximumRelatedFiles), linked ? null : EditorFolderOf(skill, descriptors, project, context.SpaceId)) { Linked = linked };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -276,10 +282,11 @@ internal sealed partial class SkillsService
         string[] names;
         try
         {
-            var context = await FolderContextAsync(request.ProjectId, project.Root, request.SpaceId, cancellationToken).ConfigureAwait(false);
-            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, context, cancellationToken).ConfigureAwait(false)).Skills;
+            var context = await FolderContextAsync(project.Project, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var listing = await _management.LoadProjectListingAsync(SkillListingScope.Combined, project.Project, context, cancellationToken).ConfigureAwait(false);
             var query = request.Query?.Trim() ?? string.Empty;
-            names = [.. descriptors.Where(skill => MatchesFilter(skill, query) && Toggleable(skill.Name)).Select(static skill => skill.Name).Distinct(StringComparer.Ordinal)];
+            names = [.. listing.Skills.Where(skill => MatchesFilter(skill, query) && Toggleable(skill.Name) && !IsInheritedSkill(skill, project.Project)
+                && (!projectScope || !listing.InheritedDisabledSkillNames.Contains(skill.NormalizedName))).Select(static skill => skill.Name).Distinct(StringComparer.Ordinal)];
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -355,9 +362,10 @@ internal sealed partial class SkillsService
         try
         {
             // Removing a skill does not depend on what a configuration file says of it.
-            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
+            var descriptors = (await _management.LoadProjectListingAsync(SkillListingScope.Combined, project.Project, SkillFolderContext.None, cancellationToken).ConfigureAwait(false)).Skills;
             var (status, skill) = FindSkill(descriptors, request, source);
             if (skill is null) return new(status, 0, null);
+            if (IsInheritedSkill(skill, project.Project)) return new("read_only", 0, null);
             folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(skill.SkillRootPath));
             // The folder of one skill, directly in the folder of its source: never that folder itself, nor one above it.
             var root = _management.GetRoots(project.Root).FirstOrDefault(candidate => candidate.Source == source)?.RootPath;
@@ -508,16 +516,15 @@ internal sealed partial class SkillsService
     }
 
     // The folders added for the space the page shows and for its project. A space that is not known adds none.
-    private async Task<SkillFolderContext> FolderContextAsync(string? projectId, string? projectRoot, string? spaceId, CancellationToken cancellationToken)
+    private async Task<SkillFolderContext> FolderContextAsync(ProjectDescriptor? project, string? spaceId, CancellationToken cancellationToken)
     {
         var spaceKey = string.IsNullOrWhiteSpace(spaceId) ? SpaceDescriptor.DefaultId : spaceId.Trim();
-        var project = projectId is null || projectRoot is null || _projects is null ? null : await _projects.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
         var space = Spaces is null ? null
             : (await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => string.Equals(candidate.Id, spaceKey, StringComparison.Ordinal));
-        return new SkillFolderContext(spaceKey, space?.Settings.Skills?.Folders ?? [], project?.SkillFolders ?? []);
+        return new SkillFolderContext(spaceKey, space?.Settings.Skills?.Folders ?? [], project?.EffectiveSkillFolders ?? []);
     }
 
-    // The contexts of every space, for a folder of the code editor, whose id does not name the space of its skill.
+    // The code editor only opens the project's own skill folders, not its inherited ones.
     private async Task<IReadOnlyList<SkillFolderContext>> AllFolderContextsAsync(string? projectId, string? projectRoot, CancellationToken cancellationToken)
     {
         var project = projectId is null || projectRoot is null || _projects is null ? null : await _projects.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
@@ -529,7 +536,7 @@ internal sealed partial class SkillsService
 
     // The folders added for every space, for the space and for the project, with what each is on the disk and how many
     // skills it brings: most specific first, as they are read.
-    private IReadOnlyList<SkillsFolder> FoldersOf(SkillFolderContext context, bool hasProject, IReadOnlyList<SkillDescriptor> skills)
+    private IReadOnlyList<SkillsFolder> FoldersOf(SkillFolderContext context, ProjectDescriptor? project, IReadOnlyList<SkillDescriptor> skills)
     {
         IReadOnlyList<string> global;
         try { global = new CodeAltaConfigStore(_projects!.Options).LoadGlobalSkillFolders(); }
@@ -548,7 +555,7 @@ internal sealed partial class SkillsService
             }
         }
 
-        if (hasProject) Add("Project", context.ProjectFolders, SkillSourceKind.ProjectFolder);
+        if (project is not null) Add(InheritsSkillFolders(project) ? "Inherited" : "Project", context.ProjectFolders, SkillSourceKind.ProjectFolder);
         Add("Space", context.SpaceFolders, SkillSourceKind.SpaceFolder);
         Add("Global", global, SkillSourceKind.UserFolder);
         return folders;
@@ -568,8 +575,9 @@ internal sealed partial class SkillsService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var result = _management.SetSkillsEnabled(projectScope ? SkillEnablementScope.Project : SkillEnablementScope.Global,
-                projectScope ? project.Root : null, names, enabled);
+            var result = projectScope
+                ? _management.SetProjectSkillsEnabled(project.Project!, names, enabled)
+                : _management.SetSkillsEnabled(SkillEnablementScope.Global, null, names, enabled);
             return new("ok", result.TotalChanged, null);
         }
         catch (ArgumentException exception)
@@ -642,10 +650,17 @@ internal sealed partial class SkillsService
         return found is null ? ("not_found", null) : ("ok", found);
     }
 
-    private static string? EditorFolderOf(SkillDescriptor skill, IReadOnlyList<SkillDescriptor> descriptors, string? projectId, string? projectRoot, string? spaceId)
-        // Editor folder handles are still name-based: do not offer a handle that could open another row's files.
-        => descriptors.Count(candidate => candidate.SourceKind == skill.SourceKind && string.Equals(candidate.Name, skill.Name, StringComparison.Ordinal)) == 1
-            ? SkillFolders.IdOf(skill, projectId, projectRoot, spaceId) : null;
+    private static bool InheritsSkillFolders(ProjectDescriptor project) => project.SkillFolders.Count == 0 && project.InheritedSkillFolders.Count > 0;
+
+    private static bool IsInheritedSkill(SkillDescriptor skill, ProjectDescriptor? project)
+        => project is { IsSubProject: true } && skill.Scope == SkillScopeKind.Project
+            && (skill.SourceKind == SkillSourceKind.ProjectFolder ? InheritsSkillFolders(project) : !GitWorktreeService.IsWithin(skill.SkillFilePath, project.ProjectPath));
+
+    private static string? EditorFolderOf(SkillDescriptor skill, IReadOnlyList<SkillDescriptor> descriptors, SettingsProjectScope.Resolution project, string? spaceId)
+        // The editor resolves name-based handles among its own roots only; it must not open another row's files.
+        => !IsInheritedSkill(skill, project.Project) && descriptors.Count(candidate => candidate.SourceKind == skill.SourceKind
+            && string.Equals(candidate.Name, skill.Name, StringComparison.Ordinal) && !IsInheritedSkill(candidate, project.Project)) == 1
+            ? SkillFolders.IdOf(skill, project.Project?.Id, project.Root, spaceId) : null;
 
     // What a parser or the system said, on one line.
     private static string Clean(string message)
@@ -710,7 +725,7 @@ internal sealed record SkillsListResponse(string Status, string? ProjectId, IRea
 }
 
 /// <summary>A folder of skills the user added.</summary>
-/// <param name="Scope"><c>Global</c> for every space, <c>Space</c> for the space of the listing, <c>Project</c> for its project.</param>
+/// <param name="Scope"><c>Global</c> for every space, <c>Space</c> for the space of the listing, <c>Project</c> for its project or <c>Inherited</c> for an ancestor.</param>
 /// <param name="Path">The folder as its list writes it: what <c>removeFolder</c> names.</param>
 /// <param name="FullPath">The full path it is read at; null when it is not a full path.</param>
 /// <param name="State"><c>ready</c>, <c>missing</c> (nothing there, or a file), <c>unreadable</c>, or <c>invalid</c> (a path that is not read).</param>
@@ -725,13 +740,17 @@ internal sealed record SkillsFolderRequest(string? ExpectedEpoch, string? Projec
 
 /// <summary>
 /// One discovered skill. The source is <c>ProjectAlta</c>, <c>ProjectCommon</c>, <c>UserAlta</c>, <c>UserCommon</c>,
-/// <c>Plugin</c> or <c>Builtin</c>; the scope is <c>Project</c>, <c>User</c>, <c>Plugin</c> or <c>Builtin</c>.
+/// <c>Plugin</c> or <c>Builtin</c>; the scope is <c>Project</c>, <c>Inherited</c>, <c>User</c>, <c>Plugin</c> or <c>Builtin</c>.
 /// </summary>
 /// <param name="Folder">The id that names the folder of the skill to the code editor; null for an ambiguous name or one that cannot be part of an id.</param>
 /// <param name="Path">The path of the folder of the skill.</param>
 /// <param name="Id">An opaque, metadata-independent identity of this source and skill file, used for details and removal.</param>
 internal sealed record SkillsEntry(string Id, string Name, string Title, string Description, string Source, string Scope, bool EnabledGlobal,
-    bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted, string? Folder = null, string? Path = null);
+    bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted, string? Folder = null, string? Path = null)
+{
+    /// <summary>Gets whether an ancestor's configuration has disabled the skill for the selected project.</summary>
+    public bool DisabledByRepository { get; init; }
+}
 /// <summary>Names one listed skill by its id and source. Without an id, a legacy name must match exactly one skill.</summary>
 /// <param name="Id">The id returned by the listing; when supplied, the name is ignored and is never a fallback.</param>
 /// <param name="SpaceId">The space the page shows, whose added folders are read too; null for the default space.</param>

@@ -4,7 +4,7 @@ import type { SessionPermissionCommand, sessionPermissions } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { PaneObservingContext } from "./hostReadsContext";
 import { formatFileSize } from "./editor/editorDocuments";
-import { offersAllowAlways, signInOf, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
+import { feedbackGoesWithDenial, offersAllowAlways, signInOf, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
 
 // How often the pending requests of a running session are read while none is shown.
@@ -41,10 +41,13 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   /** Whether the session has a run that may ask for permission. */
   running: boolean;
   /**
-   * Tells the agent what to do instead of a denied request: steered into the run when the denial was taken, queued
-   * for the next turn otherwise. Without it, the panel offers no such text.
+   * Takes what the user tells the agent to do instead of a denied request, when it did not go with the denial itself:
+   * steered into the run for a request whose denial carries no text, queued for the next turn when the request no longer
+   * waited, and given back as a draft when nothing says whether the denial was taken. Without it, the panel offers no
+   * such text. `shown` is false when the card no longer shows the session the text was written for (another session is
+   * shown, or its tab was closed) by the time the denial is answered: the text is still that session's.
    */
-  instruct?: (kind: "Steer" | "Queue", text: string) => void;
+  instruct?: (kind: "Steer" | "Queue" | "Draft", text: string, shown: boolean) => void;
   /** Whether a request that appears may take the focus from the composer: it has no draft being written. */
   takeFocus?: () => boolean;
   /** Called when the user answered a request: the composer takes the focus back. */
@@ -78,7 +81,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   useLayoutEffect(() => {
     const controller = new AbortController();
     currentState.current = undefined;
-    setState(undefined); setShown(null); setArmed(null); attempted.current = notAttempted.current;
+    // A text written for the request of one session is not the answer to the request of another.
+    setState(undefined); setShown(null); setArmed(null); setInstead(""); attempted.current = notAttempted.current;
     scope.current = reviewer.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, value => {
       currentState.current = value; setState(value);
       if (value.kind !== "loading") setShown(value.kind === "ready" ? value : null);
@@ -127,7 +131,9 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     return () => { stopped = true; clearInterval(timer); };
   }, [entry, running, state, shown, observing]);
   useEffect(() => {
-    // A request that comes back after it was gone is a new one on screen: it arms again.
+    // A request that comes back after it was gone is a new one on screen: it arms again, and a text written for the
+    // one before it is not said to it.
+    setInstead("");
     if (attempt === null) { setArmed(null); return; }
     const timer = setTimeout(() => setArmed(attempt), armDelay);
     return () => clearTimeout(timer);
@@ -153,14 +159,28 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   function decide(target: HTMLElement, value: SessionPermissionCommand, decision: CommandDecision, text = "") {
     const current = scope.current;
     if (!live(target) || !current) return;
-    void current.decide(value, decision).then(() => {
-      // Another selection has its own composer: the text never goes to it.
-      if (!text || !instruct || scope.current !== current) return;
+    // What to do instead goes with the denial itself where the request takes it: the agent reads both in one result,
+    // and never answers the denial before it has read the text.
+    const withDenial = decision === "deny" && feedbackGoesWithDenial(value, text);
+    // The session of this render: the text is its own, also when the card shows another session, or none, by the time
+    // the denial is answered. Another selection has its own composer: the text never goes to it.
+    const tell = instruct;
+    void current.decide(value, decision, withDenial ? text : null).then(() => {
+      if (!text || !tell) return;
+      const shown = scope.current === current;
       const original = reviewer.readOriginal();
-      // A denial the agent took is followed by what to do instead; otherwise the text waits for the next turn.
-      instruct(original?.state === "resolved" && original.origin.handle.attemptId === value.handle.attemptId ? "Steer" : "Queue", text);
+      const state = original?.origin.handle.attemptId === value.handle.attemptId ? original.state : "error";
+      if (state === "resolved") {
+        // A denial that carries no text is followed by what to do instead, steered into the run.
+        if (!withDenial) tell("Steer", text, shown);
+      }
+      // The request no longer waited: the text waits for the next turn.
+      else if (state === "rejected") tell("Queue", text, shown);
+      // Nothing says whether the text went with a denial: it is given back, never sent a second time.
+      else tell(withDenial ? "Draft" : "Queue", text, shown);
     });
-    if (text) setInstead("");
+    // Whatever the answer, a text left in the field went with it or is dropped: it never waits for the next request.
+    setInstead("");
     // The request is answered: what the user writes next goes to the prompt.
     onAnswered?.();
   }
@@ -188,7 +208,11 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       event.preventDefault();
       // Escape first takes back the text being written, as in any field.
       if (field && instead) setInstead("");
-      else choices.current?.querySelector<HTMLElement>("[data-permission-decision=deny]")?.click();
+      // Escape denies, and says nothing more: a text left in the field is not sent by it.
+      else {
+        const deny = choices.current?.querySelector<HTMLElement>("[data-permission-decision=deny]");
+        if (deny) decide(deny, entry!, "deny");
+      }
       return;
     }
     const step = event.key === "ArrowDown" || (!field && event.key === "ArrowRight") ? 1
@@ -269,7 +293,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
         // A key held down answers nothing, and neither does a space: it is typed in a text, not to answer.
         onKeyDown={event => { if ((event.repeat && event.key === "Enter") || event.key === " ") event.preventDefault(); }}
         onKeyUp={event => { if (event.key === " ") event.preventDefault(); }}
-        onClick={event => decide(event.currentTarget, entry, decision)}>
+        // Deny with a text written in the field below says that text too, as Enter in the field does.
+        onClick={event => decide(event.currentTarget, entry, decision, decision === "deny" && instruct ? instead.trim() : "")}>
         <span className="permission-choice-index" aria-hidden="true">{index + 1}</span>{t(label)}</button>)}
       {instruct && <form className="permission-instead" onSubmit={event => {
         event.preventDefault();

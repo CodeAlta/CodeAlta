@@ -9,6 +9,9 @@ namespace CodeAlta.Catalog;
 /// </summary>
 public sealed class CatalogYamlSerializer
 {
+    // The value of `for` in the file of a label given to sessions.
+    private const string LabelForSessions = "sessions";
+
     private sealed class ProjectFrontMatter
     {
         [JsonPropertyName("id")]
@@ -105,6 +108,11 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("space")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Space { get; set; }
+
+        // What the label is given to: `sessions`, or nothing for projects.
+        [JsonPropertyName("for")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? For { get; set; }
     }
 
     private sealed class SpaceFrontMatter
@@ -641,6 +649,7 @@ public sealed class CatalogYamlSerializer
             Parent = Text(frontMatter.Parent),
             Favorite = frontMatter.Favorite ?? false,
             Space = Text(frontMatter.Space),
+            Target = string.Equals(Text(frontMatter.For), LabelForSessions, StringComparison.OrdinalIgnoreCase) ? LabelTarget.Sessions : LabelTarget.Projects,
             Description = description.Length == 0 ? null : description,
         };
     }
@@ -662,8 +671,9 @@ public sealed class CatalogYamlSerializer
             Order = descriptor.Order,
             Parent = descriptor.Parent,
             Favorite = descriptor.Favorite ? true : null,
-            // A sub-label is in the space of its top-level label: its own file names none.
+            // A sub-label is in the space of its top-level label, and for the same things: its own file names neither.
             Space = descriptor.Parent is null ? descriptor.Space : null,
+            For = descriptor.Parent is null && descriptor.IsForSessions ? LabelForSessions : null,
         };
         var yaml = YamlSerializer.Serialize(frontMatter).Trim();
         var description = descriptor.Description?.Trim();

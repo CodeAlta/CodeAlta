@@ -917,7 +917,7 @@ public sealed class StatisticsEngineTests
 
     private static async Task WaitForAsync(Func<bool> condition)
     {
-        var limit = DateTime.UtcNow.AddSeconds(20);
+        var limit = DateTime.UtcNow + TestTime.Seconds(20);
         while (!condition())
         {
             Assert.IsTrue(DateTime.UtcNow < limit, "The engine did not get there in time.");

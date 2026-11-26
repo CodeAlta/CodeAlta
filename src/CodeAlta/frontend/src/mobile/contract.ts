@@ -359,12 +359,13 @@ export type ToolOutputPage = Readonly<{ output?: string | null; outputOffset?: n
 /** A page of a file that a message links, with its full path and, on the page around them, where in the file the lines the link names are (`GET /api/sessions/<id>/file`). */
 export type LinkedFilePage = ToolOutputPage & Readonly<{ path?: string | null; markStart?: number; markEnd?: number }>;
 
-/** A question of an ask: answered with one of its choices, with text, or both. */
+/** A question of an ask: answered with one or more of its choices, with text, or both. */
 export type AskQuestion = Readonly<{
   title: string;
   question: string;
   description: string | null;
   choices: readonly Readonly<{ title: string; description: string | null }>[];
+  allowMultiSelect?: boolean;
   freeform: Readonly<{ title: string | null; placeholder: string | null }> | null;
 }>;
 

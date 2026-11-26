@@ -40,12 +40,14 @@ public sealed record LabelEdit(string? Name = null, string? Description = null, 
 
 /// <summary>A label with the projects that have it.</summary>
 /// <param name="Label">The label.</param>
-/// <param name="ProjectIds">The identifiers of the projects whose file names the label, in the order of the project catalog.</param>
+/// <param name="ProjectIds">The identifiers of the projects whose file names the label, in the order of the project catalog; none for a label of sessions.</param>
 public sealed record LabelMembers(LabelDescriptor Label, IReadOnlyList<string> ProjectIds);
 
 /// <summary>
 /// Loads and persists the labels of the global catalog: one Markdown file for each under
-/// <see cref="CatalogOptions.LabelsRoot"/>, and in each project file the labels of the project.
+/// <see cref="CatalogOptions.LabelsRoot"/>, and in each project file the labels of the project. A label is given to
+/// projects or to sessions (<see cref="LabelDescriptor.Target"/>); the journal of a session names its labels, and the
+/// session runtime changes them.
 /// </summary>
 /// <remarks>
 /// The labels are listed in the order of their tree: a label, then its sub-labels, each level by its order. A file that
@@ -172,7 +174,7 @@ public sealed class LabelCatalog
         var labels = await LoadAsync(cancellationToken).ConfigureAwait(false);
         var projects = (await Projects.LoadAsync(cancellationToken).ConfigureAwait(false))
             .Where(project => includeArchived || !project.Archived).ToArray();
-        return labels.Select(label => new LabelMembers(label, projects
+        return labels.Select(label => new LabelMembers(label, label.IsForSessions ? [] : projects
             .Where(project => (label.IsDeclared ? project.DeclaredLabels : project.Labels).Contains(label.Id, StringComparer.Ordinal))
             .Select(static project => project.Id).ToArray())).ToArray();
     }
@@ -188,11 +190,12 @@ public sealed class LabelCatalog
     /// <param name="space">The space of a top-level label; <see langword="null"/> for every space. A sub-label takes the space of its parent.</param>
     /// <param name="favorite">Whether the label is a favorite.</param>
     /// <param name="description">What the label stands for.</param>
+    /// <param name="target">What a top-level label is given to. A sub-label is for what its parent is for.</param>
     /// <param name="cancellationToken">Cancels before the file is written.</param>
     /// <returns>The label created, or why none was.</returns>
     /// <exception cref="IOException">The file could not be written.</exception>
     public async Task<LabelChange> CreateAsync(string name, string? parent = null, string? icon = null, string? color = null, string? space = null,
-        bool favorite = false, string? description = null, CancellationToken cancellationToken = default)
+        bool favorite = false, string? description = null, LabelTarget target = LabelTarget.Projects, CancellationToken cancellationToken = default)
     {
         if (IsReadOnly) return ReadOnlyChange();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -219,6 +222,7 @@ public sealed class LabelCatalog
                 Color = Optional(color),
                 Parent = parent,
                 Favorite = favorite,
+                Target = above?.Target ?? target,
                 Order = labels.Where(value => value.Parent == parent).Select(static value => value.Order).DefaultIfEmpty(0).Max() + 1,
             };
             if (above is not null) label.Space = above.Space;
@@ -319,6 +323,8 @@ public sealed class LabelCatalog
                 if (above is null) return new(LabelChangeStatus.NotFound, Message: $"No label has the id '{parent}'.");
                 if (Subtree(label.Id, labels).Contains(parent, StringComparer.Ordinal))
                     return new(LabelChangeStatus.Invalid, Message: "A label cannot go under itself or under one of its sub-labels.");
+                if (above.Target != label.Target)
+                    return new(LabelChangeStatus.Invalid, Message: $"A label for {TargetName(label.Target)} cannot go under a label for {TargetName(above.Target)}.");
                 if (Depth(above, labels) + Height(label, labels) > LabelDescriptor.MaximumDepth)
                     return new(LabelChangeStatus.Invalid, Message: $"Labels go {LabelDescriptor.MaximumDepth} levels deep at most.");
             }
@@ -327,7 +333,8 @@ public sealed class LabelCatalog
             label.Parent = parent;
             if (above is not null) label.Space = above.Space;
             if (moved && Invalid(label, labels) is { } invalid) return new(LabelChangeStatus.Invalid, Message: invalid);
-            var siblings = labels.Where(value => value.Parent == parent && !ReferenceEquals(value, label)).ToList();
+            // Its place is among the labels for the same things: at the top, the two trees are listed apart.
+            var siblings = labels.Where(value => value.Parent == parent && value.Target == label.Target && !ReferenceEquals(value, label)).ToList();
             siblings.Insert(index < 0 || index > siblings.Count ? siblings.Count : index, label);
             var complete = true;
             for (var place = 0; place < siblings.Count; place++)
@@ -385,7 +392,8 @@ public sealed class LabelCatalog
                 await WriteAsync(siblings[index], CancellationToken.None).ConfigureAwait(false);
             }
 
-            await ForgetAsync([label.Id]).ConfigureAwait(false);
+            // The journals of sessions keep the id of a label of sessions: a label that no longer exists is not shown.
+            if (!label.IsForSessions) await ForgetAsync([label.Id]).ConfigureAwait(false);
             label.SourcePath = null;
             return new(LabelChangeStatus.Ok, label);
         }
@@ -393,6 +401,32 @@ public sealed class LabelCatalog
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Finds the label for sessions a text names among those of a space, by its id then by its name, or creates it at the top
+    /// of every space with this text as its name: how an automation gives its runs the label it names.
+    /// </summary>
+    /// <param name="reference">The id or the name of the label.</param>
+    /// <param name="spaceId">The space of the sessions that get it; <see langword="null"/> or empty for the default space.</param>
+    /// <param name="cancellationToken">Cancels before a file is written.</param>
+    /// <returns>The label found or created, or why there is none.</returns>
+    /// <exception cref="IOException">The file could not be written.</exception>
+    public async Task<LabelChange> GetOrCreateForSessionsAsync(string reference, string? spaceId, CancellationToken cancellationToken = default)
+    {
+        var text = Optional(reference);
+        if (text is null) return new(LabelChangeStatus.Invalid, Message: "A label needs a name.");
+        LabelDescriptor? Find(IReadOnlyList<LabelDescriptor> labels)
+        {
+            var visible = labels.Where(label => label.IsForSessions && label.IsIn(spaceId)).ToArray();
+            return visible.FirstOrDefault(label => string.Equals(label.Id, text, StringComparison.OrdinalIgnoreCase))
+                ?? visible.FirstOrDefault(label => string.Equals(label.Name, text, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (Find(await LoadAsync(cancellationToken).ConfigureAwait(false)) is { } found) return new(LabelChangeStatus.Ok, found);
+        var created = await CreateAsync(text, target: LabelTarget.Sessions, cancellationToken: cancellationToken).ConfigureAwait(false);
+        // Two runs that start together create it once: the second finds the one of the first.
+        return created.Succeeded || Find(await LoadAsync(cancellationToken).ConfigureAwait(false)) is not { } again ? created : new(LabelChangeStatus.Ok, again);
     }
 
     /// <summary>
@@ -418,6 +452,8 @@ public sealed class LabelCatalog
         var known = all.Select(static label => label.Id).ToHashSet(StringComparer.Ordinal);
         if (add.FirstOrDefault(id => !known.Contains(id)) is { } missing)
             return new(LabelChangeStatus.NotFound, Message: $"No label has the id '{missing}'.");
+        if (all.FirstOrDefault(label => label.IsForSessions && add.Contains(label.Id, StringComparer.Ordinal)) is { } ofSessions)
+            return new(LabelChangeStatus.Invalid, Message: $"The label '{ofSessions.Name}' is for sessions, not for projects.");
         var status = await Projects.UpdateLabelsAsync(projectId,
             current => current.Where(id => !remove.Contains(id, StringComparer.Ordinal)).Concat(add), cancellationToken).ConfigureAwait(false);
         return status switch
@@ -509,7 +545,7 @@ public sealed class LabelCatalog
         => 1 + labels.Where(value => value.Parent == label.Id).Select(child => Height(child, labels)).DefaultIfEmpty(0).Max();
 
     // Puts the labels in the order of their tree. A parent that does not exist, that makes a loop or that puts the
-    // label too deep is read as none; a sub-label is in the space of its top-level label.
+    // label too deep is read as none; a sub-label is in the space of its top-level label, and for the same things.
     private static List<LabelDescriptor> Arranged(List<LabelDescriptor> labels)
     {
         var byId = labels.ToDictionary(static label => label.Id, StringComparer.Ordinal);
@@ -526,7 +562,7 @@ public sealed class LabelCatalog
         }
 
         var arranged = new List<LabelDescriptor>(labels.Count);
-        void Add(string? parent, string? space)
+        void Add(string? parent, string? space, LabelTarget target)
         {
             var children = labels.Where(label => label.Parent == parent).ToList();
             children.Sort(static (left, right) =>
@@ -537,13 +573,13 @@ public sealed class LabelCatalog
             });
             foreach (var child in children)
             {
-                if (parent is not null) child.Space = space;
+                if (parent is not null) (child.Space, child.Target) = (space, target);
                 arranged.Add(child);
-                Add(child.Id, child.Space);
+                Add(child.Id, child.Space, child.Target);
             }
         }
 
-        Add(null, null);
+        Add(null, null, LabelTarget.Projects);
         return arranged;
     }
 
@@ -567,6 +603,8 @@ public sealed class LabelCatalog
 
     private string PathOf(string id) => Path.Combine(_options.LabelsRoot, $"{id}.md");
 
+    private static string TargetName(LabelTarget target) => target == LabelTarget.Sessions ? "sessions" : "projects";
+
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     // What is wrong with a label about to be written, among the others; null when nothing is.
@@ -578,7 +616,9 @@ public sealed class LabelCatalog
         if (label.Color is not null && !SpaceDescriptor.IsValidColor(label.Color)) return $"'{label.Color}' is not a color written #rgb or #rrggbb.";
         // Beside it: under the same parent, so in the same space, or at the top of a space it shows in. Top-level labels
         // of two spaces never show together, so they can share a name; a label of every space shows with all of them.
+        // The labels of projects and those of sessions are two trees that never show together either.
         return labels.Any(other => !ReferenceEquals(other, label) && other.Id != label.Id && other.Parent == label.Parent
+                && other.Target == label.Target
                 && (other.Space is null || label.Space is null || other.Space == label.Space)
                 && string.Equals(other.Name, label.Name, StringComparison.OrdinalIgnoreCase))
             ? $"A label beside it is already named '{label.Name}'."

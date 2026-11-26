@@ -13,7 +13,20 @@ export type PermissionReviewState =
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 type DecisionOrigin = Readonly<{
   expectedHostEpoch: string; handle: SessionPermissionCommandHandle; decision: CommandDecision;
+  /** What the user tells the agent with a denial, sent with it; null for nothing. */
+  feedback: string | null;
 }>;
+/** The most characters of what the user tells the agent with a denial that go with the denial itself. */
+export const denialFeedbackLimit = 4096;
+/**
+ * Whether what the user tells the agent with a denial goes with the denial itself: the request takes it, and it is short
+ * enough. The agent then reads it where it reads that it was denied. Otherwise it is sent as a prompt, after the denial.
+ */
+export function feedbackGoesWithDenial(entry: SessionPermissionCommand, feedback: string): boolean {
+  // The rule of the host for that text (`SessionPermissionsService.ResolveAsync`): a text it would refuse is not sent with
+  // the denial, which it would refuse with it.
+  return entry.denialTakesFeedback === true && text(feedback.trim(), denialFeedbackLimit, true);
+}
 export type PermissionDecisionObservation = Readonly<{
   origin: DecisionOrigin; state: "pending" | "resolved" | "rejected" | "error"; code: string | null;
 }>;
@@ -128,16 +141,21 @@ export function createPermissionReviewer(
           }
           return Object.freeze({ origin: retained.origin, state: retained.state, code: retained.code });
         },
-        async decide(entry: SessionPermissionCommand, decision: CommandDecision): Promise<void> {
+        /**
+         * Answers a request. `feedback` is what the user tells the agent with a denial, for a request that takes it
+         * (`feedbackGoesWithDenial`): it is sent with the denial, in the same call.
+         */
+        async decide(entry: SessionPermissionCommand, decision: CommandDecision, feedback: string | null = null): Promise<void> {
           if (!active() || !validSelection || !replaceable() || reloadCode || !entries.includes(entry)
             || !["allow_once", "allow_always", "deny", "cancel"].includes(decision)
-            || (decision === "allow_always" && !offersAllowAlways(entry))) return;
+            || (decision === "allow_always" && !offersAllowAlways(entry))
+            || (feedback !== null && (decision !== "deny" || !feedbackGoesWithDenial(entry, feedback)))) return;
           // Retire the entire review window before dispatch. Old closures/refreshes cannot resubmit it.
           ++generation;
           entries = [];
           const original: RetainedDecision = {
             origin: Object.freeze({ expectedHostEpoch: selectedRequest.expectedHostEpoch,
-              handle: Object.freeze({ ...entry.handle }), decision }),
+              handle: Object.freeze({ ...entry.handle }), decision, feedback: feedback === null ? null : feedback.trim() }),
             providerId: entry.providerId, kind: entry.kind, command: entry.command, workingDirectory: entry.workingDirectory,
             grantRoot: entry.grantRoot, reason: entry.reason,
             controller: new AbortController(), waiter: null, state: "pending", code: null, observed: false,

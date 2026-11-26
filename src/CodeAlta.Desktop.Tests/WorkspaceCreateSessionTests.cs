@@ -583,7 +583,7 @@ public sealed class WorkspaceCreateSessionTests
             await catalog.SaveAsync(archived);
             Assert.AreEqual("project_missing", (await rpc.CreateSessionAsync(new(Epoch, "project", archived.Id, projectPath, null), CancellationToken.None)).Status);
             Assert.IsTrue((await catalog.GetByIdAsync(archived.Id))!.Archived);
-            Assert.AreEqual("unconfigured", (await new WorkspaceService((string?)null)
+            Assert.AreEqual("unconfigured", (await new WorkspaceService(catalog.Options.GlobalRoot)
                 .CreateSessionAsync(new(Epoch, "global", null, null, null), CancellationToken.None)).Status);
             await using var unavailable = new ModelProviderRegistry();
             var noProvider = new WorkspaceService(reads, catalog, Epoch, unavailable, (_, _, _) =>

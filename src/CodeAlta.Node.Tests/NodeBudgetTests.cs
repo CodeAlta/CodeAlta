@@ -308,7 +308,7 @@ public sealed class NodeBudgetTests
             var sends = new CodeAlta.Fleet.NodeApi.FleetHeldSends(file, protection);
             sends.Add(new CodeAlta.Fleet.NodeApi.FleetHeldSend("send-open", open.SessionId, "The open work.", null, "nonce-open", null, null, null, null, DateTimeOffset.UtcNow));
             sends.Add(new CodeAlta.Fleet.NodeApi.FleetHeldSend("send-blocked", blocked.SessionId, "The blocked work.", null, "nonce-blocked", null, null, null, null,
-                DateTimeOffset.UtcNow.AddSeconds(1)));
+                DateTimeOffset.UtcNow.AddSeconds(1))); // not a limit
 
             // At the restart, the second send does not open (the protected store is away for it): only the first is taken at once.
             protector.Blocks = static text => text.Contains("blocked", StringComparison.Ordinal);

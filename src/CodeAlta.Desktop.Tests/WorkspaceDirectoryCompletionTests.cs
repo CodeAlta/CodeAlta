@@ -78,7 +78,6 @@ public sealed class WorkspaceDirectoryCompletionTests
                 new(Epoch, root, "\ud800"), new(Epoch, new string('x', 1025), "") })
                 Assert.AreEqual("invalid_request", (await service.CompleteDirectoryAsync(request, CancellationToken.None)).Status);
             Assert.AreEqual("stale_epoch", (await service.CompleteDirectoryAsync(new(Guid.NewGuid().ToString("D"), root, ""), CancellationToken.None)).Status);
-            Assert.AreEqual("unconfigured", (await new WorkspaceService((string?)null).CompleteDirectoryAsync(new(Epoch, root, ""), CancellationToken.None)).Status);
             var catalogOnly = new WorkspaceService(Path.Combine(root, "catalog-only"));
             Assert.AreEqual("unconfigured", (await catalogOnly.CompleteDirectoryAsync(new(Epoch, root, ""), CancellationToken.None)).Status);
             Assert.IsFalse(Directory.Exists(Path.Combine(root, "catalog-only")));

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using CodeAlta.Catalog.Skills;
 
 namespace CodeAlta.Catalog.Tests;
@@ -33,11 +34,12 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(10, descriptors.Count);
+        Assert.AreEqual(11, descriptors.Count);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-plugin-runtime").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-model-servers").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-fleet").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "document-conversion").SourceKind);
+        Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "improve-codebase-health").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "ultra-profiler").SourceKind);
         Assert.AreEqual(SkillSourceKind.ProjectAlta, descriptors.Single(x => x.Name == "project-alta-skill").SourceKind);
         Assert.AreEqual(SkillSourceKind.ProjectCommon, descriptors.Single(x => x.Name == "project-common-skill").SourceKind);
@@ -239,7 +241,7 @@ public sealed class SkillCatalogTests
             .ConfigureAwait(false);
 
         CollectionAssert.AreEquivalent(
-            new[] { "codealta-fleet", "codealta-model-servers", "codealta-monorepo", "codealta-plugin-runtime", "document-conversion", "parent-skill", "ultra-profiler", "visible-skill" },
+            new[] { "codealta-fleet", "codealta-model-servers", "codealta-monorepo", "codealta-plugin-runtime", "document-conversion", "improve-codebase-health", "parent-skill", "ultra-profiler", "visible-skill" },
             descriptors.Select(static descriptor => descriptor.Name).ToArray());
     }
 
@@ -270,7 +272,7 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(10, allDescriptors.Count);
+        Assert.AreEqual(11, allDescriptors.Count);
         var winner = allDescriptors.Single(x => x.SourceKind == SkillSourceKind.ProjectAlta);
         Assert.IsTrue(winner.IsModelVisible);
         Assert.IsFalse(winner.IsShadowed);
@@ -290,7 +292,7 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(7, visible.Count);
+        Assert.AreEqual(8, visible.Count);
         Assert.IsTrue(visible.Any(static descriptor => descriptor.SourceKind == SkillSourceKind.ProjectAlta));
         Assert.IsTrue(visible.Any(static descriptor => descriptor.SourceKind == SkillSourceKind.Builtin));
     }
@@ -436,6 +438,28 @@ public sealed class SkillCatalogTests
         StringAssert.Contains(activation.Payload, "<file>assets/visible.svg</file>");
         StringAssert.Contains(activation.Payload, "<file>references/guide.md</file>");
         Assert.IsFalse(activation.Payload.Contains("ignored.svg", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task SkillCatalog_ActivateAsync_PluginRuntimeSkillIsShortAndLinksToShippedSamples()
+    {
+        var catalog = new SkillCatalog();
+        var activation = await catalog.ActivateAsync(new SkillCatalogQuery(), "codealta-plugin-runtime").ConfigureAwait(false);
+
+        Assert.IsNotNull(activation);
+        Assert.AreEqual(SkillSourceKind.Builtin, activation.Descriptor.SourceKind);
+
+        var body = activation.Document.Body;
+        var words = Regex.Count(body, @"\S+");
+        Assert.IsLessThan(2_500, words, $"Skill activation loads {words:N0} words before the file list.");
+
+        var sampleLinks = Regex.Matches(body, @"(?<=\]\()samples/[^)\s]+");
+        Assert.IsGreaterThan(0, sampleLinks.Count, "The contribution index must link to shipped samples.");
+        foreach (Match link in sampleLinks)
+        {
+            Assert.IsTrue(File.Exists(Path.Combine(activation.Document.Path, link.Value, "plugin.cs")),
+                $"No sample plugin at {link.Value}");
+        }
     }
 
     [TestMethod]

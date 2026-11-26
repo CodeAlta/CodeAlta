@@ -28,13 +28,13 @@ public sealed partial record ClientCapabilities
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the client supports `plan_update` and `plan_removed` session updates.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client can receive both update types.</summary>
+    /// <summary>Whether the Client supports `plan_update` and `plan_removed` session updates.  Optional. Omitted or `null` both mean the Client does not advertise support. Supplying `{}` means the Client can receive both update types.</summary>
     [JsonPropertyName("plan")]
     public PlanCapabilities? Plan { get; set; }
     /// <summary>Session-related capabilities supported by the client.  Optional. Omitted or `null` both mean the client does not advertise any session-related extensions.</summary>
     [JsonPropertyName("session")]
     public ClientSessionCapabilities? Session { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the client understands exposed subagent sessions.  Optional and nullable. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client understands child associations, work-state snapshots, session-directed messages, and restricted-session semantics.</summary>
+    /// <summary>Whether the client understands exposed subagent sessions.  Optional and nullable. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client understands child associations, work-state snapshots, session-directed messages, and restricted-session semantics.  See protocol docs: [Subagents](https://agentclientprotocol.com/protocol/v1/draft/subagents)</summary>
     [JsonPropertyName("subagents")]
     public SubagentCapabilities? Subagents { get; set; }
     /// <summary>Whether the Client support all `terminal/*` methods.</summary>

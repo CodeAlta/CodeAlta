@@ -164,6 +164,13 @@ internal sealed partial class BuiltInAltaCommandContributor
         else
         {
             var file = ResolvePath(context, given);
+            // The command reads the file here, outside the sandbox, with the rights of the user. A sandboxed session reads
+            // its file itself, with its own tools, and gives what it read: no file is opened for it here, where a path
+            // checked first could name another file by the time it is opened. Nothing is said of the file, not even
+            // whether it exists.
+            if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
+                return PermissionDenied(context, "sandbox.fileDenied",
+                    $"This session is sandboxed (profile '{sandbox.Profile}'): `alta script check` reads no file for it, outside its sandbox. Read the file with your file tools and give its content with `alta script check --stdin`.");
             if (!File.Exists(file)) return NotFound(context, "script.notFound", $"No script '{given}': neither a script of the library nor a file.");
             content = await File.ReadAllTextAsync(file, context.CancellationToken).ConfigureAwait(false);
             label = file;
@@ -198,14 +205,44 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (NormalizeOptionalText(name) is not { } scriptName) return UsageError(context, "usage.missingName", "A script name is required.", "alta script edit");
         if (CodeModeScriptLibrary.IsPluginName(scriptName))
             return UsageError(context, "script.ofPlugin", $"'{scriptName}' is a script of a plugin: it changes with its plugin. Edit a copy under another name.", "alta script edit");
+        // The name becomes the name of a file this command writes, outside any sandbox: it is a name of the library, never
+        // a path that would put the file elsewhere (in the library itself, or over another file).
+        if (!CodeModeScriptLibrary.IsName(scriptName))
+            return UsageError(context, "script.invalidName", $"'{scriptName}' is not a script name: lowercase letters, digits and hyphens, starting with a letter (at most 64 characters).", "alta script edit");
         var script = await FindInCallerSpaceAsync(context, library, scriptName).ConfigureAwait(false);
-        // The copy is in the scratchpad of the session, which its file tools reach; a new script starts empty.
-        var scratchpad = context.Services.Get<SessionRuntimeService>()?.ScratchpadRoot
-            ?? (context.Services.Get<CodeAlta.Catalog.CatalogOptions>() is { } catalog ? Path.Combine(catalog.GlobalRoot, "scratchpad") : Path.GetTempPath());
-        var folder = Path.Combine(scratchpad, "scripts", NormalizeOptionalText(context.Caller.SourceSessionId) ?? "user");
+        // A new script starts empty.
+        var source = script?.Source.Original ?? $"export const meta = {{ name: \"{scriptName}\", description: \"\", params: {{}} }};\n\nreturn null;\n";
+        var caller = NormalizeOptionalText(context.Caller.SourceSessionId);
+        var runtime = context.Services.Get<SessionRuntimeService>();
+        if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not null)
+        {
+            // A sandboxed session writes its copy itself, in the scratchpad of its sandbox: this command runs outside the
+            // container, and a file it wrote in a folder the session writes could land elsewhere, through a link made there.
+            var own = runtime is null || caller is null ? null : Path.Combine(runtime.SandboxScratchpadOf(caller), "scripts", scriptName + ".js");
+            var where = own is null ? "a file of the scratchpad of your sandbox" : own;
+            AltaJsonlWriter.WriteRecord(context.Stdout, new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["type"] = "alta.script.edit",
+                ["version"] = 1,
+                ["correlationId"] = context.CorrelationId,
+                ["name"] = scriptName,
+                ["path"] = own,
+                ["written"] = false,
+                ["source"] = source,
+                ["hash"] = script?.Hash,
+                ["scope"] = script is null ? null : CodeModeScriptScopeNames.NameOf(script.Scope),
+                ["nextStep"] = $"This session is sandboxed: write `source` to {where} with your file tools, change it there, check its content with `alta script check --stdin` and try it with `workflow({{ scriptPath: \"<that file>\" }})`. A sandboxed session does not publish a script: ask the user to save it.",
+            });
+            return AltaExitCodes.Success;
+        }
+
+        // The copy is in the scratchpad of the session, which its file tools reach.
+        var scratchpad = runtime?.ScratchpadRoot
+            ?? (context.Services.Get<CodeAlta.Catalog.CatalogOptions>() is { } catalog ? Path.Combine(catalog.StateRoot, "scratchpad") : Path.GetTempPath());
+        var folder = Path.Combine(scratchpad, "scripts", caller ?? "user");
         Directory.CreateDirectory(folder);
         var copy = Path.Combine(folder, scriptName + ".js");
-        File.WriteAllText(copy, script?.Source.Original ?? $"export const meta = {{ name: \"{scriptName}\", description: \"\", params: {{}} }};\n\nreturn null;\n");
+        File.WriteAllText(copy, source);
         var record = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["type"] = "alta.script.edit",
@@ -244,8 +281,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
         else
         {
-            // The source of a run is kept in the scratchpad of its session, under its id.
-            var runSources = context.Services.Get<SessionRuntimeService>()?.ScratchpadRoot is { } scratchpad ? Path.Combine(scratchpad, "codemode") : null;
+            // The source of a run is kept in the scratchpad of its session, under its id; none is kept for a sandboxed session.
+            var runSources = context.Services.Get<SessionRuntimeService>()?.ScriptSourcesRoot;
             var kept = runSources is null || !Directory.Exists(runSources) ? null : Directory.EnumerateFiles(runSources, options.FromRun + ".js", SearchOption.AllDirectories).FirstOrDefault();
             if (kept is null) return NotFound(context, "run.notFound", $"No source kept for run '{options.FromRun}'.");
             content = await File.ReadAllTextAsync(kept, context.CancellationToken).ConfigureAwait(false);

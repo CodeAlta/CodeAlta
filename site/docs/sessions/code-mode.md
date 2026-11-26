@@ -115,7 +115,7 @@ While it runs, it is listed above the prompt with what the session runs in the b
 
 Another session, or you from a terminal, reads a run with `alta workflow list`, `alta workflow show <run-id>` (its steps and the sessions it started) and `alta workflow result <run-id>`, and stops it with `alta workflow cancel <run-id>`. CodeAlta Desktop and CodeAlta TUI keep the runs that ended, the 100 newest for 14 days at most, so these commands, the **Workflows** tab and the tab of a run still find them after CodeAlta starts again.
 
-The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`.
+The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`. A [sandboxed](sandbox.md) session keeps none: it writes its scripts itself, in the scratchpad of its sandbox.
 
 ## The result
 
@@ -193,8 +193,8 @@ Agents manage the library with `alta script`:
 | --- | --- |
 | `alta script list`, `alta script show <name>` | List the scripts, read one (`--declarations` for how to call it) |
 | `alta script run <name> --arg <key>=<value>` | Run a script in a new session of the project, as **Run…** does. A value is JSON (`7`, `["a","b"]`) unless the parameter is a string |
-| `alta script edit <name>` | Copy a script into the scratchpad of the session, where the agent changes it with its file tools |
-| `alta script check <name-or-path>` | Check that a script parses and describes itself |
+| `alta script edit <name>` | Copy a script into the scratchpad of the session, where the agent changes it with its file tools. A sandboxed session gets its source instead, and writes the copy itself |
+| `alta script check <name-or-path>` | Check that a script parses and describes itself. A sandboxed session gives the script with `--stdin` |
 | `alta script save <name> --from <path>` | Publish a script, in the project (`--scope global` for yours). With the `--hash` that `edit` gave, a save is refused when the library copy changed since |
 | `alta script delete <name>` | Delete a script |
 

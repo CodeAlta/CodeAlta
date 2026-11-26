@@ -73,4 +73,29 @@ export const labelMessages = {
   "The agents read it.": ["Los agentes la leen.", "Les agents la lisent.", "Die Agenten lesen es.", "エージェントが読み取ります。", "智能体会读取它。"],
   "Labels go {count} levels deep at most.": ["Las etiquetas tienen como máximo {count} niveles.", "Les étiquettes ont au plus {count} niveaux.",
     "Labels haben höchstens {count} Ebenen.", "ラベルは最大 {count} 階層までです。", "标签最多 {count} 层。"],
+  // Labels for sessions: the groups of the sessions of a project, and their forms.
+  "Labels for": ["Etiquetas para", "Étiquettes pour", "Labels für", "ラベルの対象", "标签用于"],
+  "Other sessions": ["Otras sesiones", "Autres sessions", "Andere Sitzungen", "その他のセッション", "其他会话"],
+  "{name}: {count} sessions": ["{name}: {count} sesiones", "{name} : {count} sessions", "{name}: {count} Sitzungen", "{name}: {count} 件のセッション", "{name}：{count} 个会话"],
+  "Group sessions by labels": ["Agrupar sesiones por etiquetas", "Grouper les sessions par étiquettes", "Sitzungen nach Labels gruppieren", "セッションをラベルでグループ化", "按标签分组会话"],
+  "Sessions in one list": ["Sesiones en una sola lista", "Sessions dans une seule liste", "Sitzungen in einer Liste", "セッションを 1 つのリストに表示", "会话显示为单个列表"],
+  "Its sessions lose it and stay. The labels under it take its place.": [
+    "Sus sesiones la pierden y se quedan. Las etiquetas que tiene debajo ocupan su lugar.",
+    "Ses sessions la perdent et restent. Les étiquettes qui sont dessous prennent sa place.",
+    "Seine Sitzungen verlieren es und bleiben. Die Labels darunter treten an seine Stelle.",
+    "セッションからラベルが外れ、セッションは残ります。下のラベルがその位置に移ります。",
+    "其会话会失去该标签但仍保留。其下的标签将取代它的位置。"],
+  "The Explorer can list the sessions of a project under these labels: Group sessions by labels, in the menu of the project. A session gets them with Labels…, in its own menu.": [
+    "El Explorador puede listar las sesiones de un proyecto bajo estas etiquetas: Agrupar sesiones por etiquetas, en el menú del proyecto. Una sesión las recibe con Etiquetas…, en su propio menú.",
+    "L’Explorateur peut lister les sessions d’un projet sous ces étiquettes : Grouper les sessions par étiquettes, dans le menu du projet. Une session les reçoit avec Étiquettes…, dans son propre menu.",
+    "Der Explorer kann die Sitzungen eines Projekts unter diesen Labels auflisten: Sitzungen nach Labels gruppieren, im Menü des Projekts. Eine Sitzung erhält sie über Labels… in ihrem eigenen Menü.",
+    "エクスプローラーはプロジェクトのセッションをこれらのラベルの下に一覧表示できます。プロジェクトのメニューの「セッションをラベルでグループ化」を使います。セッションには、そのメニューの「ラベル…」でラベルを付けます。",
+    "资源管理器可以按这些标签列出项目的会话：在项目菜单中选择“按标签分组会话”。会话可通过其菜单中的“标签…”获得标签。"],
+  "Label of its runs": ["Etiqueta de sus ejecuciones", "Étiquette de ses exécutions", "Label seiner Läufe", "実行のラベル", "运行的标签"],
+  "Every session of a run gets this label for sessions, created at the first run when there is none. Empty: a label of the name of the automation.": [
+    "Cada sesión de una ejecución recibe esta etiqueta para sesiones, creada en la primera ejecución si no existe. Vacío: una etiqueta con el nombre de la automatización.",
+    "Chaque session d’une exécution reçoit cette étiquette pour sessions, créée à la première exécution s’il n’y en a pas. Vide : une étiquette au nom de l’automatisation.",
+    "Jede Sitzung eines Laufs erhält dieses Label für Sitzungen, das beim ersten Lauf erstellt wird, wenn es keines gibt. Leer: ein Label mit dem Namen der Automatisierung.",
+    "各実行のセッションには、このセッション用ラベルが付きます。存在しない場合は最初の実行時に作成されます。空欄の場合は、自動化の名前のラベルになります。",
+    "每次运行的会话都会获得此会话标签；若不存在，则在首次运行时创建。留空：使用自动化名称作为标签。"],
 } satisfies Record<string, readonly [string, string, string, string, string]>;

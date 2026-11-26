@@ -1,4 +1,4 @@
-import { selectedChoice, submitStep } from "../askReview";
+import { selectedChoice, selectedChoices, submitStep } from "../askReview";
 import { canSubmitReview, defaultVerdict } from "../review/reviewThreads";
 import { isBusy, type Ask, type AskAnswerRequest, type AskMark, type AskReview, type AskVerdict, type Live } from "./contract";
 
@@ -15,6 +15,7 @@ export type AskDraft = {
   /** The questions shown once: Submit shows those not seen before it sends. */
   seen: Set<number>;
   choices: Map<number, number>;
+  multiChoices: Map<number, number[]>;
   text: Map<number, string>;
   /** The verdict chosen; null keeps the one the comments give. */
   verdict: AskVerdict | null;
@@ -23,7 +24,7 @@ export type AskDraft = {
   actionId: string | null;
 };
 
-export const newAskDraft = (): AskDraft => ({ index: 0, seen: new Set([0]), choices: new Map(), text: new Map(), verdict: null, overall: "", actionId: null });
+export const newAskDraft = (): AskDraft => ({ index: 0, seen: new Set([0]), choices: new Map(), multiChoices: new Map(), text: new Map(), verdict: null, overall: "", actionId: null });
 
 /** The key of the draft of an ask of a session. */
 export const askDraftKey = (sessionId: string, ask: Pick<Ask, "id">) => `${sessionId}\n${ask.id}`;
@@ -138,12 +139,21 @@ export function askCommentsText(comments: number | null): string {
   return `Your review · ${comments === 0 ? "No comment yet" : comments === 1 ? "1 comment to send" : `${comments} comments to send`}`;
 }
 
-/** The choice a question answers with: the one picked, else the first. */
+/** The choice a single-select question answers with: the one picked, else the first. */
 export const askChoice = (ask: Ask, draft: AskDraft, index: number): number | null => {
   const question = ask.questions[index];
   if (!question) return null;
   const chosen = draft.choices.get(index);
   return selectedChoice(question, chosen === undefined ? undefined : [chosen]);
+};
+
+/** The choices a question answers with: every checked box for a multi-select question, else the single choice. */
+export const askChoices = (ask: Ask, draft: AskDraft, index: number): number[] => {
+  const question = ask.questions[index];
+  if (!question) return [];
+  if (question.allowMultiSelect) return selectedChoices(question, draft.multiChoices.get(index));
+  const choice = askChoice(ask, draft, index);
+  return choice === null ? [] : [choice];
 };
 
 /** What the main button does: show the first question not seen yet, else send. */
@@ -163,10 +173,11 @@ export function askGo(ask: Ask, draft: AskDraft, index: number): boolean {
 
 /** The answer of every question, as the desktop sends it, with the verdict of a review. */
 export function askAnswer(ask: Ask, draft: AskDraft, actionId: string): AskAnswerRequest {
-  const answers = ask.questions.map((_, index) => {
-    const choice = askChoice(ask, draft, index);
-    return { question: index, choices: choice === null ? [] : [choice], text: draft.text.get(index) || null };
-  });
+  const answers = ask.questions.map((_, index) => ({
+    question: index,
+    choices: askChoices(ask, draft, index),
+    text: draft.text.get(index) || null,
+  }));
   return {
     actionId, askId: ask.id, revision: ask.revision, answers,
     ...(ask.review ? { review: { verdict: askVerdict(ask, draft), overall: draft.overall || null } } : {}),

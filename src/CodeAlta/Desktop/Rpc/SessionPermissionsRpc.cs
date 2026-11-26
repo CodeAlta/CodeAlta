@@ -12,7 +12,7 @@ internal sealed class SessionPermissionsService
 {
     internal const int MaximumResponseBytes = 192 * 1024;
     private readonly Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> _list;
-    private readonly Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken, ValueTask<bool>> _resolve;
+    private readonly Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, string?, CancellationToken, ValueTask<bool>> _resolve;
     private readonly string _epoch;
     // Read at every call: the user turns the review on and off while the host runs.
     private readonly Func<bool> _enabled;
@@ -29,14 +29,14 @@ internal sealed class SessionPermissionsService
     /// <summary>Creates the service over the hosts of the sessions: each request goes to the host of its session.</summary>
     internal SessionPermissionsService(SessionHostRegistry hosts, string epoch, Func<bool> enabled)
         : this((sessionId, token) => hosts.Resolve(sessionId).ListPermissionsAsync(sessionId, token),
-            (handle, decision, token) => hosts.Resolve(handle.Attempt.SessionId).ResolvePermissionAsync(handle, decision, token), epoch, enabled)
+            (handle, decision, feedback, token) => hosts.Resolve(handle.Attempt.SessionId).ResolvePermissionAsync(handle, decision, feedback, token), epoch, enabled)
     {
         ArgumentNullException.ThrowIfNull(hosts);
     }
 
     // Mandatory inert transport-test adapters; never constructs a host, provider or native surface.
     internal SessionPermissionsService(Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> list,
-        Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken, ValueTask<bool>> resolve,
+        Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, string?, CancellationToken, ValueTask<bool>> resolve,
         string epoch, Func<bool> enabled)
     {
         ArgumentNullException.ThrowIfNull(list);
@@ -92,6 +92,7 @@ internal sealed class SessionPermissionsService
                 {
                     Shortened = summary.Shortened,
                     OutsideSandbox = summary.OutsideSandbox,
+                    DenialTakesFeedback = summary.DenialTakesFeedback,
                     Skill = summary.Skill is { } skillSummary
                         ? new(skillSummary.Server, skillSummary.Name, skillSummary.Uri, skillSummary.FileCount, (int)skillSummary.TotalBytes, skillSummary.Dynamic)
                         : null,
@@ -111,7 +112,9 @@ internal sealed class SessionPermissionsService
     public async Task<SessionPermissionResolution> ResolveAsync(SessionPermissionResolveRequest request, CancellationToken cancellationToken)
     {
         if (request is null || !TryHandle(request.Handle, out var handle)
-            || request.Decision is not ("allow_once" or "allow_always" or "deny" or "cancel")) return new("invalid_request", _epoch, null);
+            || request.Decision is not ("allow_once" or "allow_always" or "deny" or "cancel")
+            // What the user tells the agent goes with a denial only, within what the owner takes.
+            || (request.Feedback is not null && (request.Decision != "deny" || !Text(request.Feedback.Trim(), SessionPermissionService.UserFeedbackLimit, true)))) return new("invalid_request", _epoch, null);
         if (request.ExpectedHostEpoch != _epoch) return new("stale_epoch", _epoch, request.Handle);
         if (!_enabled()) return new("disabled", _epoch, request.Handle);
         cancellationToken.ThrowIfCancellationRequested();
@@ -126,7 +129,7 @@ internal sealed class SessionPermissionsService
         };
         try
         {
-            var accepted = await _resolve(handle!, decision, cancellationToken).ConfigureAwait(false);
+            var accepted = await _resolve(handle!, decision, request.Feedback?.Trim(), cancellationToken).ConfigureAwait(false);
             return new(accepted ? "resolved" : "rejected", _epoch, request.Handle);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -207,6 +210,12 @@ internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle H
     /// <summary>True when a sandboxed session asks to run the command outside its sandbox, with the rights of the user.</summary>
     public bool OutsideSandbox { get; init; }
 
+    /// <summary>
+    /// True when a denial takes what the user tells the agent with it (<see cref="SessionPermissionResolveRequest.Feedback"/>):
+    /// the agent reads it with the denial. Otherwise the window sends those words as a prompt, after the denial.
+    /// </summary>
+    public bool DenialTakesFeedback { get; init; }
+
     /// <summary>The skill of an MCP server a <c>skill</c> request asks to load; null for another kind.</summary>
     public SessionPermissionSkillEntry? Skill { get; init; }
 
@@ -223,7 +232,11 @@ internal sealed record SessionPermissionBrowserEntry(string Browser, string Prof
 /// <summary>The skill of an MCP server a permission asks to load: <paramref name="Dynamic"/> ones are allowed once only.</summary>
 internal sealed record SessionPermissionSkillEntry(string Server, string Name, string Uri, int FileCount, int TotalBytes, bool Dynamic);
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);
-internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision);
+/// <summary>
+/// The answer to a pending permission. <paramref name="Feedback"/> is what the user tells the agent with a <c>deny</c>, for
+/// a request that takes it (<see cref="SessionPermissionCommand.DenialTakesFeedback"/>); null for nothing.
+/// </summary>
+internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision, string? Feedback = null);
 internal sealed record SessionPermissionResolution(string Status, string HostEpoch, SessionPermissionCommandHandle? Handle);
 internal sealed record SessionPermissionSkillContentRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle);
 /// <summary>The <c>SKILL.md</c> of the skill a request asks to load, cut at 64 Ki characters; <c>Verified</c> when checked against its entry.</summary>

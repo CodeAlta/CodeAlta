@@ -16,17 +16,18 @@ internal sealed partial class AcpAgentSession
 
     private async Task AnswerPermissionAsync(Connection connection, RequestId requestId, JsonElement parameters)
     {
-        var key = requestId.Value.GetRawText();
-        using var prompt = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        connection.PermissionRequests[key] = prompt;
+        var key = RequestIdKey(requestId);
+        using var pending = connection.CreatePendingRequest(_lifetime.Token);
+        connection.PendingRequests[key] = pending;
         string? optionId;
         try
         {
-            optionId = await DecideAsync(connection, parameters, prompt.Token).ConfigureAwait(false);
+            pending.Token.ThrowIfCancellationRequested();
+            optionId = await DecideAsync(connection, parameters, pending.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            // The turn was stopped: the request is cancelled, as the protocol asks.
+            // The turn was stopped or the agent sent $/cancel_request: the request is cancelled, as the protocol asks.
             optionId = null;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -36,7 +37,7 @@ internal sealed partial class AcpAgentSession
         }
         finally
         {
-            connection.PermissionRequests.TryRemove(key, out _);
+            connection.PendingRequests.TryRemove(key, out _);
         }
 
         var outcome = AcpJson.Build(writer =>
@@ -67,6 +68,9 @@ internal sealed partial class AcpAgentSession
     private async Task<string?> DecideAsync(Connection connection, JsonElement parameters, CancellationToken cancellationToken)
     {
         AcpJson.TryGetObject(parameters, "toolCall", out var toolCall);
+        // ACP allows session/request_permission to send a minimal ToolCallUpdate (for example only toolCallId);
+        // merge with the cached tool_call state so hooks, permission modes, and approval dialogs see full metadata.
+        toolCall = MergeToolCall(connection, toolCall);
         if (Standalone)
         {
             // A turn that belongs to no session runs no tool: even a read the permission modes allow is refused.
@@ -76,11 +80,6 @@ internal sealed partial class AcpAgentSession
 
         var callId = AcpJson.GetString(toolCall, "toolCallId");
         var kind = AcpJson.GetString(toolCall, "kind");
-        if (callId is not null && _bridge.Find(callId) is { IsCodeAltaTool: true })
-        {
-            // A tool of CodeAlta asks its own permissions when the session runs it.
-            return AcpPermissionOptions.Select(parameters, "allow_once", "allow_always");
-        }
 
         string? permissionMode;
         AgentProviderRunContext? run;
@@ -92,11 +91,19 @@ internal sealed partial class AcpAgentSession
             interceptor = _toolInterceptor;
         }
 
-        // The tool hooks of the session decide before the permission mode does: a call they block is refused, in every mode.
+        // The tool hooks of the session decide before anything else: a call they block is refused, in every mode.
         if (interceptor is not null && await BlockedByToolHooksAsync(connection, interceptor, toolCall, callId, cancellationToken).ConfigureAwait(false) is { } blocked)
         {
             _logger?.Info($"A tool call of {_options.AgentName} was refused by a tool hook: {Limit(blocked)}");
             return AcpPermissionOptions.Select(parameters, "reject_once", "reject_always");
+        }
+
+        // Only auto-allow when an actual CodeAlta MCP invocation was matched on this session's endpoint;
+        // never grant permission from agent-supplied display names or titles alone.
+        if (connection.Endpoint is not null && kind is null or "other" &&
+            callId is not null && _bridge.Find(callId) is { IsCodeAltaTool: true, IsMcpMatched: true })
+        {
+            return AcpPermissionOptions.Select(parameters, "allow_once", "allow_always");
         }
 
         if (AcpPermissionOptions.AllowsWithoutAsking(permissionMode, kind))
@@ -132,7 +139,7 @@ internal sealed partial class AcpAgentSession
     {
         try
         {
-            var (name, arguments, _) = AcpToolCalls.Map(toolCall, ExposedTools, connection.WorkingDirectory);
+            var (name, arguments, _) = AcpToolCalls.Map(toolCall, connection.Endpoint is not null ? ExposedTools : EmptyTools, connection.WorkingDirectory);
             AcpJson.TryGetObject(toolCall, "rawInput", out var input);
             var call = CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(
                 new AgentToolInvocation(_providerId, _sessionId, callId ?? Guid.NewGuid().ToString("N"), name, arguments),

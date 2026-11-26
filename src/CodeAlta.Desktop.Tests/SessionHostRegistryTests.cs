@@ -258,7 +258,7 @@ public sealed class SessionHostRegistryTests
         public OwnedAskDisposition? ObserveAsk(Guid actionId, OwnedAskHandle handle) => throw new NotSupportedException();
         public Task<OwnedAskDisposition> AnswerAskAsync(OwnedAskAction action, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<OwnedAskDisposition> CancelAskAsync(OwnedAskAction action, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, string? userFeedback, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<bool> ResolveUserInputAsync(SessionOwnedUserInputHandle handle, IReadOnlyList<SessionOwnedUserInputAnswer> answers, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<bool> CancelUserInputAsync(SessionOwnedUserInputHandle handle, CancellationToken cancellationToken) => throw new NotSupportedException();
         public IAsyncEnumerable<RuntimeToolOutputUpdate> ObserveJobOutputAsync(string sessionId, string jobId, CancellationToken cancellationToken) => throw new NotSupportedException();

@@ -2,6 +2,7 @@
 // theme, under the edit menu of the page: no application host. The test reads the menu a right-click opens, and what its
 // entries did, through `editorsFixture`.
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { EditMenu } from "./EditMenu";
 import { fixtureClipboard, middleOf, readEditMenu } from "./editMenu.probe";
@@ -21,6 +22,9 @@ function Prompt() {
   const [value, setValue] = useState(state.prompt);
   return <PromptEditor value={value} label="Prompt" onChange={next => { state.prompt = next; setValue(next); }} />;
 }
+// The menu listens before any editor is there, since `ready` waits for the editors: rendered later, its effect could
+// come after them, and on a busy machine after the first right-click of a test.
+flushSync(() => createRoot(add("menu", "")).render(<EditMenu clipboard={fixtureClipboard(state)} editors={monacoEditTarget} />));
 createRoot(add("prompt", "position: absolute; left: 20px; right: 20px; bottom: 20px;")).render(<Prompt />);
 // As the project editor creates the editor of a file.
 monaco.editor.create(add("file", "position: absolute; left: 20px; top: 20px; width: 480px; height: 160px;"),
@@ -28,7 +32,6 @@ monaco.editor.create(add("file", "position: absolute; left: 20px; top: 20px; wid
 // As a built-in prompt of an agent is shown.
 monaco.editor.create(add("readonly", "position: absolute; left: 520px; top: 20px; width: 300px; height: 160px;"),
   { value: "a read-only text", ariaLabel: "Read-only", readOnly: true, fixedOverflowWidgets: true, minimap: { enabled: false } });
-createRoot(add("menu", "")).render(<EditMenu clipboard={fixtureClipboard(state)} editors={monacoEditTarget} />);
 
 type Rgba = [number, number, number, number];
 const rgba = (color: string): Rgba => {

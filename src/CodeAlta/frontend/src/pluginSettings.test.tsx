@@ -11,7 +11,7 @@ const never = () => assert.fail("rendering must not act");
 const entry = (id: string, change: Partial<PluginsEntry> = {}): PluginsEntry => ({
   id, name: id, description: null, kind: "Source", scope: "Global", state: "Enabled", enabled: true, enabledGlobal: null, enabledProject: null,
   runtime: "running", runtimeMessage: null, folder: `plugin:global:${id}`, path: `/home/.alta/plugins/${id}`, loadable: true, changed: false, errors: null,
-  icon: null, color: null, version: null, author: null, tags: null, image: null, ...change,
+  icon: null, color: null, version: null, author: null, tags: null, image: null, disabledByRepository: false, ...change,
 });
 const english = (key: Parameters<typeof translate>[1]) => translate("en", key);
 function render(listed: readonly PluginsEntry[], change: { locale?: typeof locales[number]; edit?: boolean; remove?: boolean; disabled?: boolean } = {}) {
@@ -25,7 +25,7 @@ const card = (html: string, name: string) => cards(html).find(value => value.inc
 
 test("the plugins that ship with CodeAlta come first and are on until configuration says otherwise", () => {
   const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes." }), entry("bare", { name: "" }),
-    entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
+    entry("git", { kind: "Config", enabled: false, enabledGlobal: false, folder: null, path: null, loadable: false })], english);
   assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
     [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["landing", "Landing page", true, true], ["ui", "UI tools", true, true],
       ["acp", "ACP agents", true, true], ["mobile", "Mobile", false, true], ["pseudonymizer", "Pseudonymizer", false, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
@@ -33,6 +33,37 @@ test("the plugins that ship with CodeAlta come first and are on until configurat
   assert.equal(rows[1].entry?.id, "git");
   assert.equal(rows[9].description, "Keeps notes.");
   assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "landing", "ui", "acp", "mobile", "pseudonymizer"]);
+});
+
+test("an inherited plugin is visible as a read-only project plugin", () => {
+  const inherited = entry("notes", { scope: "Inherited", folder: null });
+  const html = card(render([inherited]), "notes");
+  assert.match(html, />Inherited</);
+  assert.match(html, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable notes")/);
+  assert.doesNotMatch(html, /Reload notes|Edit notes|Remove notes/);
+  assert.ok(pluginFacts(pluginRows([inherited], english).find(row => row.id === inherited.id)!).project);
+});
+
+test("a built-in card uses the global setting, never the repository's setting", () => {
+  const repository = { kind: "Config", scope: "Inherited", enabled: false, disabledByRepository: true, folder: null, path: null };
+  const listed = [entry("jira", repository), entry("git", { ...repository, id: "GIT", enabledGlobal: false })];
+  const html = render(listed);
+  const jira = card(html, "Jira");
+  assert.match(jira, />Built-in</);
+  assert.doesNotMatch(jira, /Inherited|Disabled by repository/);
+  const jiraSwitch = jira.match(/<input[^>]*aria-label="Enable Jira"[^>]*>/)?.[0] ?? assert.fail("no Jira switch");
+  assert.match(jiraSwitch, /checked=""/);
+  assert.doesNotMatch(jiraSwitch, /disabled=""/);
+  assert.equal(pluginRows(listed, english).find(row => row.id === "git")?.enabled, false, "Global configuration is matched without regard to case.");
+  assert.equal(pluginRows(listed, english).filter(row => row.id.toLowerCase() === "git").length, 1, "There is no duplicate config card.");
+});
+
+test("the repository's off locks the switch even for a local plugin", () => {
+  const local = entry("notes", { scope: "Project", enabled: false, enabledProject: true, disabledByRepository: true });
+  const html = card(render([local]), "notes");
+  assert.match(html, />Disabled by repository</);
+  assert.match(html, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable notes")/);
+  assert.match(html, /Edit notes/, "The child still owns the source file.");
 });
 
 test("the Mobile plugin is off until the global configuration turns it on", () => {

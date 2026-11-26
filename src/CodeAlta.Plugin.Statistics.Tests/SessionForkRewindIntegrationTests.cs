@@ -148,7 +148,7 @@ public sealed class SessionForkRewindIntegrationTests
     private static async Task SendAsync(CodeAltaHost host, SessionViewDescriptor session, SessionExecutionOptions options, string prompt)
     {
         await host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text(prompt) }, CancellationToken.None);
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
         while (await host.RuntimeService.HasActiveRunAsync(session, CancellationToken.None))
         {
             Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The run did not end.");

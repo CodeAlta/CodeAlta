@@ -144,8 +144,11 @@ internal interface ISessionHost
     /// <summary>Lists the permission requests of a session that wait for the user.</summary>
     ValueTask<SessionOwnedPermissionPage> ListPermissionsAsync(string sessionId, CancellationToken cancellationToken);
 
-    /// <summary>Resolves a permission request by its exact handle; false when the host no longer holds it.</summary>
-    ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, CancellationToken cancellationToken);
+    /// <summary>
+    /// Resolves a permission request by its exact handle, with what the user tells the agent with a denial, or null; false
+    /// when the host no longer holds it, or cannot give the request those words with its answer.
+    /// </summary>
+    ValueTask<bool> ResolvePermissionAsync(SessionOwnedPermissionHandle handle, AgentPermissionDecisionKind decision, string? userFeedback, CancellationToken cancellationToken);
 
     /// <summary>Lists the questions of a provider of a session that wait for the user.</summary>
     ValueTask<SessionOwnedUserInputPage> ListUserInputsAsync(string sessionId, CancellationToken cancellationToken);

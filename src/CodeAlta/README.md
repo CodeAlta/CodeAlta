@@ -30,50 +30,147 @@ the network. Node and npm are needed only to build.
 
 ## Build and run
 
-Install the .NET 10 SDK and a current Node.js, then build the solution from `src`:
+Install the .NET 10 SDK and a current Node.js. Before building, check
+[Debug or Release](../../AGENTS.md#debug-or-release): never build over a running copy from this
+checkout. Build the solution from `src`:
 
 ```powershell
 cd src
 dotnet build -c Release
-./CodeAlta/bin/Release/net10.0/alta.exe
 ```
 
-The first build restores the npm packages of `frontend/` and generates the RPC client. To build
-only this project in Debug:
+The build restores the npm packages of `frontend/` and generates the RPC client under
+`obj/neoastra/`. To build only Desktop from `src` (choose `-c Release` instead if Debug is in use):
 
 ```powershell
 cd src
-dotnet build CodeAlta/CodeAlta.csproj
-./CodeAlta/bin/Debug/net10.0/alta.exe
+dotnet build CodeAlta/CodeAlta.csproj -c Debug
 ```
 
 Build outputs use the standard SDK layout, `bin/<Configuration>/net10.0` and
 `obj/<Configuration>/net10.0`.
 
-`alta` opens the current folder as a project on the `~/.alta` profile, like `altatui`. Only one
-CodeAlta runs on a profile at a time, so exit the installed app first (`alta --exit`), or use the
-developer instance.
+To check just the frontend after the build, run these from `src/CodeAlta/frontend`:
+
+```sh
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/tsx/dist/cli.mjs --test src/<feature>/<name>.test.ts
+```
+
+Use the actual test path (`src/<name>.test.ts` for a top-level test). Use Node.js 24.3.0 or newer
+on the Node 24 line: earlier 24.x releases can close a browser while its subtests are still
+running. Browser tests launch their own Edge, not the app; use the developer instance to check
+the real window.
 
 ## Developer instance
 
-`alta --dev` starts a second window, titled **CodeAlta (dev)** with a **DEV** tag beside its name.
-It runs beside the normal app on the same `~/.alta` profile:
+[Build the project](#build-and-run) first, then test it in a second window, beside the normal
+app that runs the agents. Use `--dev` to start and exit it; the flag, not the build configuration,
+selects the instance.
 
-- it shares configuration, providers, credentials, prompts, skills, the project catalog and the
-  spaces;
-- it keeps its own sessions, database (the list of sessions and the tables of the plugins) and lock under `~/.alta/dev/`;
-- it keeps its own web view data (tabs, drafts, theme) under `CodeAlta/desktop-dev` in the local
-  application data folder.
+### Start
 
-Use it to work on CodeAlta with CodeAlta: the normal app runs the agents, and the developer
-instance runs the build you are testing. `alta --dev --exit` asks it to exit. The normal app can be
-the installed one or a build of this repository; a build cannot be replaced while it runs, so when
-the normal app runs from `bin/Release`, build, test and start the developer instance in `Debug`, and
-the other way round.
+From the repository root, use the executable of the configuration you built. On Windows, for
+a Debug build:
 
-Its MCP server listens at `http://127.0.0.1:2583/mcp` (the normal app has port 2582): the `.mcp.json`
-and `.alta/mcp.json` of this repository register it as `codealta-dev`, which is how an agent looks at
-the window and clicks in it. See `AGENTS.md`.
+```powershell
+Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev" -WorkingDirectory (Get-Location)
+```
+
+On macOS and Linux, run `src/CodeAlta/bin/Debug/net10.0/alta --dev`.
+The native window is titled **CodeAlta (dev)** and the page shows a **DEV** tag
+(`document.title` stays `CodeAlta`). The default MCP port is 2583, not the normal app's 2582.
+`~/.alta/dev/mcp_url.txt` holds its address while it runs. Starting it again shows the running
+developer window, rather than opening another one.
+
+- On Windows, omit `-Wait`, `-NoNewWindow` and `--wait` from the detached launch. Avoid
+  changing its environment or redirecting output: the window can inherit the shell tool's
+  capture handles and keep it waiting after the launcher exits.
+- For an isolated environment with logs, run a bounded job:
+  `alta job start --command "pwsh -NoProfile -File <launcher.ps1>" --title "Launch isolated desktop" --timeout 60`.
+  In the launcher, make each captured standard handle non-inheritable
+  (`SetHandleInformation(GetStdHandle(n), 1, 0)` for `n` = -10, -11, -12, through `Add-Type`).
+  Then `Start-Process` with the allowlisted environment and distinct `-RedirectStandardOutput`
+  and `-RedirectStandardError` files, without `-Wait`. Redirection and a background job alone do
+  not fix a pipe leak. The launcher ends in seconds; diagnose a job that stays live rather than
+  starting another.
+- In a separate short shell call, confirm the process and path (`Get-Process alta | Select-Object Id, Path`)
+  and that `(Get-NetTCPConnection -LocalPort 2583 -State Listen).OwningProcess` is its PID.
+  The port can take a few seconds to listen. Check the end of the log under
+  `%LOCALAPPDATA%\CodeAlta\desktop-dev\logs` when diagnosing startup.
+- A fresh or isolated profile opens Settings on **Providers**. Use **Skip**, not a provider
+  configuration change, to leave the setup guide.
+
+### Connect
+
+The repository's `.mcp.json` (Claude Code and other clients) and `.alta/mcp.json` (CodeAlta)
+register `http://127.0.0.1:2583/mcp` as `codealta-dev`. A client that connects at startup needs
+the app running or a reconnection afterwards. The server is stateless, so later app restarts
+need neither.
+
+- In CodeAlta, run `alta mcp activate codealta-dev` after launch. Tools named
+  `mcp__codealta_dev__…` join the current turn and stay available across turns and app restarts.
+  In the Claude Code provider the prefix is `mcp__codealta__mcp__codealta_dev__…`; Claude Code
+  can also list `mcp__codealta-dev__…` from `.mcp.json` for the same window.
+- Drive this window through `codealta-dev` only. `alta ui activate` would drive the window that
+  hosts the session, not the test window. The MCP server's `alta` tool runs commands in the test
+  instance without a calling session, for example `{"args": ["session", "list"]}`.
+
+### Inspect the window
+
+Use `take_snapshot` to find elements by `uid`, `take_screenshot` to see the layout, `click`,
+`fill`, `type_text` and `press_key` to exercise controls, `evaluate_script` for the DOM, and
+`list_console_messages` for errors. These use the
+[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) tool arguments.
+On Windows, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` before
+launch only if you need DevTools features such as performance traces or CSS inspection.
+
+- For a visual change, check both themes and a narrow layout. Use `resize_page` with 900×650
+  CSS pixels for the narrow check (Settings has about 430 px of content width there). Restore a
+  large page for ordinary inspection and screenshots: the desktop site Settings and Statistics
+  images are 2400×1500 device pixels, from a 1600×1000 CSS-pixel page at 150% scale. Check the
+  actual scale and image dimensions. Native caption buttons are not in page screenshots.
+- To save a screenshot, pass `filePath` in the project or the tools' folder
+  (`%LOCALAPPDATA%\CodeAlta\desktop-dev\ui`). In an isolated fixture save under its own
+  `<browser-root>/ui` instead, and record that path with the results.
+- Use `evaluate_script` to navigate (e.g. `nav[aria-label="Settings pages"] button`), wait for the
+  control and measure layout (`scrollWidth > clientWidth` for horizontal overflow). Use
+  `scrollIntoView({ block: "nearest" })` to avoid scrolling the dialog itself. Use `fill` for
+  native selects and check keyboard interaction with `press_key` or `type_text`. Verify changes
+  on disk only with an isolated profile.
+
+### Exit before rebuilding
+
+Closing the window may only hide it. From the repository root, ask the developer instance you
+started to exit, with the `alta` of either build:
+
+```powershell
+Start-Process src\CodeAlta\bin\Debug\net10.0\alta.exe -ArgumentList "--dev", "--exit"
+```
+
+On macOS and Linux, run `src/CodeAlta/bin/Debug/net10.0/alta --dev --exit`.
+Never omit `--dev` or stop all `alta` processes: that would exit the user's app. After checking
+the port owner, `press_key` with `Control+q` through `codealta-dev` is another way to exit the
+test window. It asks first about running sessions and unsaved files. Confirm the port is no
+longer listening before rebuilding, then launch and inspect again.
+
+### Profile and safety
+
+One developer instance runs at a time: `alta --dev` or, to check the TUI in a separate console,
+`altatui --dev`. Both use `~/.alta` with a separate state root:
+
+| Shared with the normal instance | Separate, under `~/.alta/dev/` |
+| --- | --- |
+| `config.toml`, providers and credentials (`auth/`), `mcp.json`, prompts, skills, plugins and their `plugin-data/`, color schemes (`color-schemes/`), projects (`projects/`) and spaces (`spaces/`) | `sessions/` (journals and pasted images), `scratchpad/`, `saved_statistics_after_deleted_sessions/`, `data/alta.sqlite3` and backups, `ui-state.yaml`, `saved_prompts/`, `logs/`, `alta.lock` |
+
+Desktop keeps separate WebView data (tabs, drafts, theme and placement) in
+`%LOCALAPPDATA%\CodeAlta\desktop-dev` on Windows. The developer instance leaves the coordinator's
+`~/.alta/AGENTS.md` alone and takes over the per-project provider/model preferences on its first
+run. Startup cleanup removes only the owning instance's scratchpad contents after safety checks.
+
+Use developer sessions, not the user's real sessions, for test prompts. Do not change shared
+settings, providers, prompts, skills or projects unless the task asks for it. For destructive
+checks use isolated temporary roots and synthetic data, never either real profile.
 
 ## Command line
 
@@ -97,9 +194,8 @@ keeps the app in the process you started; so does a start under a debugger. See
 
 Set `CODEALTA_DISABLE_PLUGINS=1` to start without plugins.
 
-`alta --help` also lists the options that start the app on explicit directories instead of
-`~/.alta` (`--data-root`, `--catalog-root`, `--allow-owned-host` and others). They are for tests and
-for running on a copy of a profile. See
+For tests on a catalog copy, see **Isolated roots** in `alta --help`. Explicit directories require
+`--allow-owned-host`; this start does not use `~/.alta` or start plugins. See
 [One instance per profile](../../doc/desktop.md#one-instance-per-profile).
 
 ## Browser demo
@@ -124,9 +220,13 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
 
 - **Spaces**: `frontend/src/spaces/` holds the groups of projects the window shows one at a time.
   The window is given the catalog as the shown space has it, and each space has its own tabs.
-- **Tests**: `npm test` in `frontend/` runs the unit tests (`src/*.test.ts`, `src/*.test.tsx`). The
-  `*.browser.test.ts` files among them mount real components in headless Edge and are skipped where
-  Edge is not installed.
+- **Tests**: `npm test` in `frontend/` runs every `*.test.ts` and `*.test.tsx` under `src/`,
+  reporting failures, totals and diagnostics; `npm run test:verbose` shows every test name.
+  Both cap file concurrency at two. The `*.browser.test.ts` files mount components in headless
+  Edge (or another Chromium selected with `CODEALTA_TEST_BROWSER`) and skip if no browser is
+  available. `waitForBrowserPort` gets its startup deadline from `browserStartLimit` in `testTime.ts`
+  and handles partial port files, spawn errors and child exit. Keep stderr piped, clean up only
+  your browser with `endBrowser`, and diagnose startup failures rather than retrying or skipping.
 - **Color schemes**: `frontend/src/colorSchemes.gen.css` and `colorSchemes.gen.ts` are generated by
   `dotnet run --project src/CodeAlta.ColorSchemes.Generator`. Run it again when the scheme recipes
   of XenoAtom.Terminal.UI or the Blueprint palette change, and commit the result. It reads the

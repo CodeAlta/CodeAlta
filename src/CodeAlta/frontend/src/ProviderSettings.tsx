@@ -10,7 +10,7 @@ import { ProviderUsagePanel } from "./UsageLimits";
 import { ManagedPolicyPanel } from "./managedPolicy/ManagedPolicyPanel";
 import type { ManagedPolicyApi } from "./managedPolicy/managedPolicy";
 import { ProviderModelVisibility } from "./ProviderModelVisibility";
-import { hasSubscriptionUsage } from "./subscriptionUsage";
+import { hasSubscriptionUsage, mayHaveSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -487,8 +487,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                       onUse={name => settle(() => secretKeys.useSecretForKey({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
                         { timeoutMilliseconds: 60000 }), original.key)} /></div>}
                 </FormSection>}
-              {original && original.type === form.type && hasSubscriptionUsage(form.type)
-                && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
+              {original && original.type === form.type && (hasSubscriptionUsage(form.type) || mayHaveSubscriptionUsage(form.type))
+                && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} whenSupported={mayHaveSubscriptionUsage(form.type)} />}
               {/* The organization of a Copilot account can set a policy that every session follows. */}
               {original && original.type === form.type && form.type === "copilot" && <ManagedPolicyPanel key={`${original.key}:policy`} epoch={epoch} api={policy} />}
               <FormSection icon="newSession" title={t("New sessions")}>

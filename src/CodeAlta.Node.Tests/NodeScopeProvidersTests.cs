@@ -26,8 +26,20 @@ public sealed class NodeScopeProvidersTests
         using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
         var store = new LocalSecretStore(Path.Combine(root.Root, "secrets"), new PlainProtector());
         var config = new CodeAltaConfigStore(catalog);
-        config.SaveGlobalProviderDefinitions([.. config.LoadGlobalProviderDefinitions(includeDisabled: true),
-            new CodeAltaProviderDocument { ProviderKey = "mine", ProviderType = "anthropic", ApiKeyEnv = "MY_KEY" }]);
+        config.SaveGlobalConfigContent("""
+            [providers.mine]
+            type = "anthropic"
+            api_key_env = "MY_KEY"
+
+            [providers.standby]
+            type = "llama-cpp"
+            enabled = false
+            server = "local/standby"
+
+            [providers.future]
+            type = "future-provider"
+            future_setting = "kept"
+            """);
         var providers = new NodeScopeProviders(catalog, store, identity);
         ScopeProviderDto Provider(string id) => new(id, FleetPrincipalKinds.Team, "infra", "Infra gateway", "openai-responses", "https://gateway.example/v1", ["gpt-6.1"], 1,
             "p2", DateTimeOffset.UtcNow, ["self"]);
@@ -43,6 +55,11 @@ public sealed class NodeScopeProvidersTests
         Assert.AreEqual("MY_KEY", written.Single(definition => definition.ProviderKey == "mine").ApiKeyEnv);
         Assert.AreEqual(CodeAlta.Automations.AutomationCredentialKind.Account, CodeAlta.Automations.AutomationCredentials.Classify(team.ProviderType!, team),
             "it runs with the key of an account");
+        var standby = config.LoadGlobal().Providers!["standby"];
+        Assert.IsFalse(standby.Enabled);
+        Assert.AreEqual("local/standby", standby.Server);
+        Assert.IsNull(standby.ApiUrl, "Installing a scope provider must not persist an endpoint for an untouched model server.");
+        StringAssert.Contains(config.LoadGlobalConfigContent(), "future_setting = \"kept\"");
 
         // The server no longer gives it: gone from the configuration and from the store; the user's own stays.
         Assert.AreEqual(0, providers.Apply("link-1", []).Count);

@@ -284,7 +284,7 @@ public sealed class ClaudeCodeExternalConversationsTests
 
         // A transcript that changed is read again; a larger one than asked is not read.
         File.AppendAllText(first, Transcript.Line(new JsonObject { ["type"] = "custom-title", ["customTitle"] = "Renamed", ["sessionId"] = VsCode }) + "\n");
-        File.SetLastWriteTimeUtc(first, DateTime.UtcNow.AddSeconds(5));
+        File.SetLastWriteTimeUtc(first, DateTime.UtcNow.AddSeconds(5)); // not a limit
         var changed = conversations.Preview(VsCode, 1024 * 1024, CancellationToken.None);
         Assert.AreNotSame(shown, changed);
         Assert.AreEqual("Renamed", changed.Conversation!.Conversation.Title);

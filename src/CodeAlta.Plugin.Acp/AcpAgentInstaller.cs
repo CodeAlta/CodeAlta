@@ -1,5 +1,6 @@
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Acp;
@@ -29,8 +30,9 @@ internal sealed class AcpInstallMarker
 
 /// <summary>
 /// Installs the agents of the ACP registry: a binary is downloaded into the cache shared by the normal and the
-/// developer instance (<c>~/.alta/cache/acp/agents/&lt;id&gt;/&lt;version&gt;/&lt;target&gt;</c>); an agent that runs
-/// through <c>npx</c> or <c>uvx</c> needs nothing installed, the runner fetches it at its first start.
+/// developer instance (<c>~/.alta/cache/acp/agents/&lt;id&gt;/&lt;version&gt;/&lt;target&gt;</c>), and checked against
+/// the SHA-512 of its release when it has one; an agent that runs through <c>npx</c> or <c>uvx</c> needs nothing
+/// installed, the runner fetches it at its first start.
 /// </summary>
 internal sealed class AcpAgentInstaller(string root, HttpClient httpClient)
 {
@@ -69,12 +71,13 @@ internal sealed class AcpAgentInstaller(string root, HttpClient httpClient)
         return (PluginProviderCatalogInstallKind.Download, "binary", "Not available for this system.");
     }
 
-    /// <summary>Installs an agent, or finds it installed, and returns what starts it.</summary>
-    /// <exception cref="InvalidOperationException">The agent cannot be installed on this computer, or the download failed.</exception>
-    public async Task<AcpInstalledAgent> InstallAsync(AcpRegistryAgentManifest manifest, IProgress<PluginProviderInstallProgress> progress, CancellationToken cancellationToken)
+    /// <summary>Installs the release of an agent, or finds it installed, and returns what starts it.</summary>
+    /// <exception cref="InvalidOperationException">The agent cannot be installed on this computer, the download failed, or it is not the one its release names.</exception>
+    public async Task<AcpInstalledAgent> InstallAsync(AcpAgentRelease release, IProgress<PluginProviderInstallProgress> progress, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(release);
         ArgumentNullException.ThrowIfNull(progress);
+        var manifest = release.Manifest;
         var (kind, distribution, unavailable) = Describe(manifest);
         if (unavailable is not null)
         {
@@ -116,6 +119,11 @@ internal sealed class AcpAgentInstaller(string root, HttpClient httpClient)
             var archiveUri = new Uri(binary.Archive, UriKind.Absolute);
             var archive = Path.Combine(partial, Path.GetFileName(archiveUri.LocalPath) is { Length: > 0 } name ? name : "agent.download");
             await DownloadAsync(archiveUri, archive, manifest.Name, progress, cancellationToken).ConfigureAwait(false);
+            if (release.Sha512 is { } expected)
+            {
+                await VerifyAsync(archive, expected, manifest.Name, cancellationToken).ConfigureAwait(false);
+            }
+
             progress.Report(new PluginProviderInstallProgress($"Extracting {manifest.Name}…"));
             var content = Path.Combine(partial, "content");
             if (Directory.Exists(content))
@@ -189,6 +197,21 @@ internal sealed class AcpAgentInstaller(string root, HttpClient httpClient)
         catch (HttpRequestException ex)
         {
             throw new InvalidOperationException($"{name} could not be downloaded: {ex.Message}", ex);
+        }
+    }
+
+    private static async Task VerifyAsync(string path, string sha512, string name, CancellationToken cancellationToken)
+    {
+        string actual;
+        await using (var file = File.OpenRead(path))
+        {
+            actual = Convert.ToHexString(await SHA512.HashDataAsync(file, cancellationToken).ConfigureAwait(false));
+        }
+
+        if (!string.Equals(actual, sha512.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            File.Delete(path);
+            throw new InvalidOperationException($"The download of {name} is not the one its release names (its SHA-512 differs): nothing was installed.");
         }
     }
 

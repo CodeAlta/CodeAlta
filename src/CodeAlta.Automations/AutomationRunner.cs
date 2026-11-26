@@ -631,6 +631,8 @@ internal sealed class AutomationRunner : IAutomationRunner
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 
+            await LabelRunAsync(definition, sessionId, spaceId, cancellationToken).ConfigureAwait(false);
+
             // The tier, or Adaptive, before the first prompt, which then runs on it.
             if (definition.Tier is { } tier && await tier.PutSessionAsync(_host, sessionId, cancellationToken).ConfigureAwait(false) is { } notOnTier)
                 return new(sessionId, $"The session could not be put on {tier.Name} ({notOnTier}).", null);
@@ -691,6 +693,22 @@ internal sealed class AutomationRunner : IAutomationRunner
         }
 
         static AutomationStart Refuse(string problem) => new(null, problem, null);
+    }
+
+    // Gives the session of a run the label of the automation (its own, else one of its name), which the first run that
+    // needs it creates: the runs of one automation then fold into one group of the Explorer, apart from the work done by
+    // hand. A label that cannot be found, created or given leaves the run without it: the run goes on.
+    private async Task LabelRunAsync(AutomationDefinition definition, string sessionId, string spaceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var label = await _host.SpaceCatalog.Labels.GetOrCreateForSessionsAsync(definition.RunLabel, spaceId, cancellationToken).ConfigureAwait(false);
+            if (label is { Succeeded: true, Label: { } found })
+                await _host.RuntimeService.SetSessionLabelsAsync(sessionId, [found.Id], null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+        }
     }
 
     /// <summary>

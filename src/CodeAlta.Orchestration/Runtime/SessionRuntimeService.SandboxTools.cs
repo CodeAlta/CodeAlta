@@ -203,14 +203,48 @@ public sealed partial class SessionRuntimeService
         };
     }
 
+    /// <summary>
+    /// Gets the scratchpad folder of a sandboxed session, the only folder of the scratchpad its commands and its file tools
+    /// write: a sandboxed session writes a scratchpad of its own, since the shared one would let it leave instructions for
+    /// others. What it reads beside that folder is what its backend lets it read. CodeAlta itself writes nothing there: a
+    /// session that writes a folder could make a file CodeAlta writes in it land elsewhere, through a link.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The folder, which may not exist yet.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public string SandboxScratchpadOf(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Path.Combine(ScratchpadRoot, "sandbox", sessionId);
+    }
+
+    /// <summary>
+    /// Gets the folder where CodeAlta keeps the source of the runs of the scripts of a session (Code Mode), for the agent to
+    /// read, change and run again: <c>&lt;scratchpad&gt;/codemode/&lt;session&gt;</c>. Null for a sandboxed session, whose
+    /// source is not kept: its sandbox is granted no folder of the scratchpad but its own, and CodeAlta writes nothing in
+    /// that one, so the session is told of no file it cannot reach.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The folder, which may not exist yet, or null.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public async ValueTask<string?> GetScriptSourcesAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return (await GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false)).IsSandboxed ? null : Path.Combine(ScriptSourcesRoot, sessionId);
+    }
+
+    /// <summary>Gets the folder of the sources of the runs of the scripts of every session (<see cref="GetScriptSourcesAsync"/>).</summary>
+    public string ScriptSourcesRoot => Path.Combine(ScratchpadRoot, "codemode");
+
     // The note a run carries about the sandbox of its session: what it allows, when the agent was told something else, or
     // nothing yet while it is sandboxed. Null when there is nothing to tell. The instructions stay the same: their text
     // is what the provider keeps in its cache.
     private async Task<(string Text, string Noted)?> SandboxNoteForAsync(RuntimeSessionEntry entry, CancellationToken cancellationToken)
     {
         var sandbox = await GetSessionSandboxAsync(entry.SessionId, cancellationToken).ConfigureAwait(false);
-        var scratchpad = sandbox.IsSandboxed && !string.IsNullOrWhiteSpace(ScratchpadRoot) ? Path.Combine(ScratchpadRoot, "sandbox", entry.SessionId) : null;
-        var note = SandboxOutsideCommands.Note(sandbox, scratchpad);
+        var scratchpad = sandbox.IsSandboxed ? SandboxScratchpadOf(entry.SessionId) : null;
+        var note = SandboxOutsideCommands.Note(sandbox, scratchpad, SandboxedProviders.RunsCodeAltaShell(ProviderTypeOf(entry.ProviderKey)));
         return entry.SandboxNoted is { } told ? told == note.Noted ? null : note : note.Noted == "off" ? null : note;
     }
 
@@ -298,8 +332,6 @@ public sealed partial class SessionRuntimeService
     private async Task<SessionSandboxStart> SandboxStartOfAsync(string sessionId, string providerId, ResolvedSandboxProfile profile, string workingDirectory,
         IReadOnlyList<string> projectRoots, AgentProcessEnvironment? environment, bool commandGuard, CancellationToken cancellationToken)
     {
-        // A sandboxed session writes a scratchpad of its own: the shared one would let it leave instructions for others.
-        string? scratchpad = string.IsNullOrWhiteSpace(ScratchpadRoot) ? null : Path.Combine(ScratchpadRoot, "sandbox", sessionId);
         // The session writes its working directory, never its project folder besides: a session in a worktree leaves
         // the checkout of the user as it is. The project folders are the repositories whose git folder its worktree
         // may write.
@@ -310,12 +342,25 @@ public sealed partial class SessionRuntimeService
             Writable = writable,
             ProjectFolders = projectFolders,
             Repositories = [.. projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)],
-            Scratchpad = scratchpad,
+            Scratchpad = SandboxScratchpadOf(sessionId),
             Readable = await ToolOutputGrantAsync(sessionId, cancellationToken).ConfigureAwait(false),
             SkillFolders = await SkillFoldersOfAsync(sessionId, cancellationToken).ConfigureAwait(false),
+            ProjectSecrets = await SandboxProjectSecretsAsync(sessionId, cancellationToken).ConfigureAwait(false),
+            WithheldVariables = _entries.TryGetValue(sessionId, out var attached) ? attached.Identity.SharedSecretVariables : [],
         };
         var (withValues, problem) = await SandboxVariablesOfAsync(sessionId, profile, cancellationToken).ConfigureAwait(false);
         return new SessionSandboxStart(sessionId, providerId, withValues, folders, environment?.Variables ?? [], commandGuard) { VariableProblem = problem };
+    }
+
+    // The secrets the project of an attached session gives its sandbox: the variables whose secrets only the project gets, as
+    // its identity read them when it attached. The session's own project names the home folder they are used in: a sub-project
+    // that gets a secret of its repository keeps a home of its own, since it may get others the repository does not.
+    private async Task<SandboxProjectSecrets?> SandboxProjectSecretsAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated || entry.Identity.ProjectSecretVariables is not { Count: > 0 } variables) return null;
+        return await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is { ProjectId: { Length: > 0 } projectId }
+            ? new SandboxProjectSecrets(projectId, variables)
+            : null;
     }
 
     // What the project of a session adds to its sandbox: the folder of the repository a sub-project writes when the session
@@ -590,12 +635,13 @@ public sealed partial class SessionRuntimeService
             var folder = FolderOf(inside, options);
             var request = new AgentCommandPermissionRequest(options.ProviderId, options.SessionId, DateTimeOffset.UtcNow, RunId: null, InteractionId: invocation.ToolCallId,
                 ApprovalId: null, Command: command, WorkingDirectory: folder, Actions: null, Reason: reason.Trim(), Network: null, ProposedExecPolicyAmendment: null,
-                ProposedNetworkPolicyAmendments: null) { OutsideSandbox = true };
+                ProposedNetworkPolicyAmendments: null) { OutsideSandbox = true, DenialTakesFeedback = true };
             var decision = await options.OnPermissionRequest(request, cancellationToken).ConfigureAwait(false);
             if (decision.Kind is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession))
                 return Refused(tool, decision is { Kind: AgentPermissionDecisionKind.Deny, Source: AgentPermissionDecisionSource.Policy or AgentPermissionDecisionSource.Unattended }
                     ? $"it may not run outside the sandbox. {decision.DescribeDenial()}"
-                    : "the user did not allow it to run outside the sandbox.");
+                    // What the user said with the refusal (what to do instead) is read with it, in the same result.
+                    : $"the user did not allow it to run outside the sandbox.{decision.DescribeUserFeedback()}");
             // The policy of the organization may have kept every command in the sandbox while the user answered.
             if (await sandboxOf(cancellationToken).ConfigureAwait(false) is { IsSandboxed: true } now && now.Profile is not { Outside: SandboxOutside.Ask })
                 return Refused(tool, "the sandbox of this session no longer lets a command run outside it. Ask the user to run it.");

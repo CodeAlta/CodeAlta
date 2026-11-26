@@ -843,7 +843,7 @@ public sealed class CodeAltaShellControllerTests
             WorkingDirectory = @"C:\repo",
             Title = "Test session",
             Status = SessionViewStatus.Active,
-            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1), // not a limit
             UpdatedAt = DateTimeOffset.UtcNow,
             LastActiveAt = DateTimeOffset.UtcNow,
         };
@@ -851,7 +851,7 @@ public sealed class CodeAltaShellControllerTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(5);
         while (!condition())
         {
             if (DateTimeOffset.UtcNow >= deadline)

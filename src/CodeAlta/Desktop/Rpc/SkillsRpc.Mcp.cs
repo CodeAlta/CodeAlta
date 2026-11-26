@@ -40,7 +40,8 @@ internal sealed partial class SkillsService
         try
         {
             var servers = await plugin.ListSkillsAsync(new McpSkillsRequest(project.Root, null), cancellationToken).ConfigureAwait(false);
-            var local = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills
+            var context = await FolderContextAsync(project.Project, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var local = (await _management.LoadProjectListingAsync(SkillListingScope.Combined, project.Project, context, cancellationToken).ConfigureAwait(false)).Skills
                 .Select(static skill => skill.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var remaining = MaximumSkills;
             var entries = new List<SkillsMcpServer>();

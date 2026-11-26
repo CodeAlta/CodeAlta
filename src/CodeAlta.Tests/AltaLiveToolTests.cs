@@ -6,6 +6,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Credentials;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -5345,6 +5346,25 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task CredentialPolicies_AreListedWhenOnlyTheBrokerIsRegistered()
+    {
+        using var broker = new CredentialBroker(new CredentialBrokerOptions { GlobalRoot = _home.Path });
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(broker));
+
+        var help = await dispatcher.InvokeAsync(["credential", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsTrue(help.IsHelp);
+        var tools = await dispatcher.InvokeAsync(["tool", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, tools.ExitCode);
+        var paths = ReadJsonLines(tools.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.paths");
+        var credentials = paths.GetProperty("paths").EnumerateArray().Select(static item => item.GetString())
+            .Where(static name => name?.StartsWith("credential ", StringComparison.Ordinal) == true).ToArray();
+        CollectionAssert.AreEquivalent(
+            new[] { "credential types", "credential list", "credential status", "credential unlock", "credential lock", "credential add", "credential remove" },
+            credentials);
+        AssertJsonArrayContains(paths.GetProperty("mutating"), "credential unlock");
+    }
+
+    [TestMethod]
     public async Task SessionTitle_ShowsNamesAndChoosesHowASessionIsTitled()
     {
         using var root = TempDirectory.Create();
@@ -5425,6 +5445,71 @@ public sealed partial class AltaLiveToolTests
         CollectionAssert.Contains(paths.GetProperty("mutating").EnumerateArray().Select(static item => item.GetString()).ToArray(), "session title");
     }
 
+    [TestMethod]
+    public async Task SessionLabel_GivesLabelsForSessions_AndSessionListFiltersByThem()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var host = fixture.Host;
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(host.CatalogOptions).Add(host.ProjectCatalog).Add(host.SpaceCatalog)
+            .Add(host.SessionViewCatalog).Add(host.RuntimeService));
+        async Task<JsonElement> OkAsync(string type, AltaCallerIdentity caller, params string[] arguments)
+        {
+            var result = await dispatcher.InvokeAsync(arguments, caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+            return BranchRecords(result, type).Single();
+        }
+
+        var audit = await OkAsync("alta.label.created", AltaCallerIdentity.Cli, "label", "create", "Audit", "--for", "sessions", "--description", "Runs of the weekly audit.").ConfigureAwait(false);
+        Assert.AreEqual("sessions", audit.GetProperty("for").GetString());
+        await OkAsync("alta.label.created", AltaCallerIdentity.Cli, "label", "create", "Weekly", "--parent", "audit").ConfigureAwait(false);
+        await OkAsync("alta.label.created", AltaCallerIdentity.Cli, "label", "create", "Infra").ConfigureAwait(false);
+        var listed = await dispatcher.InvokeAsync(["label", "list", "--for", "sessions"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "audit", "weekly" }, BranchRecords(listed, "alta.label.item").Select(static item => item.GetProperty("id").GetString()).ToArray());
+
+        var labeled = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, fixture.Options, null, CancellationToken.None).ConfigureAwait(false);
+        var other = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, fixture.Options, null, CancellationToken.None).ConfigureAwait(false);
+        var agent = fixture.Agent(labeled.SessionId);
+        static string?[] Ids(JsonElement record) => [.. record.GetProperty("labels").EnumerateArray().Select(static label => label.GetProperty("id").GetString())];
+
+        // Without an option the command reads; the session of the caller is the one it is about.
+        Assert.HasCount(0, Ids(await OkAsync("alta.session.labels", agent, "session", "label").ConfigureAwait(false)));
+        var given = await OkAsync("alta.session.labels", agent, "session", "label", "--add", "Audit › Weekly").ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "weekly" }, Ids(given));
+        Assert.IsTrue(given.GetProperty("changed").GetBoolean());
+        CollectionAssert.AreEqual(new[] { "weekly", "audit" }, Ids(await OkAsync("alta.session.labels", AltaCallerIdentity.Cli, "session", "label", labeled.SessionId, "--add", "audit,weekly").ConfigureAwait(false)));
+
+        // `session list --label` lists the sessions of a label and of the labels under it.
+        var byLabel = await dispatcher.InvokeAsync(["session", "list", "--label", "audit"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var items = BranchRecords(byLabel, "alta.session.item");
+        CollectionAssert.AreEqual(new[] { labeled.SessionId }, items.Select(static item => item.GetProperty("sessionId").GetString()).ToArray(), byLabel.Transcript);
+        CollectionAssert.AreEqual(new[] { "weekly", "audit" }, items[0].GetProperty("labels").EnumerateArray().Select(static id => id.GetString()).ToArray());
+        var all = await dispatcher.InvokeAsync(["session", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsTrue(BranchRecords(all, "alta.session.item").Any(item => item.GetProperty("sessionId").GetString() == other.SessionId));
+
+        (string[] Args, int ExitCode, string Code)[] refused =
+        [
+            (["session", "label", labeled.SessionId, "--add", "infra"], AltaExitCodes.Usage, "label.invalid"),
+            (["session", "label", labeled.SessionId, "--add", "missing"], AltaExitCodes.NotFound, "label.notFound"),
+            (["session", "label", labeled.SessionId, "--clear", "--add", "audit"], AltaExitCodes.Usage, "usage.labelConflict"),
+            (["session", "label"], AltaExitCodes.Usage, "usage.missingSession"),
+            (["session", "list", "--label", "infra"], AltaExitCodes.Usage, "label.invalid"),
+        ];
+        foreach (var (args, exitCode, code) in refused)
+        {
+            var result = await dispatcher.InvokeAsync(args, caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(exitCode, result.ExitCode, result.Transcript);
+            Assert.AreEqual(code, BranchRecords(result, "alta.error").Single().GetProperty("code").GetString(), string.Join(' ', args));
+        }
+
+        var projectLabel = await dispatcher.InvokeAsync(["label", "assign", "audit", host.CurrentProject.Id], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, projectLabel.ExitCode, projectLabel.Transcript);
+        StringAssert.Contains(BranchRecords(projectLabel, "alta.error").Single().GetProperty("message").GetString(), "alta session label");
+
+        CollectionAssert.AreEqual(new[] { "audit" }, Ids(await OkAsync("alta.session.labels", agent, "session", "label", "--remove", "weekly").ConfigureAwait(false)));
+        Assert.HasCount(0, Ids(await OkAsync("alta.session.labels", agent, "session", "label", "--clear").ConfigureAwait(false)));
+    }
+
     private static List<JsonElement> BranchRecords(AltaCommandResult result, string type)
         => ReadJsonLines(result.Stdout).Where(line => line.GetProperty("type").GetString() == type).ToList();
 
@@ -5489,7 +5574,7 @@ public sealed partial class AltaLiveToolTests
         public async Task WaitIdleAsync(string sessionId)
         {
             var session = await ListedAsync(sessionId).ConfigureAwait(false);
-            var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
             while (await Host.RuntimeService.HasActiveRunAsync(session, CancellationToken.None).ConfigureAwait(false))
             {
                 Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The run did not end.");
@@ -7406,7 +7491,7 @@ public sealed partial class AltaLiveToolTests
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(2);
         while (!condition())
         {
             if (DateTimeOffset.UtcNow >= deadline)
@@ -7422,7 +7507,7 @@ public sealed partial class AltaLiveToolTests
     // the prompt is not there at once, and a journal being written can be read again.
     private static async Task<SessionViewLocalState> WaitForJournalStateAsync(SessionViewCatalog catalog, string sessionId, Func<SessionViewLocalState, bool> expected)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
         while (true)
         {
             SessionViewLocalState? state = null;
@@ -7442,7 +7527,7 @@ public sealed partial class AltaLiveToolTests
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(2);
         while (!await condition().ConfigureAwait(false))
         {
             if (DateTimeOffset.UtcNow >= deadline)

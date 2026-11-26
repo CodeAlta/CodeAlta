@@ -1233,6 +1233,7 @@ export const messages = dictionary({
   "Saved": ["Guardado", "Enregistré", "Gespeichert", "保存済み", "已保存"],
   "Modified": ["Modificado", "Modifié", "Geändert", "変更あり", "已修改"],
   "Read-only": ["Solo lectura", "Lecture seule", "Schreibgeschützt", "読み取り専用", "只读"],
+  "Disabled by repository": ["Desactivado por el repositorio", "Désactivé par le dépôt", "Vom Repository deaktiviert", "リポジトリで無効", "已由仓库禁用"],
   "Unavailable": ["No disponible", "Indisponible", "Nicht verfügbar", "利用不可", "不可用"],
   "Changed on disk": ["Cambiado en disco", "Modifié sur le disque", "Auf Datenträger geändert", "ディスク上で変更", "磁盘上已更改"],
   "Ln {line}, Col {column}": ["Lín. {line}, col. {column}", "Li {line}, col {column}", "Zeile {line}, Spalte {column}", "{line} 行、{column} 列", "行 {line}，列 {column}"],

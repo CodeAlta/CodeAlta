@@ -91,7 +91,6 @@ public sealed class DesktopWorkspaceTests
     }
 
     [TestMethod]
-    [DataRow("browser only", true)]
     [DataRow("catalog", true)]
     [DataRow("reordered", true)]
     [DataRow("missing data", false)]
@@ -118,17 +117,21 @@ public sealed class DesktopWorkspaceTests
         var parent = OperatingSystem.IsWindows() ? @"C:\desktop-fixture" : "/desktop-fixture";
         var data = Path.Combine(parent, "browser");
         var catalog = Path.Combine(parent, "copy");
-        string[] args = ["--data-root", data, "--catalog-root", catalog, "--allow-catalog-cache"];
+        var project = Path.Combine(parent, "project");
+        var home = Path.Combine(parent, "home");
+        var builtin = Path.Combine(parent, "builtin");
+        string[] owned = ["--allow-owned-host", "--project-root", project, "--discovery-home", home,
+            "--instruction-root", parent, "--builtin-skill-root", builtin];
+        string[] args = ["--data-root", data, "--catalog-root", catalog, "--allow-catalog-cache", .. owned];
         switch (row)
         {
-            case "browser only": args = ["--data-root", data]; break;
-            case "reordered": args = ["--allow-catalog-cache", "--catalog-root", catalog, "--data-root", data]; break;
-            case "missing data": args = ["--catalog-root", catalog, "--allow-catalog-cache"]; break;
+            case "reordered": args = [.. owned, "--allow-catalog-cache", "--catalog-root", catalog, "--data-root", data]; break;
+            case "missing data": args = ["--catalog-root", catalog, "--allow-catalog-cache", .. owned]; break;
             case "relative data": args[1] = "relative"; break;
             case "alta data": args[1] = Path.Combine(parent, ".ALTA", "browser"); break;
             case "alta before traversal": args[1] = Path.Combine(parent, ".alta", "..", "browser"); break;
-            case "missing consent": args = ["--data-root", data, "--catalog-root", catalog]; break;
-            case "consent only": args = ["--data-root", data, "--allow-catalog-cache"]; break;
+            case "missing consent": args = ["--data-root", data, "--catalog-root", catalog, .. owned]; break;
+            case "consent only": args = ["--data-root", data, "--allow-catalog-cache", .. owned]; break;
             case "relative catalog": args[3] = "relative"; break;
             case "alta catalog": args[3] = Path.Combine(parent, ".alta", "copy"); break;
             case "same roots": args[3] = data; break;
@@ -139,6 +142,7 @@ public sealed class DesktopWorkspaceTests
             case "mixed early flag": args = ["--help", .. args]; break;
         }
         bool DirectoryExists(string path) =>
+            path == project || path == home || path == parent || path == builtin ||
             (path == catalog && row is not "missing catalog" and not "catalog file") ||
             (path == data && row == "existing data directory") || (path == Path.GetPathRoot(parent) && row == "catalog volume root");
         bool FileExists(string path) =>
@@ -149,7 +153,8 @@ public sealed class DesktopWorkspaceTests
         {
             Assert.IsNotNull(options);
             Assert.AreEqual(data, options.DataRoot);
-            Assert.AreEqual(row == "browser only" ? null : catalog, options.CatalogRoot);
+            Assert.AreEqual(catalog, options.CatalogRoot);
+            Assert.AreEqual(new OwnedDesktopRoots(project, home, parent, builtin), options.Owned);
             Assert.IsNull(error);
         }
         else
@@ -607,6 +612,12 @@ public sealed class DesktopWorkspaceTests
         Assert.HasCount(first.Sessions.Length + 2, Search("zebra").Sessions);
         Assert.HasCount(first.Sessions.Length + 1, Search("busy-699").Sessions, "A session is found by its identifier.");
         Assert.HasCount(first.Sessions.Length, Search("nothing has this").Sessions);
+        // A word that names a label finds the sessions that have one whose id starts so, with the other words in their title.
+        sessions[650] = sessions[650] with { ViewState = new AgentSessionViewStateMetadata(Archived: false) { Labels = ["audit-weekly"] } };
+        CollectionAssert.AreEqual(new[] { "busy-650" }, Search("label:audit").Sessions.Select(static session => session.Id).Except(first.Sessions.Select(static session => session.Id)).ToArray());
+        Assert.HasCount(first.Sessions.Length + 1, Search("zebra label:AUDIT").Sessions);
+        Assert.HasCount(first.Sessions.Length, Search("parser label:audit").Sessions);
+        Assert.HasCount(first.Sessions.Length, Search("label:weekly").Sessions);
         // A search of one list leaves the others alone.
         Assert.HasCount(first.Sessions.Length, Search("zebra", scoped: true, project: "quiet").Sessions);
         Assert.HasCount(first.Sessions.Length, Search("zebra", scoped: true).Sessions);

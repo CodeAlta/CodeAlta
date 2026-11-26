@@ -19,7 +19,8 @@ public sealed class SessionPermissionsRpcTests
     }
     private static SessionPermissionsService Service(SessionOwnedPermissionPage page,
         Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken, ValueTask<bool>>? resolve = null)
-        => new((_, _) => ValueTask.FromResult(page), resolve ?? ((_, _, _) => throw new AssertFailedException("Resolve forbidden.")), Epoch, static () => true);
+        => new((_, _) => ValueTask.FromResult(page), resolve is null ? (_, _, _, _) => throw new AssertFailedException("Resolve forbidden.") : (handle, decision, _, token) => resolve(handle, decision, token),
+            Epoch, static () => true);
 
     [TestMethod]
     public void CommandReviewFlag_IsExplicitOwnedOnlyAndDefaultOff()
@@ -36,7 +37,7 @@ public sealed class SessionPermissionsRpcTests
         Assert.IsFalse(DesktopCommandLine.TryParse([.. args, "--review-owned-command-permissions", "--review-owned-command-permissions"], Exists, _ => false, out _, out _));
         Assert.IsFalse(DesktopCommandLine.TryParse(["--data-root", root + "/browser", "--review-owned-command-permissions"], Exists, _ => false, out _, out _));
         Assert.IsFalse(DesktopCommandLine.TryParse([.. args.Where(arg => arg != "--allow-owned-host"), "--review-owned-command-permissions"], Exists, _ => false, out _, out _));
-        Assert.IsFalse(new BootService().Status(new()).CommandReviewEnabled);
+        Assert.IsFalse(new BootService(developer: false).Status(new()).CommandReviewEnabled);
         Assert.IsFalse(new BootService(Epoch).Status(new()).CommandReviewEnabled);
         Assert.IsTrue(new BootService(Epoch, true).Status(new()).CommandReviewEnabled);
     }
@@ -47,7 +48,7 @@ public sealed class SessionPermissionsRpcTests
         foreach (var enabled in new[] { false, true })
         {
             var service = new SessionPermissionsService((_, _) => throw new AssertFailedException("List forbidden."),
-                (_, _, _) => throw new AssertFailedException("Resolve forbidden."), Epoch, () => enabled);
+                (_, _, _, _) => throw new AssertFailedException("Resolve forbidden."), Epoch, () => enabled);
             foreach (var identity in new[] { "", " padded ", "bad\n", "\ud800", "\udc00", new string('x', 129) })
                 Assert.AreEqual("invalid_request", (await service.ListAsync(new(Epoch, identity), default)).Status);
             Assert.AreEqual("invalid_request", (await service.ListAsync(null!, default)).Status);
@@ -82,7 +83,7 @@ public sealed class SessionPermissionsRpcTests
         Assert.AreEqual("stale_epoch", (await service.ResolveAsync(new("old", handle, "allow_once"), default)).Status);
         await Assert.ThrowsAsync<OperationCanceledException>(() => service.ResolveAsync(new(Epoch, handle, "allow_once"), new CancellationToken(true)));
         var disabled = new SessionPermissionsService((_, _) => throw new AssertFailedException("List forbidden."),
-            (_, _, _) => throw new AssertFailedException("Resolve forbidden."), Epoch, static () => false);
+            (_, _, _, _) => throw new AssertFailedException("Resolve forbidden."), Epoch, static () => false);
         Assert.AreEqual("disabled", (await disabled.ResolveAsync(new(Epoch, handle, "allow_once"), default)).Status);
         Assert.AreEqual(0, called);
         foreach (var (decision, status) in new[] { ("allow_once", "resolved"), ("deny", "rejected"), ("cancel", "resolved") })
@@ -136,7 +137,7 @@ public sealed class SessionPermissionsRpcTests
         Assert.AreEqual(AgentPermissionDecisionKind.AllowAlways, forwarded);
         // The skill a waiting request asks to load is read for the user, and only that one.
         (string Session, string Server, string Uri)? read = null;
-        var reading = new SessionPermissionsService((_, _) => ValueTask.FromResult(new SessionOwnedPermissionPage([entry], false)), (_, _, _) => ValueTask.FromResult(true), Epoch, static () => true)
+        var reading = new SessionPermissionsService((_, _) => ValueTask.FromResult(new SessionOwnedPermissionPage([entry], false)), (_, _, _, _) => ValueTask.FromResult(true), Epoch, static () => true)
         {
             ReadSkill = (session, server, uri, _) => { read = (session, server, uri); return Task.FromResult<(string?, bool, string?)>(("# Refunds", true, null)); },
         };
@@ -197,12 +198,50 @@ public sealed class SessionPermissionsRpcTests
         var entry = Entry();
         var handle = (await Service(new([entry], false)).ListAsync(new(Epoch, "session"), default)).Entries[0].Handle;
         var service = new SessionPermissionsService((_, _) => ValueTask.FromException<SessionOwnedPermissionPage>(new IOException("private")),
-            (_, _, _) => ValueTask.FromException<bool>(new IOException("private")), Epoch, static () => true);
+            (_, _, _, _) => ValueTask.FromException<bool>(new IOException("private")), Epoch, static () => true);
         var page = await service.ListAsync(new(Epoch, "session"), default);
         var result = await service.ResolveAsync(new(Epoch, handle, "allow_once"), default);
         Assert.AreEqual("read_failed", page.Status);
         Assert.AreEqual("uncertain", result.Status);
         Assert.IsFalse(JsonSerializer.Serialize(result, DesktopJsonContext.Default.SessionPermissionResolution).Contains("private", StringComparison.Ordinal));
+    }
+
+    // What the user tells the agent with a denial goes to the owner with the denial, in the same call (#489); the
+    // window is told which requests take it.
+    [TestMethod]
+    public async Task ADenial_CarriesWhatTheUserSays_ForARequestThatTakesIt()
+    {
+        var entry = Entry();
+        var taking = entry with { Request = entry.Request with { DenialTakesFeedback = true } };
+        Assert.IsFalse((await Service(new([entry], false)).ListAsync(new(Epoch, "session"), default)).Entries.Single().DenialTakesFeedback);
+        var listed = (await Service(new([taking], false)).ListAsync(new(Epoch, "session"), default)).Entries.Single();
+        Assert.IsTrue(listed.DenialTakesFeedback);
+
+        var forwarded = new List<(AgentPermissionDecisionKind Decision, string? Feedback)>();
+        var service = new SessionPermissionsService((_, _) => ValueTask.FromResult(new SessionOwnedPermissionPage([taking], false)),
+            (_, decision, feedback, _) => { forwarded.Add((decision, feedback)); return ValueTask.FromResult(true); }, Epoch, static () => true);
+        Assert.AreEqual("resolved", (await service.ResolveAsync(new(Epoch, listed.Handle, "deny", "Use the dry run instead."), default)).Status);
+        Assert.AreEqual("resolved", (await service.ResolveAsync(new(Epoch, listed.Handle, "deny"), default)).Status);
+        CollectionAssert.AreEqual(new (AgentPermissionDecisionKind, string?)[] { (AgentPermissionDecisionKind.Deny, "Use the dry run instead."), (AgentPermissionDecisionKind.Deny, null) }, forwarded);
+
+        // Words go with a denial only, and are bounded: anything else is refused before the owner is asked.
+        foreach (var bad in new SessionPermissionResolveRequest[]
+                 {
+                     new(Epoch, listed.Handle, "allow_once", "Use the dry run instead."),
+                     new(Epoch, listed.Handle, "cancel", "Use the dry run instead."),
+                     new(Epoch, listed.Handle, "deny", "   "),
+                     new(Epoch, listed.Handle, "deny", new string('x', SessionPermissionService.UserFeedbackLimit + 1)),
+                     new(Epoch, listed.Handle, "deny", "a\0b"),
+                 })
+        {
+            Assert.AreEqual("invalid_request", (await service.ResolveAsync(bad, default)).Status);
+        }
+
+        Assert.HasCount(2, forwarded);
+        // An owner that does not take the words (the request no longer waits, or its answer carries none) resolves nothing.
+        var refusing = new SessionPermissionsService((_, _) => ValueTask.FromResult(new SessionOwnedPermissionPage([taking], false)),
+            (_, _, _, _) => ValueTask.FromResult(false), Epoch, static () => true);
+        Assert.AreEqual("rejected", (await refusing.ResolveAsync(new(Epoch, listed.Handle, "deny", "Use the dry run instead."), default)).Status);
     }
 
     [TestMethod]
@@ -218,7 +257,7 @@ public sealed class SessionPermissionsRpcTests
             Assert.AreEqual(listCancellation.Token, token);
             listCancellation.Cancel();
             return ValueTask.FromCanceled<SessionOwnedPermissionPage>(token);
-        }, (actual, _, token) =>
+        }, (actual, _, _, token) =>
         {
             Assert.AreEqual(entry.Handle, actual);
             Assert.AreEqual(resolveCancellation.Token, token);

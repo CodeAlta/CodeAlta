@@ -92,6 +92,8 @@ A provider that runs a program ([Claude Code](setup.md#claude-code-settings), [C
 
 Saved settings reach the sessions already open: an idle session takes them at its next prompt, and a running turn finishes with the settings it started with.
 
+CodeAlta TUI refuses to save the form if the configuration changed on disk since it was loaded. Choose **Refresh** and reapply your changes.
+
 A deleted provider leaves the model tiers, the global ones and those of each space; a provider given another key keeps its place in them under the new key. Its sessions keep their history:
 
 - in CodeAlta Desktop, a session of a deleted provider switches to the default provider when you open it, and says so;
@@ -158,7 +160,7 @@ color = "#22B8CD"
 
 ## Subscription usage
 
-Codex, Codex CLI, Copilot and Claude Code are subscriptions with limits. CodeAlta Desktop shows how much of each limit is used and when it starts over:
+Codex, Codex CLI, Copilot, Claude Code and Google Antigravity are subscriptions with limits. CodeAlta Desktop shows how much of each limit is used and when it starts over:
 
 - in the **Usage** section of the provider, in **Settings > Providers**;
 - under **Subscription usage** in the [context usage](../workspace/prompt.md#context-usage) of a session.
@@ -177,9 +179,10 @@ Each limit is a meter. Its fill is what is used; the small mark shows how far th
 | Codex CLI | The same, for the account of the provider | Codex, in the folder of the provider |
 | Copilot | The AI credits or premium requests of the month, chat and completions | GitHub, with the sign-in of the provider |
 | Claude Code | The 5-hour window, the week, the weekly limit of a model, the usage credits spent | The Claude Code CLI |
+| Google Antigravity | The 5-hour window and the week of each group of models: the Gemini models, and the Claude and GPT models | The Antigravity CLI (`agy`) the provider runs |
 
 - CodeAlta asks when you open the page or the context usage, or choose **Refresh usage**, never in the background. An answer is kept for a minute.
-- For Codex and Claude Code, CodeAlta asks the provider's command-line program and never reads its credentials. When the program is missing, or the Codex CLI is signed in with another account, the Usage section says so. For a ChatGPT plan, install the Codex CLI and run `codex login`.
+- For Codex, Claude Code and Google Antigravity, CodeAlta asks the provider's command-line program and never reads its credentials. When the program is missing, or the Codex CLI is signed in with another account, the Usage section says so. For a ChatGPT plan, install the Codex CLI and run `codex login`.
 - In a session, the limits the last turns reported are shown until the provider answers, and keep its answer up to date while the turns run.
 
 ## Prompt caching

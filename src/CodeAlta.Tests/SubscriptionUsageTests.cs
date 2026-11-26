@@ -330,6 +330,69 @@ public sealed class SubscriptionUsageTests
         }
     }
 
+    [TestMethod]
+    public void Antigravity_ReadsTheWindowsOfEachGroupOfModels()
+    {
+        // What `agy --print /usage --output-format json` writes (1.5.14).
+        var reading = AntigravityAccountUsage.Parse("""
+            {"conversation_id":"","status":"SUCCESS","response":"Gemini Models\tWeekly Limit Remaining\t97%\t2026-11-28T18:21:12Z\n","duration_seconds":0,"num_turns":0,
+             "command":{"name":"usage","data":{"description":"Within each group, models share a weekly limit and a 5-hour limit.","groups":[
+               {"name":"Gemini Models","description":"Models within this group: Gemini 4 Carbon","buckets":[
+                 {"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.9726318717002869,"reset_time":"2026-11-28T18:21:12Z"},
+                 {"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.9205273389816284,"reset_time":"2026-11-21T23:21:12Z"}]},
+               {"name":"Claude and GPT models","buckets":[
+                 {"id":"3p-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":1,"reset_time":"1970-01-01T00:00:00Z"},
+                 {"id":"3p-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":1,"reset_time":"1970-01-01T00:00:00Z"},
+                 {"id":"3p-new","name":"Something new","window":"monthly","remaining_fraction":0.5},
+                 {"id":"3p-broken","window":"5h"}]}]}}}
+            """, string.Empty, Now)!;
+
+        Assert.AreEqual(AgentSubscriptionUsageReading.Ok, reading.Status);
+        var usage = reading.Usage!;
+        Assert.IsNull(usage.Plan, "The CLI does not name the plan with its usage.");
+        Assert.AreEqual(Now, usage.ObservedAt);
+        // The shorter window first in each group, as the other providers give theirs.
+        CollectionAssert.AreEqual(new[] { "gemini-5h", "gemini-weekly", "3p-5h", "3p-weekly", "3p-new" }, usage.Limits.Select(static limit => limit.Id).ToArray());
+        var fiveHours = usage.Limits[0];
+        Assert.AreEqual("Gemini Models", fiveHours.Name);
+        Assert.AreEqual(7.947, fiveHours.UsedPercent!.Value, 0.001);
+        Assert.AreEqual(300, fiveHours.WindowMinutes);
+        Assert.AreEqual(new DateTimeOffset(2026, 11, 21, 23, 21, 12, TimeSpan.Zero), fiveHours.ResetsAt);
+        Assert.AreEqual(7 * 24 * 60, usage.Limits[1].WindowMinutes);
+        Assert.AreEqual(2.737, usage.Limits[1].UsedPercent!.Value, 0.001);
+        // A window nothing was used of has not started: it has no end yet.
+        Assert.AreEqual(0, usage.Limits[2].UsedPercent);
+        Assert.IsNull(usage.Limits[2].ResetsAt);
+        Assert.AreEqual("Claude and GPT models", usage.Limits[3].Name);
+        Assert.IsNull(usage.Limits[4].WindowMinutes, "A window CodeAlta does not know is a limit without a length.");
+    }
+
+    [TestMethod]
+    public void Antigravity_SaysWhenItIsSignedOut_HasNoLimits_OrDidNotAnswerItsUsage()
+    {
+        Assert.AreEqual(AgentSubscriptionUsageReading.SignedOut,
+            AntigravityAccountUsage.Parse(string.Empty, "Error: Please sign in to view your usage. Launch the CLI without arguments to sign in.", Now)!.Status);
+        Assert.AreEqual(AgentSubscriptionUsageReading.SignedOut,
+            AntigravityAccountUsage.Parse("""{"status":"ERROR","response":"Please sign in to continue."}""", string.Empty, Now)!.Status);
+        // An API key has no plan: the answer has no group.
+        Assert.AreEqual(AgentSubscriptionUsageReading.Unavailable,
+            AntigravityAccountUsage.Parse("""{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[]}}}""", string.Empty, Now)!.Status);
+        // A CLI too old to know /usage answers the prompt as a model would, or not in JSON.
+        Assert.IsNull(AntigravityAccountUsage.Parse("""{"status":"SUCCESS","response":"I do not know /usage."}""", string.Empty, Now));
+        Assert.IsNull(AntigravityAccountUsage.Parse("unknown flag: --output-format", string.Empty, Now));
+    }
+
+    [TestMethod]
+    public void TheAntigravityCli_IsKnownByItsExecutableStartedAsAnAcpServer()
+    {
+        Assert.IsTrue(AntigravityCli.IsAcpServer("C:\\Users\\me\\.alta\\cache\\acp\\agents\\antigravity-acp\\1.5.14\\windows-x86_64\\agy.exe", ["acp"]));
+        Assert.IsTrue(AntigravityCli.IsAcpServer("/home/me/.alta/cache/acp/agents/antigravity-acp/1.5.14/linux-x86_64/antigravity", ["acp"]));
+        Assert.IsTrue(AntigravityCli.IsAcpServer("agy", ["acp", "--sandbox"]));
+        Assert.IsFalse(AntigravityCli.IsAcpServer("agy", ["--print", "hello"]));
+        Assert.IsFalse(AntigravityCli.IsAcpServer("C:\\agents\\agy_acp_server.exe", []));
+        Assert.IsFalse(AntigravityCli.IsAcpServer("npx", ["--yes", "@github/copilot", "--acp"]));
+    }
+
     private sealed class TempDirectory : IDisposable
     {
         public TempDirectory() => Directory.CreateDirectory(Path);

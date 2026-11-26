@@ -556,7 +556,7 @@ public sealed class DesktopAutomationPlacementTests
         public Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken)
         {
             var count = Interlocked.Increment(ref _runs);
-            var run = new FleetAutomationRunInfo($"node-run-{count}", id, DateTimeOffset.UtcNow.AddSeconds(count), "manual", AutomationRun.Running)
+            var run = new FleetAutomationRunInfo($"node-run-{count}", id, DateTimeOffset.UtcNow.AddSeconds(count), "manual", AutomationRun.Running) // not a limit
                 { Name = "Nightly on the mini", SessionId = $"node-session-{count}" };
             RunList.Enqueue(run);
             return Task.FromResult(run);

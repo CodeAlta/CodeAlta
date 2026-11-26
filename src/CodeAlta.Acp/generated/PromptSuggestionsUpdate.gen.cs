@@ -26,7 +26,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record PromptSuggestionsUpdate
 {
-    /// <summary>The suggestions the Client can offer, ordered most likely first.  Required and non-null. An empty list withdraws the suggestions the Client is offering. A Client skips an entry it cannot parse and keeps the rest.</summary>
+    /// <summary>The suggestions the Client can offer, ordered most likely first.  Required and non-null. An empty list withdraws the suggestions the Client is offering.</summary>
     [JsonPropertyName("suggestions")]
     public List<PromptSuggestion> Suggestions { get; set; } = [];
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>

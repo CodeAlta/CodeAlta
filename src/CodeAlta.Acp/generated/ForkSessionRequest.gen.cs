@@ -26,7 +26,7 @@ public sealed partial record ForkSessionRequest
     /// <summary>The ID of the session to fork.</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>Additional workspace roots to activate for this session. Each path must be absolute.  When omitted or empty, no additional roots are activated. When non-empty, this is the complete resulting additional-root list for the forked session.</summary>
+    /// <summary>Additional workspace roots to activate for this session. Each path MUST be absolute.  When omitted or empty, no additional roots are activated. When non-empty, this is the complete resulting additional-root list for the forked session.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Initial values for the forked session's config options.  Optional. Omitted and `null` are equivalent to an empty list. Clients MUST only send this when the Agent advertises `sessionCapabilities.options`.  The Agent applies the entries in list order on top of the configuration the fork starts with, as if the Client had called `session/set_config_option` for each entry after the session was set up. Malformed entries and duplicate `configId` values fail the request with `-32602`. The Agent MUST ignore an entry whose `configId` is unknown, whose `type` does not match the option, or whose value is not allowed when it is applied. The `configOptions` in the response contain the values the session actually has. The Agent SHOULD NOT send `config_option_update` notifications for these entries, and SHOULD NOT send other `session/update` notifications caused by applying them before it responds.</summary>
@@ -41,7 +41,7 @@ public sealed partial record ForkSessionRequest
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v1/draft/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>System-level instructions for the forked session.  Optional. Omitted and `null` are equivalent. The Agent may then keep a system prompt it stored with the source session or use its default instructions. Clients MUST only send this when the Agent advertises `sessionCapabilities.systemPrompt`, and SHOULD send the same value they used for the source session.</summary>
+    /// <summary>System-level instructions for the forked session.  Optional. Omitted and `null` are equivalent. The Agent MAY then keep a system prompt it stored with the source session or use its default instructions. Clients MUST only send this when the Agent advertises `sessionCapabilities.systemPrompt`, and SHOULD send the same value they used for the source session.</summary>
     [JsonPropertyName("systemPrompt")]
     public SystemPrompt? SystemPrompt { get; set; }
 }

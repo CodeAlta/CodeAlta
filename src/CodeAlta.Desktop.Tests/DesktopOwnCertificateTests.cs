@@ -48,7 +48,7 @@ public sealed class DesktopOwnCertificateTests
             Assert.AreEqual(pin, new FleetServerLinkStore(host.CatalogOptions.FleetRoot).Find(link.Url)!.CertificatePin, "the link keeps it");
             Assert.AreEqual(given, link.ShareableUrl);
 
-            var deadline = DateTime.UtcNow.AddSeconds(20);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(20);
             while (servers.Connections.SingleOrDefault()?.Connector?.State != FleetConnectorState.Online && DateTime.UtcNow < deadline) await Task.Delay(50, token);
             Assert.AreEqual(FleetConnectorState.Online, servers.Connections.Single().Connector!.State, "the control connection checks the pin");
             Assert.AreEqual(given, FleetServerService.View(servers.Connections.Single(), []).ShareUrl, "altanode join and the invitations carry the pin");

@@ -48,7 +48,8 @@ export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
     // What "Show more" counts of the sessions the lists leave out, and whether more of them can be asked for.
     snapshot.omittedChatSessions ?? 0, snapshot.wantedTruncated === true,
     snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath,
-      session.worktreePath, session.worktreeMissing, session.rewindCount, session.forkedFromSessionId, session.forkKind, session.archived, session.providerConversation === true])
+      session.worktreePath, session.worktreeMissing, session.rewindCount, session.forkedFromSessionId, session.forkKind, session.archived, session.providerConversation === true,
+      session.labels?.join(",") ?? ""])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
 }
 

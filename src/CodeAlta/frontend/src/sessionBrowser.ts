@@ -1,4 +1,5 @@
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { hasLabelWords, splitLabelWords } from "./labels/labels";
 import { sessionTreeRows } from "./sessionBrowserSelection";
 import { resolveSessionTab, type SessionTab } from "./sessionTabs";
 
@@ -23,10 +24,14 @@ export function browseSessions(snapshot: WorkspaceSnapshot, projectId: string | 
  */
 export function browseTree(snapshot: WorkspaceSnapshot, projectId: string | null, query: string, compare: (a: WorkspaceSession, b: WorkspaceSession) => number,
   limit = browserLimit) {
-  const needle = query.slice(0, 256).trim().toLocaleLowerCase();
+  // A word `label:audit` keeps the sessions with a label whose id starts with `audit`; the rest is looked for as one text.
+  const typed = query.slice(0, 256).trim().toLocaleLowerCase();
+  const { words, labels } = splitLabelWords(typed.split(/\s+/u).filter(Boolean));
+  const needle = labels.length ? words.join(" ") : typed;
   const scoped = snapshot.sessions.filter(row => projectId === null
     ? row.scopeKind === "global" && row.projectId === null : row.scopeKind === "project" && row.projectId === projectId);
-  const matched = needle ? new Set(scoped.filter(row => `${row.fullTitle}\n${row.title}\n${row.id}`.toLocaleLowerCase().includes(needle)).map(row => row.id)) : null;
+  const matched = needle || labels.length ? new Set(scoped.filter(row => hasLabelWords(row, labels)
+    && `${row.fullTitle}\n${row.title}\n${row.id}`.toLocaleLowerCase().includes(needle)).map(row => row.id)) : null;
   const rows = sessionTreeRows(scoped, matched, compare).slice(0, limit).map(node => {
     const tab: SessionTab = { sessionId: node.session.id, projectId, path: node.session.workspacePath };
     return { row: node.session, tab, valid: !!resolveSessionTab(snapshot, tab), depth: node.depth, match: node.match };

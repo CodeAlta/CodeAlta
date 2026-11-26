@@ -90,9 +90,13 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
                 SandboxNetworkProxy? proxy = null;
                 try
                 {
-                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, reserved, CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
+                    // The proxy reads the reserved ports at each connection: one CodeAlta takes while the worker runs is
+                    // refused at once, before the next call starts a worker with it.
+                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts, CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
+                    // The file tools write where the commands of the session write: its folder, those of its project, and
+                    // those its profile adds. The folders of the sandbox itself (scratchpad, temp) are given beside them.
                     var client = await SandboxWorkerClient.StartAsync(_backend, policy, _commandLine(), proxy?.Endpoint,
-                        new SandboxWorkerInit(start.SessionId, start.ProviderId, policy.WorkingDirectory, [policy.WorkingDirectory, .. start.Folders.Writable],
+                        new SandboxWorkerInit(start.SessionId, start.ProviderId, policy.WorkingDirectory, [policy.WorkingDirectory, .. start.Folders.Writable, .. policy.ProfileWrite],
                             start.Folders.Scratchpad, Host().HomeDirectory, start.CommandGuard) { TemporaryFolders = [policy.Temp] }, cancellationToken).ConfigureAwait(false);
                     slot.Current = new Running(client, proxy, key, policy);
                 }
@@ -146,7 +150,8 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         SandboxNetworkProxy? proxy = null;
         try
         {
-            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts(), CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
+            // The process of an agent lives as long as its session: its proxy reads the reserved ports at each connection.
+            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts, CodeAlta.Catalog.Network.NetworkProxy.ProcessUpstream);
             var process = await _backend.StartAsync(policy, SandboxCommandLine.Create(launch.FileName, launch.Arguments), proxy?.Endpoint, cancellationToken).ConfigureAwait(false);
             return new AgentProcess(process, proxy);
         }
@@ -273,6 +278,9 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
 
         key.Append(policy.ProfileName).Append('\u001E').Append(policy.WorkingDirectory).Append('\u001E').Append(policy.Network).Append('\u001E');
         Add(policy.ReadWrite);
+        // What the file tools of the worker write, which the container may grant for another reason too (a folder of the
+        // profile that is also one of the sandbox): the worker is told once, as it starts.
+        Add(policy.ProfileWrite);
         Add(policy.ReadOnly);
         Add(policy.Denied);
         Add(policy.Protected);

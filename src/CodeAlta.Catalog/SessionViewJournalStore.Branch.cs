@@ -198,6 +198,8 @@ public sealed partial class SessionViewJournalStore
             // What its agent was told of Adaptive is in the conversation it continues.
             AdaptiveNoted = sourceLocal?.AdaptiveNoted,
             AgentPromptId = sourceLocal?.AgentPromptId,
+            // A fork continues the same work: it keeps the labels of its source.
+            Labels = sourceLocal?.Labels is { Count: > 0 } labels ? [.. labels] : null,
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,
             CreatedBy = target.CreatedBy,

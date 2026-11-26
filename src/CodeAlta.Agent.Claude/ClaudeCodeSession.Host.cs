@@ -782,29 +782,43 @@ internal sealed partial class ClaudeCodeSession
         })).ConfigureAwait(false);
     }
 
-    // A tool the CLI runs itself, asked of the tool hooks of the session: a block denies the call with the reason the
-    // model reads. The hooks cannot change its input here (an input changed through a hook also skips the permissions
-    // of the CLI), and they do not see its result. They can approve a tool of an MCP server the CLI runs: its permission
-    // prompt is then answered here, after the checks of the host, without asking the run. A tool of CodeAlta runs its
-    // hooks when the session runs it.
+    // With _gate held, for a tool the CLI runs itself.
+    private string? DisabledToolRefusal(string toolName)
+        => _disabledTools?.Contains(toolName) == true || AgentToolPatterns.IsDisabled(toolName, _disabledToolPatterns)
+            ? $"`{toolName}` is turned off for this session in CodeAlta."
+            : null;
+
+    // A tool the CLI runs itself is checked against the session's disabled tools before its hooks are asked. A block
+    // denies the call with the reason the model reads. The hooks cannot change its input here (an input changed through
+    // a hook also skips the permissions of the CLI), and they do not see its result. They can approve a tool of an MCP
+    // server the CLI runs: its permission prompt is then answered after the checks of the host, without asking the run.
+    // A tool of CodeAlta runs its hooks when the session runs it.
     private async Task AnswerToolHookAsync(string requestId, JsonElement request)
     {
-        string? refusal = null;
+        ClaudeCodeJson.TryGetObject(request, "input", out var input);
+        if (ClaudeCodeJson.GetString(input, "tool_name") is not { Length: > 0 } toolName
+            || toolName.StartsWith(ClaudeCodeLauncher.McpToolPrefix, StringComparison.Ordinal))
+        {
+            // The tools of CodeAlta are filtered under their own names, not under the SDK server's MCP prefix.
+            await SendSafelyAsync(connection => connection.RespondAsync(requestId, null)).ConfigureAwait(false);
+            return;
+        }
+
+        CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? interceptor;
+        ModelProviderId providerId;
+        int approvalRun;
+        string? refusal;
+        lock (_gate)
+        {
+            refusal = DisabledToolRefusal(toolName);
+            interceptor = _toolInterceptor;
+            providerId = _providerId;
+            approvalRun = _approvalRuns;
+        }
+
         try
         {
-            CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? interceptor;
-            ModelProviderId providerId;
-            int approvalRun;
-            lock (_gate)
-            {
-                interceptor = _toolInterceptor;
-                providerId = _providerId;
-                approvalRun = _approvalRuns;
-            }
-
-            ClaudeCodeJson.TryGetObject(request, "input", out var input);
-            if (interceptor is not null && ClaudeCodeJson.GetString(input, "tool_name") is { Length: > 0 } toolName
-                && !toolName.StartsWith(ClaudeCodeLauncher.McpToolPrefix, StringComparison.Ordinal))
+            if (refusal is null && interceptor is not null)
             {
                 var arguments = ClaudeCodeJson.TryGetObject(input, "tool_input", out var toolInput) ? toolInput.Clone() : ClaudeCodeJson.EmptyObject;
                 var toolUseId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? ClaudeCodeJson.GetString(input, "tool_use_id");
@@ -837,8 +851,7 @@ internal sealed partial class ClaudeCodeSession
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // Hooks that fail let the permissions of the CLI decide, as without hooks; a hook that must not be skipped
-            // blocks by itself (it fails closed).
+            // A plugin hook that fails lets the permissions of the CLI decide. The session policy was checked first.
         }
 
         await SendSafelyAsync(connection => connection.RespondAsync(requestId, refusal is null ? null : writer =>

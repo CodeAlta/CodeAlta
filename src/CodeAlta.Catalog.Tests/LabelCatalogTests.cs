@@ -168,6 +168,57 @@ public sealed class LabelCatalogTests
     }
 
     [TestMethod]
+    public async Task LabelsOfSessions_AreATreeOfTheirOwn_AndNeverGoToProjects()
+    {
+        using var fixture = new Fixture();
+        var alpha = await fixture.Projects.UpsertFromPathAsync(fixture.Folder("alpha"));
+        var infra = (await fixture.Labels.CreateAsync("Infra")).Label!;
+        var audit = await fixture.Labels.CreateAsync("Audit", icon: "shield", description: "Runs of the weekly audit.", target: LabelTarget.Sessions);
+        Assert.AreEqual(LabelChangeStatus.Ok, audit.Status, audit.Message);
+        Assert.IsTrue(audit.Label!.IsForSessions);
+        StringAssert.Contains(await File.ReadAllTextAsync(audit.Label.SourcePath!), "\nfor: sessions\n");
+        Assert.IsFalse((await File.ReadAllTextAsync(infra.SourcePath!)).Contains("for:"), "A label of projects names no target.");
+
+        // A sub-label is for what its parent is for, and says nothing of it in its own file.
+        var weekly = (await fixture.Labels.CreateAsync("Weekly", parent: audit.Label.Id)).Label!;
+        Assert.IsTrue(weekly.IsForSessions);
+        Assert.IsFalse((await File.ReadAllTextAsync(weekly.SourcePath!)).Contains("for:"));
+        Assert.IsTrue((await fixture.Labels.GetAsync(weekly.Id))!.IsForSessions);
+
+        // The two trees never show together: a name can be in both, and a label does not go from one to the other.
+        Assert.IsTrue((await fixture.Labels.CreateAsync("infra", target: LabelTarget.Sessions)).Succeeded);
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.CreateAsync("audit", target: LabelTarget.Sessions)).Status);
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.MoveAsync(weekly.Id, infra.Id, -1)).Status);
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.AssignAsync(alpha.Id, [audit.Label.Id], null)).Status);
+        Assert.AreEqual(0, (await fixture.Projects.GetByIdAsync(alpha.Id))!.Labels.Count);
+        Assert.AreEqual(0, (await fixture.Labels.LoadMembersAsync()).Single(member => member.Label.Id == audit.Label.Id).ProjectIds.Count);
+
+        Assert.IsTrue((await fixture.Labels.MoveAsync(weekly.Id, null, -1)).Succeeded);
+        Assert.IsTrue((await fixture.Labels.GetAsync(weekly.Id))!.IsForSessions, "A sub-label moved to the top stays for sessions.");
+        StringAssert.Contains(await File.ReadAllTextAsync(weekly.SourcePath!), "\nfor: sessions\n");
+
+        // A place is counted among the labels of the same tree, as the page that shows one tree counts it.
+        Assert.IsTrue((await fixture.Labels.MoveAsync(weekly.Id, null, 1)).Succeeded);
+        CollectionAssert.AreEqual(new[] { "Audit", "Weekly", "infra" },
+            (await fixture.Labels.LoadAsync()).Where(static label => label.IsForSessions).Select(static label => label.Name).ToArray());
+    }
+
+    [TestMethod]
+    public async Task AnAutomation_FindsTheLabelItNames_OrCreatesItForSessions()
+    {
+        using var fixture = new Fixture();
+        var audit = (await fixture.Labels.CreateAsync("Audit", target: LabelTarget.Sessions)).Label!;
+        Assert.AreEqual(audit.Id, (await fixture.Labels.GetOrCreateForSessionsAsync("AUDIT", null)).Label!.Id, "Found by its id.");
+        Assert.IsTrue((await fixture.Labels.CreateAsync("Nightly review")).Succeeded, "A label for projects of the same name is not the one.");
+        var created = await fixture.Labels.GetOrCreateForSessionsAsync("Nightly review", null);
+        Assert.AreEqual(LabelChangeStatus.Ok, created.Status, created.Message);
+        Assert.IsTrue(created.Label!.IsForSessions);
+        Assert.AreEqual("nightly-review-2", created.Label.Id);
+        Assert.AreEqual(created.Label.Id, (await fixture.Labels.GetOrCreateForSessionsAsync("nightly REVIEW", null)).Label!.Id, "Found by its name the next time.");
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.GetOrCreateForSessionsAsync(" ", null)).Status);
+    }
+
+    [TestMethod]
     public async Task DeletingASpace_DeletesItsLabels()
     {
         using var fixture = new Fixture();

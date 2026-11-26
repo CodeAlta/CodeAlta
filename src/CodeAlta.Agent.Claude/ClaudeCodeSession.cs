@@ -76,6 +76,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? _writeGuard;
     // Checks each shell command before it runs, in every permission mode (a hook runs before the permissions of the CLI).
     private CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? _commandGuard;
+    // The session's policy also applies to tools that never appear in the tool table of CodeAlta.
+    private IReadOnlySet<string>? _disabledTools;
+    private IReadOnlyList<string>? _disabledToolPatterns;
     // The tool hooks of the session (those of plugins), asked before each tool the CLI runs itself.
     private CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? _toolInterceptor;
     // Where the next process of the session starts: the sandbox of the session, or null for a child of this process.
@@ -524,6 +527,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _permissionMode = permissionMode;
             _writeGuard = key.WithoutShell ? request.WriteGuard : null;
             _commandGuard = request.CommandGuard;
+            _disabledTools = request.DisabledTools;
+            _disabledToolPatterns = request.DisabledToolPatterns;
             _toolInterceptor = request.ToolInterceptor;
             _processHost = request.ProcessHost;
         }
@@ -979,7 +984,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                     writer.WriteEndArray();
                     writer.WriteNumber("timeout", PreToolHookTimeoutSeconds);
                     writer.WriteEndObject();
-                    // The tool hooks of CodeAlta (those of plugins) see each tool the CLI runs itself, and can block it.
+                    // Check each tool the CLI runs itself against the session's policy, then ask its tool hooks.
                     writer.WriteStartObject();
                     writer.WriteStartArray("hookCallbackIds");
                     writer.WriteStringValue(ToolHookId);

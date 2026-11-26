@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using CodeAlta.Catalog;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.NodeApi;
@@ -283,6 +284,22 @@ internal sealed class DesktopModelServers : IAsyncDisposable
         }
 
         return results;
+    }
+
+    /// <summary>Saves a provider of this computer that uses the named model server.</summary>
+    internal static void SaveLocalProviderDefinition(CodeAltaConfigStore store, string key, string name, string server)
+    {
+        store.UpdateGlobalProviderDefinitions(definitions =>
+        {
+            var definition = definitions.FirstOrDefault(existing => string.Equals(existing.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
+            if (definition is null) definitions.Add(definition = new CodeAltaProviderDocument { ProviderKey = key });
+            definition.ProviderType = "llama-cpp";
+            definition.DisplayName = name;
+            definition.Server = server;
+            definition.ApiUrl = null;
+            definition.Enabled = true;
+            return true;
+        });
     }
 
     /// <summary>The key of the provider of a server: <c>llama-&lt;server&gt;</c>, with the machine for one of another machine.</summary>

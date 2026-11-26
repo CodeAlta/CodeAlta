@@ -70,8 +70,13 @@ public sealed class WorkspaceDraftPromptsTests
     [TestMethod]
     public async Task CatalogOnlyDraftDoesNotInventOwnedChoices()
     {
-        var result = await new WorkspaceService((string?)null).DraftPromptsAsync(new(Epoch, null, null), CancellationToken.None);
-        Assert.AreEqual("unconfigured", result.Status);
-        Assert.IsEmpty(result.Prompts);
+        var fixture = Directory.CreateTempSubdirectory("codealta-draft-prompts-");
+        try
+        {
+            var result = await new WorkspaceService(fixture.FullName).DraftPromptsAsync(new(Epoch, null, null), CancellationToken.None);
+            Assert.AreEqual("unconfigured", result.Status);
+            Assert.IsEmpty(result.Prompts);
+        }
+        finally { fixture.Delete(recursive: true); }
     }
 }

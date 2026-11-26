@@ -119,12 +119,15 @@ export const workspace = Object.freeze({
 });
 
 const unavailable = async () => { throw new Error("This operation requires the packaged desktop host."); };
+function unavailableService<Method extends string>(...methods: Method[]) {
+  return Object.freeze(Object.fromEntries(methods.map(method => [method, unavailable])) as Record<Method, typeof unavailable>);
+}
 const emptyPage = async () => ({ status: "ok", rows: [], next: null, epoch: "demo" });
 
-export const sessionDisplay = Object.freeze({ observe: unavailable });
-export const sessionRuntimeState = Object.freeze({ current: unavailable });
+export const sessionDisplay = unavailableService("observe");
+export const sessionRuntimeState = unavailableService("current");
 export const sessionRetentionProtection = Object.freeze({ publish: async () => ({ accepted: true, reason: null }) });
-export const sessionUsage = Object.freeze({ read: unavailable });
+export const sessionUsage = unavailableService("read");
 export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable, skillContent: unavailable });
 export const conversationHeld = Object.freeze({ list: async () => ({ status: "ok", hostEpoch: "demo", sessionId: null, entries: [] }), resolve: unavailable });
 // The demo has no Claude Code conversation to open in VS Code or a terminal.
@@ -141,13 +144,13 @@ export const sessionOperations = Object.freeze({
   openInVsCode: async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId }),
 });
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
-export const sessionNotes = Object.freeze({ current: unavailable });
-export const sideQuestion = Object.freeze({ ask: unavailable });
-export const shellCommands = Object.freeze({ run: unavailable });
-export const releaseNotes = Object.freeze({ list: unavailable, read: unavailable, picture: unavailable });
-export const sessionPluginEvents = Object.freeze({ read: unavailable });
+export const sessionNotes = unavailableService("current");
+export const sideQuestion = unavailableService("ask");
+export const shellCommands = unavailableService("run");
+export const releaseNotes = unavailableService("list", "read", "picture");
+export const sessionPluginEvents = unavailableService("read");
 // The demo has no host process: nothing to repair, nothing to keep running.
-export const startupConfig = Object.freeze({ read: unavailable, reload: unavailable, validate: unavailable, save: unavailable, leave: unavailable });
+export const startupConfig = unavailableService("read", "reload", "validate", "save", "leave");
 export const appUpdate = Object.freeze({
   check: async () => ({ status: "unavailable", packageId: "CodeAlta", currentVersion: "demo", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null }),
   openReleaseNotes: async () => ({ status: "unavailable" }), install: async () => ({ status: "unavailable" }), cancelInstallation: async () => ({ status: "unavailable" }),
@@ -161,19 +164,16 @@ export const desktopShell = Object.freeze({
   hide: async () => ({ status: "unavailable" }), exit: async () => ({ status: "unavailable" }), watch: unavailable,
   pickFolder: async () => ({ status: "unavailable", path: null }), revealEntry: async () => ({ status: "unavailable" }),
 });
-export const providerLogin = Object.freeze({ status: unavailable, login: unavailable, logout: unavailable });
-export const providerUsage = Object.freeze({ read: unavailable });
-export const managedPolicy = Object.freeze({ read: unavailable, refresh: unavailable });
-export const projectFiles = Object.freeze({ read: unavailable, write: unavailable, list: unavailable, stat: unavailable, create: unavailable, rename: unavailable,
-  delete: unavailable, image: unavailable, reveal: unavailable, openExternal: unavailable, search: unavailable, watch: unavailable });
-export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
-export const worktrees = Object.freeze({ list: unavailable, remove: unavailable, branches: unavailable, switch: unavailable, settings: unavailable, saveSettings: unavailable,
-  inventory: unavailable, removeMany: unavailable, openEditor: unavailable, openExternal: unavailable });
-export const externalEditors = Object.freeze({ list: unavailable, set: unavailable, openFolder: unavailable });
-export const cloudSessions = Object.freeze({ readiness: unavailable, start: unavailable, startState: unavailable, cancelStart: unavailable, bringHere: unavailable,
-  details: unavailable, send: unavailable, continueHere: unavailable });
-export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
-export const network = Object.freeze({ read: unavailable, save: unavailable, check: unavailable });
+export const providerLogin = unavailableService("status", "login", "logout");
+export const providerUsage = unavailableService("read");
+export const managedPolicy = unavailableService("read", "refresh");
+export const projectFiles = unavailableService("read", "write", "list", "stat", "create", "rename", "delete", "image", "reveal", "openExternal", "search", "watch");
+export const projectGit = unavailableService("status", "changes", "commits", "file", "watch");
+export const worktrees = unavailableService("list", "remove", "branches", "switch", "settings", "saveSettings", "inventory", "removeMany", "openEditor", "openExternal");
+export const externalEditors = unavailableService("list", "set", "openFolder");
+export const cloudSessions = unavailableService("readiness", "start", "startState", "cancelStart", "bringHere", "details", "send", "continueHere");
+export const mcpHost = unavailableService("status", "setEnabled", "setTailnet");
+export const network = unavailableService("read", "save", "check");
 export const secrets = Object.freeze({ list: async () => ({ status: "unavailable", protection: null, secrets: [], variables: [] }),
   listEnvironment: async () => ({ status: "unavailable", projects: [], spaces: [] }),
   setSecret: async () => ({ status: "unavailable", message: null }), rotateSecret: async () => ({ status: "unavailable", message: null }),
@@ -233,8 +233,7 @@ export const sandboxSettings = Object.freeze({
   session: noSandboxSession, setSession: noSandboxSession, draft: noSandboxSession,
   check: async () => (async function* (): AsyncGenerator<{ status: string; id: string | null; passed: boolean | null; detail: string | null }> { })(),
 });
-export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
-  open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
+export const terminals = unavailableService("acknowledge", "attach", "close", "create", "detach", "input", "open", "profiles", "rename", "resize", "show", "watch");
 // The demo starts no session by itself: its automations tab says so.
 const noAutomations = async () => ({ status: "unavailable", paused: false, scanned: false, items: [], faults: [], runs: [], upcoming: [] });
 export const automations = Object.freeze({ list: noAutomations, refresh: noAutomations, save: unavailable, delete: unavailable, setEnabled: unavailable,
@@ -292,10 +291,10 @@ export const windows = Object.freeze({ current: async () => ({ status: "unavaila
   displays: async () => ({ status: "unavailable", displays: [] }), dragOver: unavailable, drop: unavailable });
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const startPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
-export const promptImages = Object.freeze({ read: unavailable });
-export const toolCalls = Object.freeze({ read: unavailable, readJob: unavailable, observe: unavailable });
+export const promptImages = unavailableService("read");
+export const toolCalls = unavailableService("read", "readJob", "observe");
 // A browser preview runs no MCP server: no tool call has a view to open.
-export const mcpApps = Object.freeze({ open: unavailable, callTool: unavailable, readResource: unavailable, close: unavailable });
+export const mcpApps = unavailableService("open", "callTool", "readResource", "close");
 // The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.
 const demoSchemesKey = "codealta.demo.colorSchemes.v1";
 const noColors: ColorSchemeColors = { background: null, text: null, muted: null, accent: null, success: null, warning: null, danger: null };
@@ -334,7 +333,7 @@ export const applicationLogs = Object.freeze({
   levels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
   saveLevels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
 });
-export const composerStatus = Object.freeze({ read: unavailable, readMcp: unavailable });
+export const composerStatus = unavailableService("read", "readMcp");
 export const pluginUi = Object.freeze({ contributions: unavailable, buttons: async () => ({ status: "unavailable", place: null, buttons: [] }), regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });
 // The canvases are tabs of plugins, which a browser without the host does not run.
 export const canvases = Object.freeze({ list: async () => ({ status: "unavailable", canvases: [] }), open: unavailable, visible: unavailable, close: unavailable, closeSpace: unavailable,

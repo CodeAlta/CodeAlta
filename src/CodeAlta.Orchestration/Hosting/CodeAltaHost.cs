@@ -599,7 +599,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 AppliesSpaceIdentities = options.AppliesSpaceIdentities,
                 SkillPromptCatalog = options.SkillPromptCatalog,
                 PreferredSkills = options.PreferredSkills,
-                ScratchpadRoot = options.ScratchpadRoot is { } scratchpad ? Path.GetFullPath(scratchpad) : null,
+                // Resolved here for the instructions and the runtime, so that the folder the instructions name is the one
+                // the sandbox, the file tools and the scripts of the sessions use.
+                ScratchpadRoot = Path.GetFullPath(options.ScratchpadRoot ?? Path.Combine(catalogOptions.StateRoot, "scratchpad")),
                 ListsSkills = options.ListsSkills,
                 ReadsUserHome = options.ReadsUserHome,
                 DisabledPromptFeatures = options.DisabledPromptFeatures is { } features
@@ -733,7 +735,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,
-                ReservedLocalPorts = options.ReservedLocalPorts,
+                ReservedLocalPorts = ReservedPortsOf(options),
                 SandboxWithheldValues = shellSecrets.Given,
                 // The variables a sandbox profile sets read their references as the shell of the session does, masked as they are
                 // given. A secret that asks before use is asked for as the session attaches, with those of its identity; a read at
@@ -834,6 +836,30 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
             throw;
         }
+    }
+
+    // The ports no sandbox of a host reaches, beside the fixed ones of the runtime: those the MCP servers of the Desktop
+    // instances of this user recorded, read as they are at each start of a sandbox, and the listeners of the host itself.
+    // Every host keeps away from the recorded ones: a host that had to ask for them (the terminal UI, a node) did not.
+    private static Func<IReadOnlyCollection<int>>? ReservedPortsOf(CodeAltaHostOptions options)
+    {
+        var recorded = options.McpPorts;
+        if (recorded is null)
+        {
+            // A host that reads nothing of the user outside its own roots reads no record of the user either: it is given one.
+            if (options.DiscoveryScope is not null) return options.ReservedLocalPorts;
+            try
+            {
+                recorded = new CodeAlta.Core.IO.McpPortRecord(CodeAlta.Core.IO.McpPortRecord.DefaultFolder());
+            }
+            catch (InvalidOperationException)
+            {
+                // A computer without a folder of the user records no port: the fixed ones and those of the host stay.
+                return options.ReservedLocalPorts;
+            }
+        }
+
+        return options.ReservedLocalPorts is { } own ? () => [.. recorded.Current(), .. own()] : recorded.Current;
     }
 
     private static async Task<ProjectDescriptor> ResolveCurrentProjectAsync(

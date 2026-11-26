@@ -56,6 +56,25 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void TheLabelOfItsRuns_IsItsNameUntilItNamesOne_AndChangesNothingOfWhatRuns()
+    {
+        var definition = new AutomationDefinition(First, "Nightly review") { Prompt = "Review." };
+        Assert.AreEqual("Nightly review", definition.RunLabel);
+        Assert.IsFalse(AutomationConfig.Write(string.Empty, definition).Contains("label", StringComparison.Ordinal));
+
+        var labeled = definition with { Label = "pr-review" };
+        Assert.IsNull(AutomationConfig.Validate(labeled));
+        var written = AutomationConfig.Write(string.Empty, labeled);
+        StringAssert.Contains(written, "label = \"pr-review\"");
+        Assert.AreEqual("pr-review", AutomationConfig.Read(written, Global).Definitions.Single().RunLabel);
+        Assert.AreEqual("Nightly review", AutomationConfig.Read(written.Replace("\"pr-review\"", "\"  \"", StringComparison.Ordinal), Global).Definitions.Single().RunLabel,
+            "A blank label is no label: the runs get one of the name.");
+        StringAssert.Contains(AutomationConfig.Validate(labeled with { Label = new string('x', 65) }), "label");
+        // An automation of a project allowed before is still allowed when its label changes.
+        Assert.AreEqual(definition.Fingerprint(), labeled.Fingerprint());
+    }
+
+    [TestMethod]
     public void Notify_IsReadAndWritten_AndOnlyAlwaysOrFailures()
     {
         var definition = new AutomationDefinition(First, "Nightly") { Prompt = "Review.", Notify = AutomationDefinition.NotifyFailures };

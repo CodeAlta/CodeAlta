@@ -11,7 +11,7 @@ public sealed class ConfiguredProviderUsageTests
     [TestMethod]
     public void OnlyTheSubscriptionProviders_HaveAUsageToRead()
     {
-        foreach (var type in new[] { "codex", "codex-cli", "copilot", "claude-code" }) Assert.IsTrue(ConfiguredProviderUsage.Supports(type), type);
+        foreach (var type in new[] { "codex", "codex-cli", "copilot", "claude-code", "acp" }) Assert.IsTrue(ConfiguredProviderUsage.Supports(type), type);
         foreach (var type in new[] { "xai", "openai-chat", "openai-responses", "anthropic", "", null }) Assert.IsFalse(ConfiguredProviderUsage.Supports(type), type);
     }
 
@@ -33,6 +33,44 @@ public sealed class ConfiguredProviderUsageTests
             Assert.IsNull(ConfiguredProviderUsage.DescribePluginProvider(new CodeAltaExternalProvider("cursor", "acp", new Dictionary<string, object?>())));
 
             // The pinned app-server was never downloaded: nothing is started.
+            using var http = new HttpClient(new Refusing());
+            var reading = await ConfiguredProviderUsage.ReadAsync(definition, root, http, default);
+            Assert.AreEqual(AgentSubscriptionUsageReading.ToolMissing, reading.Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task AnAcpProvider_HasAUsageWhenItRunsTheAntigravityCli_WhichIsAskedForIt()
+    {
+        var root = Directory.CreateTempSubdirectory("CodeAlta-provider-usage-").FullName;
+        try
+        {
+            var missing = Path.Combine(root, "agy.exe");
+            var provider = new CodeAltaExternalProvider("antigravity-acp", "acp", new Dictionary<string, object?>
+            {
+                ["agent"] = "antigravity-acp", ["command"] = missing, ["arguments"] = new object?[] { "acp" }, ["enabled"] = true,
+            });
+            var definition = ConfiguredProviderUsage.DescribePluginProvider(provider)!;
+            Assert.AreEqual("acp", definition.ProviderType);
+            Assert.AreEqual(missing, definition.Command);
+            Assert.IsTrue(definition.Enabled);
+
+            // Another agent, and the server of the registry, which has no usage to ask for.
+            Assert.IsNull(ConfiguredProviderUsage.DescribePluginProvider(new CodeAltaExternalProvider("copilot-acp", "acp", new Dictionary<string, object?>
+            {
+                ["command"] = "npx", ["arguments"] = new object?[] { "--yes", "@github/copilot", "--acp" },
+            })));
+            Assert.IsNull(ConfiguredProviderUsage.DescribePluginProvider(new CodeAltaExternalProvider("antigravity-acp", "acp", new Dictionary<string, object?>
+            {
+                ["agent"] = "antigravity-acp", ["command"] = Path.Combine(root, "agy_acp_server.exe"), ["arguments"] = Array.Empty<object?>(),
+            })));
+            Assert.IsNull(ConfiguredProviderUsage.DescribePluginProvider(new CodeAltaExternalProvider("agy", "acp", new Dictionary<string, object?> { ["command"] = "agy" })), "not its ACP server");
+
+            // The CLI is not there: nothing is started.
             using var http = new HttpClient(new Refusing());
             var reading = await ConfiguredProviderUsage.ReadAsync(definition, root, http, default);
             Assert.AreEqual(AgentSubscriptionUsageReading.ToolMissing, reading.Status);

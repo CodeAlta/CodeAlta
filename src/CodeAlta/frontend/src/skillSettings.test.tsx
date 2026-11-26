@@ -12,7 +12,7 @@ import { readAssignments, readSpaces } from "./spaces/spaces";
 const never = () => assert.fail("rendering must not act");
 const entry = (name: string, source: string): SkillsEntry => ({ id: `${source}-${name}`, name, title: name, description: "What it is for.", source,
   scope: source.startsWith("Project") ? "Project" : source.startsWith("User") ? "User" : source, enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true,
-  folder: `skill:global:${source}:${name}`, path: `/skills/${name}` });
+  folder: `skill:global:${source}:${name}`, path: `/skills/${name}`, disabledByRepository: false });
 const detail = (skill: SkillsEntry, change: Partial<SkillsDetailResponse> = {}): SkillsDetailResponse => ({ status: "ok", name: skill.name, source: skill.source,
   skillFilePath: `/skills/${skill.name}/SKILL.md`, skillRootPath: `/skills/${skill.name}`, sourceId: "source", shadowedBy: null, modelVisible: true, license: null,
   // The instructions are Markdown, which only a browser renders: the text of the file is left out.
@@ -107,6 +107,26 @@ test("a skill has no button while its details are read, when its folder has no i
   assert.ok(!render(skill, detail(skill, { folder: null })).includes(button), "The host did not name the folder.");
   assert.ok(!render(skill, detail(skill, { skillRootPath: null })).includes(button));
   assert.ok(!render(skill, detail(skill), { edit: false }).includes(button), "A page without an owned host opens no editor.");
+});
+
+test("the repository's disablement is explained and the skill cannot be switched on here", () => {
+  const skill = { ...entry("release-notes", "UserAlta"), enabled: false, enabledProject: false, disabledByRepository: true };
+  assert.match(render(skill, detail(skill, { modelVisible: false })), /Disabled by repository/);
+  const row = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills: [skill], empty: "No skills were found.", selected: skill, disabled: false, onSelect: never, onToggle: never })));
+  assert.match(row, /Disabled by repository/);
+  assert.match(row, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable release-notes")/);
+});
+
+test("a skill from an inherited root is previewable but has no edit or remove action", () => {
+  const skill = { ...entry("repo-skill", "ProjectAlta"), scope: "Inherited", folder: null };
+  const row = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills: [skill], empty: "No skills were found.", selected: skill, disabled: false,
+      onSelect: never, onToggle: never, onEdit: never, onDelete: never })));
+  assert.match(row, /Inherited/);
+  assert.match(row, /<input(?=[^>]*disabled="")(?=[^>]*aria-label="Enable repo-skill")/);
+  assert.doesNotMatch(row, /Edit repo-skill|Remove repo-skill/);
+  assert.match(render(skill, detail(skill, { folder: null })), /Inherited/);
 });
 
 test("invalid or missing names cannot write name-based enablement, but keep their selection and removal", () => {

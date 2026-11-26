@@ -13,9 +13,6 @@ namespace CodeAlta.Acp;
 /// 
 /// The methods that currently accept a session cursor.
 /// 
-/// A malformed value falls back to no capabilities, so the Client never passes a
-/// cursor to a method the Agent did not advertise.
-/// 
 /// See the [Session Cursors RFD](https://agentclientprotocol.com/rfds/session-cursors).
 /// </summary>
 public sealed partial record CursorCapabilities

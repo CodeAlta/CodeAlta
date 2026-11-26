@@ -90,11 +90,22 @@ internal sealed class ProviderFrontendCoordinator
 
     public async Task<ProviderConfigurationSaveResult> SaveProviderDefinitionsAsync(
         IReadOnlyList<CodeAltaProviderDocument> definitions,
+        string? expectedRevision,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definitions);
 
-        _configStore.SaveGlobalProviderDefinitions(definitions);
+        var saved = _configStore.UpdateGlobalProviderDefinitions(written =>
+        {
+            written.Clear();
+            written.AddRange(definitions);
+            return true;
+        }, expectedRevision);
+        if (!saved)
+        {
+            throw new InvalidOperationException(SR.T("Provider configuration changed on disk. Refresh before saving again."));
+        }
+
         return await RefreshAfterProviderConfigurationSaveAsync(cancellationToken);
     }
 

@@ -224,7 +224,7 @@ public sealed class OwnedSessionAskRuntimeTests
                 // answer leaves the session once its released run has returned.
                 var second = new OwnedAskAction(Guid.NewGuid(), next.Handle, [new() { QuestionIndex = 0, FreeformText = "next" }]);
                 var nextText = AltaAskAnswerMarkdownFormatter.Format(next.Request, second.Answers);
-                var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+                var deadline = DateTimeOffset.UtcNow + TestTime.Seconds(10);
                 OwnedSessionCommandAdmission plain;
                 while ((plain = _host.Commands.AdmitSend(new(second.ActionId.ToString("D"), "session", nextText))).Kind == OwnedSessionCommandAdmissionKind.Busy
                     && DateTimeOffset.UtcNow < deadline)

@@ -125,6 +125,7 @@ public sealed class FleetMachineAsks(Func<CancellationToken, ValueTask<FleetNode
                 {
                     Title = question.Title ?? "", Question = question.Question ?? "", Description = question.Description,
                     Choices = [.. question.Choices.Select(static choice => new PluginAskChoice { Title = choice.Title ?? "", Description = choice.Description })],
+                    AllowMultiSelect = question.AllowMultiSelect,
                     Freeform = question.AllowsText ? new PluginAskFreeform { Title = question.FreeformTitle, Placeholder = question.FreeformPlaceholder } : null,
                 })]
                 : [],

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Agent.ModelCatalog;
@@ -390,6 +391,16 @@ public sealed partial class CodeAltaConfigStore
         return SharedTextFile.TryReadAllText(_options.ConfigPath) ?? GetDefaultGlobalConfigContent();
     }
 
+    /// <summary>Returns the stable revision token for configuration text.</summary>
+    /// <param name="content">The configuration text to identify.</param>
+    /// <returns>A content revision for comparison, not for authorization.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> is null.</exception>
+    public static string GetGlobalConfigRevision(string content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)).AsSpan(0, 16));
+    }
+
     /// <summary>
     /// Validates and saves the global user configuration TOML content without reformatting it.
     /// </summary>
@@ -560,20 +571,71 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
     /// <exception cref="IOException">A configuration file cannot be read.</exception>
     public CodeAltaConfigDocument LoadProject(string? projectRoot, IReadOnlyList<string> inheritedRoots)
+        => LoadProjectCore(projectRoot, inheritedRoots, onReadError: null).Effective;
+
+    /// <summary>
+    /// Loads the project configuration for inspection, keeping its own and inherited values separate as well as
+    /// computing the effective configuration with the usual inheritance rules. An unreadable file is reported by
+    /// path and contributes no values; the result must not be used as runtime policy.
+    /// </summary>
+    /// <param name="projectRoot">The project root directory, or null for no project.</param>
+    /// <param name="inheritedRoots">The inherited folders, nearest first.</param>
+    /// <param name="onReadError">Receives the path and cause of each unreadable or malformed file.</param>
+    /// <returns>The effective configuration and the separate local and inherited configurations, when present.</returns>
+    /// <exception cref="ArgumentNullException">The inherited folders or diagnostic callback are null.</exception>
+    /// <exception cref="InvalidDataException">The combined configuration cannot be parsed.</exception>
+    public (CodeAltaConfigDocument Effective, CodeAltaConfigDocument? Local, CodeAltaConfigDocument? Inherited) LoadProject(
+        string? projectRoot, IReadOnlyList<string> inheritedRoots, Action<string, Exception> onReadError)
+    {
+        ArgumentNullException.ThrowIfNull(onReadError);
+        return LoadProjectCore(projectRoot, inheritedRoots, onReadError);
+    }
+
+    private (CodeAltaConfigDocument Effective, CodeAltaConfigDocument? Local, CodeAltaConfigDocument? Inherited) LoadProjectCore(
+        string? projectRoot, IReadOnlyList<string> inheritedRoots, Action<string, Exception>? onReadError)
     {
         ArgumentNullException.ThrowIfNull(inheritedRoots);
-        if (string.IsNullOrWhiteSpace(projectRoot)) return new CodeAltaConfigDocument();
+        if (string.IsNullOrWhiteSpace(projectRoot)) return (new CodeAltaConfigDocument(), null, null);
         var inherited = inheritedRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(GetProjectConfigPath).Where(File.Exists).ToList();
-        if (inherited.Count == 0) return LoadProject(projectRoot);
         var own = GetProjectConfigPath(projectRoot);
-        var merged = new TomlTable();
-        foreach (var path in Enumerable.Reverse(inherited).Append(own).Where(File.Exists))
+        if (inherited.Count == 0)
         {
-            var text = _inheritedTexts.Read(path, static (_, content) => content);
-            if (!string.IsNullOrWhiteSpace(text)) MergeInherited(merged, new ConfigLayer($"'{path}'", path, text, IsFile: true).Parse());
+            try
+            {
+                var local = LoadProject(projectRoot);
+                return (local, local, null);
+            }
+            catch (Exception exception) when (onReadError is not null && exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                onReadError(own, exception);
+                return (new CodeAltaConfigDocument(), null, null);
+            }
         }
 
-        return merged.Count == 0 ? new CodeAltaConfigDocument() : ParseLoadedContent(own, TomlSerializer.Serialize(merged));
+        var merged = new TomlTable();
+        foreach (var path in Enumerable.Reverse(inherited).Where(File.Exists)) _ = ReadAndMerge(path);
+        var inheritedDocument = onReadError is not null && merged.Count > 0 ? ParseLoadedContent(own, TomlSerializer.Serialize(merged)) : null;
+        var localDocument = File.Exists(own) ? ReadAndMerge(own) : null;
+        var effective = merged.Count == 0 ? new CodeAltaConfigDocument() : ParseLoadedContent(own, TomlSerializer.Serialize(merged));
+        return (effective, localDocument, inheritedDocument);
+
+        CodeAltaConfigDocument? ReadAndMerge(string path)
+        {
+            try
+            {
+                var text = _inheritedTexts.Read(path, static (_, content) => content);
+                if (string.IsNullOrWhiteSpace(text)) return null;
+                // Inspection skips a file with invalid typed values, not just one with broken TOML syntax.
+                var document = onReadError is not null ? ParseLoadedContent(path, text) : null;
+                MergeInherited(merged, new ConfigLayer($"'{path}'", path, text, IsFile: true).Parse());
+                return document;
+            }
+            catch (Exception exception) when (onReadError is not null && exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                onReadError(path, exception);
+                return null;
+            }
+        }
     }
 
     // Merges the configuration of a nearer folder over the one of a farther folder, as an overlay does, except for what the
@@ -1457,6 +1519,42 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads the archive policies of the user's configuration file (<c>[[sessions.archive_policies]]</c>), which apply to the
+    /// sessions of every project and to the chats. A policy that cannot be applied is left out.
+    /// </summary>
+    /// <returns>The policies; none when the file names none, or cannot be read.</returns>
+    public IReadOnlyList<SessionArchivePolicy> LoadGlobalSessionArchivePolicies()
+    {
+        try
+        {
+            return SessionArchivePolicy.ReadAll(ReadSharedGlobalDocument().Sessions?.ArchivePolicies);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Reads the archive policies of the configuration file of a project (<c>.alta/config.toml</c>), which apply to the
+    /// sessions of that project and are shared with its repository. A policy that cannot be applied is left out.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>The policies; none when the file names none, or cannot be read.</returns>
+    public IReadOnlyList<SessionArchivePolicy> LoadProjectSessionArchivePolicies(string projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return [];
+        try
+        {
+            return SessionArchivePolicy.ReadAll(LoadProject(projectRoot).Sessions?.ArchivePolicies);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
     /// Persists how a session nobody named is titled, in the user's configuration file. The default is not written.
     /// </summary>
     /// <param name="mode">The mode.</param>
@@ -1886,10 +1984,46 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Edits the provider definitions of the global file without filling in defaults or applying overlays. Disabled
+    /// providers are included; the sections of types this version does not know are left alone.
+    /// </summary>
+    /// <param name="edit">
+    /// Changes the definitions synchronously while the file is locked. Return <see langword="true"/> to save the list,
+    /// or <see langword="false"/> to skip saving it.
+    /// </param>
+    /// <param name="expectedRevision">
+    /// The revision of the text the editor read (see <see cref="GetGlobalConfigRevision"/>), or <see langword="null"/> not to check it.
+    /// </param>
+    /// <returns><see langword="false"/> if the revision did not match and the edit did not run; otherwise <see langword="true"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="edit"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration cannot be read, locked or saved.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">A definition is invalid or uses an unknown provider's key, or the store is read-only.</exception>
+    public bool UpdateGlobalProviderDefinitions(Func<List<CodeAltaProviderDocument>, bool> edit, string? expectedRevision = null)
+    {
+        ArgumentNullException.ThrowIfNull(edit);
+        var matched = false;
+        UpdateGlobal(() =>
+        {
+            if (expectedRevision is not null && !string.Equals(expectedRevision, GetGlobalConfigRevision(LoadGlobalConfigContent()), StringComparison.Ordinal))
+                return;
+
+            var document = LoadDocument(_options.ConfigPath);
+            var definitions = document.Providers?.Values.ToList() ?? [];
+            if (edit(definitions)) SaveGlobalProviderDefinitions(document, definitions);
+            matched = true;
+        });
+        return matched;
+    }
+
+    /// <summary>
     /// Saves the complete set of global provider definitions. The providers of the file whose type this version
-    /// does not know are not part of that set: their sections stay as they are.
+    /// does not know are not part of that set: their sections stay as they are. To edit an existing set, use
+    /// <see cref="UpdateGlobalProviderDefinitions"/> instead.
     /// </summary>
     /// <param name="definitions">The provider definitions to persist.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="definitions"/> is null.</exception>
     /// <exception cref="InvalidOperationException">
     /// A definition is not valid, has the key of a provider whose type this version does not know, or the store is
     /// read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).
@@ -1902,7 +2036,11 @@ public sealed partial class CodeAltaConfigStore
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
+        SaveGlobalProviderDefinitions(document, definitions);
+    }
 
+    private void SaveGlobalProviderDefinitions(CodeAltaConfigDocument document, IEnumerable<CodeAltaProviderDocument> definitions)
+    {
         var normalizedDefinitions = definitions
             .Select(CloneProviderDefinition)
             .Select(static definition =>
@@ -2462,7 +2600,8 @@ public sealed partial class CodeAltaConfigStore
             if (sessions.PromptSuggestions is not false) sessions.PromptSuggestions = null;
             // The default is to list the Claude Code conversations: the absence of the setting.
             if (sessions.ClaudeCodeConversations is not false) sessions.ClaudeCodeConversations = null;
-            if (sessions is { Title: null, PromptSuggestions: null, ClaudeCodeConversations: null })
+            if (sessions.ArchivePolicies is { Count: 0 }) sessions.ArchivePolicies = null;
+            if (sessions is { Title: null, PromptSuggestions: null, ClaudeCodeConversations: null, ArchivePolicies: null })
             {
                 document.Sessions = null;
             }

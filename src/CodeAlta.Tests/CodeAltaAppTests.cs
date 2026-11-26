@@ -1237,7 +1237,7 @@ public sealed class CodeAltaAppTests
             WorkingDirectory = @"C:\code\CodeAlta",
             Title = "Recovered Session",
             Status = SessionViewStatus.Active,
-            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5), // not a limit
             UpdatedAt = DateTimeOffset.UtcNow,
             LastActiveAt = DateTimeOffset.UtcNow,
             StartedAt = null,

@@ -7,15 +7,11 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// A plan represented as structured entries.
 /// </summary>
 public sealed partial record PlanItems
 {
-    /// <summary>The list of tasks to be accomplished.  When updating an item-based plan, the agent must send a complete list of all entries with their current status. The client replaces that plan with each update.</summary>
+    /// <summary>The list of tasks to be accomplished.  The Agent MUST send all entries with their current status. The Client MUST replace the checklist with this `planId` on each update.</summary>
     [JsonPropertyName("entries")]
     public List<PlanEntry> Entries { get; set; } = [];
     /// <summary>The plan ID to update.</summary>

@@ -110,8 +110,8 @@ The pictures are `site/img/alta-desktop-*.webp`; how to take them is written in
     removed, a page that needs one gets it.
 - Captures are taken on the **developer instance** (`alta --dev`, MCP server `codealta-dev`) built from the
   release commit, in the **Dark** theme, at 1600x1000 CSS pixels (2400x1500 pictures), with public projects
-  only (a space of public projects), exported as WebP. An isolated profile (`--data-root` ...) starts no
-  plugins and has no speech: use it only for what doc/site-screenshots.md says.
+  only (a space of public projects), exported as WebP. Isolated roots (`--allow-owned-host` with the roots
+  listed in `alta --help`) start no plugins and have no speech: use them only for what doc/site-screenshots.md says.
 - Leave the owner's profile as it was: what a scene creates (spaces, sessions, worktrees, temporary plugins,
   configuration tables) is removed after the capture, and the files it changed are checked against a copy.
 - Keep the scene scripts of the release in a folder that survives a restart, such as the ignored `tmp/` of the
@@ -136,7 +136,7 @@ repository has no API: tell the owner to upload the new file himself (Settings >
 - New pages are added to the menus (`site/menu.yml`, the `menu.yml` of their folder under `site/docs/`) and
   linked from the pages around them.
 - The repository readme (`readme.md`) lists the features at a glance; `doc/` changes only if the architecture
-  did (see "Documentation" in `AGENTS.md`).
+  did (see the [documentation rules](../../../doc/development-guide.md#documentation)).
 - Pages stay concise with short headings: look at the table of contents of the long ones in the built site.
 - `site/docs/**` and the `site/img/alta-desktop-*.webp` pictures are packed into the applications as their
   built-in user guide (`content/user-guide`, see `src/CodeAlta/CodeAlta.csproj` and `src/CodeAlta.Tui/CodeAlta.Tui.csproj`):

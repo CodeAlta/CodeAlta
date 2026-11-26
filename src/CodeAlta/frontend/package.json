@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build --logLevel warn",
     "build:demo": "tsc --noEmit && vite build --mode demo --logLevel warn",
     "icons": "node scripts/generate-brand-icons.mjs",
+    "pretest": "node scripts/check-test-node.mjs",
     "test": "tsx --test --test-concurrency=2 --test-reporter=./scripts/failures-reporter.mjs \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
+    "pretest:verbose": "node scripts/check-test-node.mjs",
     "test:verbose": "tsx --test --test-concurrency=2 --test-reporter=spec \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
   },
   "dependencies": {

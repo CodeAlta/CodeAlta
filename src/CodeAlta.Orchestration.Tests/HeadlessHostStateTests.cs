@@ -141,6 +141,55 @@ public sealed class HeadlessHostStateTests
         Assert.IsFalse(instructions.Contains(Path.Combine(root.GlobalRoot, "scratchpad"), StringComparison.OrdinalIgnoreCase));
     }
 
+    // A host that names no scratchpad (CodeAlta Desktop, the terminal UI, a node) has the one of its state root, for the
+    // instructions and for the runtime alike: the runtime that had none gave a sandboxed session no scratchpad of its own
+    // and kept no source of its scripts, while the instructions named the folder (#492).
+    [TestMethod]
+    public async Task ScratchpadRoot_Unset_IsTheFolderOfTheStateRoot_ForTheInstructionsAndTheRuntime()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider, separateStateRoot: true);
+        var scratchpad = Path.Combine(root.StateRoot, "scratchpad");
+
+        Assert.AreEqual(scratchpad, host.RuntimeService.ScratchpadRoot);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, HeadlessTestRoot.Options(provider, root.ProjectRoot), "Scratchpad");
+        await host.RuntimeService.SendAsync(session, HeadlessTestRoot.Options(provider, root.ProjectRoot), new AgentSendOptions { Input = AgentInput.Text("hello") });
+        Assert.IsTrue(provider.Requests.TryPeek(out var request));
+        StringAssert.Contains(request.SessionInstructions, Path.Combine(scratchpad, "<yyyy-mm-dd>-<short-name>-"));
+
+        // The folders of a session there: the one its sandbox would write, and the sources of the runs of its scripts.
+        Assert.AreEqual(Path.Combine(scratchpad, "sandbox", session.SessionId), host.RuntimeService.SandboxScratchpadOf(session.SessionId));
+        Assert.AreEqual(Path.Combine(scratchpad, "codemode", session.SessionId), await host.RuntimeService.GetScriptSourcesAsync(session.SessionId));
+        Assert.AreEqual(Path.Combine(scratchpad, "codemode"), host.RuntimeService.ScriptSourcesRoot);
+    }
+
+    // Every host keeps its sandboxes away from the MCP servers of the CodeAlta Desktop instances of the user, as they
+    // record their ports: a host that had to ask for them (the terminal UI, a node) did not (#492).
+    [TestMethod]
+    public async Task ReservedPorts_AreTheRecordedMcpPorts_AndThoseOfTheHost_ReadAsTheyAreNow()
+    {
+        await using var root = new HeadlessTestRoot();
+        var own = new List<int> { 41001 };
+        var host = await root.CreateHostAsync(new ScriptedTurnProvider(), reservedPorts: () => own);
+
+        CollectionAssert.AreEquivalent(new[] { 2582, 2583, 41001 }, host.RuntimeService.CurrentReservedPorts().ToArray());
+
+        // A Desktop instance that starts later, on a free port: read at the next start of a sandbox.
+        root.McpPorts.Publish(41002);
+        own.Add(41003);
+        CollectionAssert.AreEquivalent(new[] { 2582, 2583, 41001, 41002, 41003 }, host.RuntimeService.CurrentReservedPorts().ToArray());
+        root.McpPorts.Withdraw();
+
+        // A host with no listener of its own keeps away from the recorded ones too.
+        await using var other = new HeadlessTestRoot();
+        var bare = await other.CreateHostAsync(new ScriptedTurnProvider());
+        CollectionAssert.AreEquivalent(new[] { 2582, 2583 }, bare.RuntimeService.CurrentReservedPorts().ToArray());
+        other.McpPorts.Publish(41004);
+        CollectionAssert.AreEquivalent(new[] { 2582, 2583, 41004 }, bare.RuntimeService.CurrentReservedPorts().ToArray());
+        other.McpPorts.Withdraw();
+    }
+
     [TestMethod]
     public async Task Config_OfTheHost_IsWhatItsStoresRead_WithItsOverlays_AndNoWrite()
     {

@@ -39,7 +39,7 @@ internal sealed record DesktopMcpEndpoint(string Host, int Port, bool Chosen)
     internal static DesktopMcpEndpoint For(DesktopLaunchOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var port = options.McpPort ?? (options.Owned is not { Home: null } ? 0 : options.Developer ? DeveloperPort : DefaultPort);
+        var port = options.McpPort ?? (options.Owned.Home is not null ? 0 : options.Developer ? DeveloperPort : DefaultPort);
         return new DesktopMcpEndpoint(options.McpHost ?? DefaultHost, port, options.McpPort is not null);
     }
 

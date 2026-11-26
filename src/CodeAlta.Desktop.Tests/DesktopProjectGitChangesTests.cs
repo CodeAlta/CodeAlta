@@ -57,7 +57,7 @@ public sealed class DesktopProjectGitChangesTests
         var again = await repository.Service.ChangesAsync(new ProjectGitChangesRequest(Epoch, repository.ProjectId, null, changes.Revision), default);
         Assert.AreEqual(ProjectGitChangesResponse.Refused("unchanged") with { ProjectId = repository.ProjectId, Revision = changes.Revision }, again);
         repository.Write("a.txt", "one\nTWO\nthree\nFOUR\n");
-        File.SetLastWriteTimeUtc(repository.At("a.txt"), DateTime.UtcNow.AddMinutes(5));
+        File.SetLastWriteTimeUtc(repository.At("a.txt"), DateTime.UtcNow.AddMinutes(5)); // not a limit
         repository.Now += TimeSpan.FromMinutes(1);
         var next = await repository.Service.ChangesAsync(new ProjectGitChangesRequest(Epoch, repository.ProjectId, null, changes.Revision), default);
         Assert.AreEqual("ok", next.Status);

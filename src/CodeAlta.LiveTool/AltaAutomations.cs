@@ -217,6 +217,9 @@ public sealed record AltaAutomationRequest(string Name, string Prompt)
     /// <summary>Gets which of its runs tell the user with a notification when they end: <c>always</c>, <c>failures</c>, or null for none.</summary>
     public string? Notify { get; init; }
 
+    /// <summary>Gets the label for sessions the sessions of its runs get: the id or the name of a label; null for one of its name.</summary>
+    public string? Label { get; init; }
+
     /// <summary>Gets its triggers, written as <see cref="AltaAutomation.Triggers"/> shows them.</summary>
     public IReadOnlyList<string> Triggers { get; init; } = [];
 }

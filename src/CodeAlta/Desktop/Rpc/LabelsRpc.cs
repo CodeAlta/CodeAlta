@@ -4,8 +4,8 @@ using NeoAstra.Rpc;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// The labels of the catalog for the page: the names given to projects to find them together, in a tree, each with the
-/// projects that have it. Every change asks every window to read the spaces and the labels again.
+/// The labels of the catalog for the page: the names given to projects, or to sessions, to find them together, in a
+/// tree, each with the projects that have it. Every change asks every window to read the spaces and the labels again.
 /// </summary>
 [NeoRpcService("labels", Version = 1)]
 internal sealed class LabelsService
@@ -34,6 +34,12 @@ internal sealed class LabelsService
         (_catalog, _view, _epoch) = (catalog, view, epoch);
     }
 
+    /// <summary>
+    /// Gets what gives labels to a session and takes others from it, and returns its labels after the change (null for a
+    /// session that is not known): the session runtime. Without it, the labels of sessions are <c>unavailable</c>.
+    /// </summary>
+    internal Func<string, IReadOnlyList<string>, IReadOnlyList<string>, CancellationToken, Task<IReadOnlyList<string>?>>? AssignSession { get; init; }
+
     /// <summary>Lists the labels in the order of their tree, each with the projects whose file names it.</summary>
     [NeoRpcMethod("list")]
     public async Task<LabelsResponse> ListAsync(LabelsRequest request, CancellationToken cancellationToken)
@@ -60,7 +66,7 @@ internal sealed class LabelsService
         return ChangeAsync(request.ExpectedEpoch, async () =>
         {
             var created = await _catalog!.CreateAsync(request.Name ?? string.Empty, request.Parent, request.Icon, request.Color, request.Space,
-                request.Favorite, request.Description, cancellationToken).ConfigureAwait(false);
+                request.Favorite, request.Description, request.ForSessions == true ? LabelTarget.Sessions : LabelTarget.Projects, cancellationToken).ConfigureAwait(false);
             if (!created.Succeeded) return created;
             foreach (var projectId in (request.ProjectIds ?? []).Take(MaximumProjects))
             {
@@ -106,6 +112,46 @@ internal sealed class LabelsService
         return ChangeAsync(request.ExpectedEpoch, () => _catalog!.AssignAsync(request.ProjectId ?? string.Empty, request.Add, request.Remove, cancellationToken));
     }
 
+    /// <summary>
+    /// Gives labels for sessions to a session and takes others from it, in one state record of its journal. A label given
+    /// must be one for sessions; one taken away may no longer exist.
+    /// </summary>
+    [NeoRpcMethod("assignSession")]
+    public async Task<LabelSessionAssignResponse> AssignSessionAsync(LabelSessionAssignRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, []);
+        if (AssignSession is null) return new("unavailable", null, []);
+        if (string.IsNullOrWhiteSpace(request.SessionId)) return new("not_found", "A session is required.", []);
+        var add = LabelDescriptor.NormalizeIds(request.Add?.Take(MaximumProjects));
+        var remove = LabelDescriptor.NormalizeIds(request.Remove?.Take(MaximumProjects));
+        try
+        {
+            var labels = await _catalog!.LoadAsync(cancellationToken).ConfigureAwait(false);
+            if (add.FirstOrDefault(id => !labels.Any(label => label.Id == id)) is { } missing) return new("not_found", $"No label has the id '{missing}'.", []);
+            if (labels.FirstOrDefault(label => !label.IsForSessions && add.Contains(label.Id, StringComparer.Ordinal)) is { } ofProjects)
+                return new("invalid", $"The label '{ofProjects.Name}' is for projects, not for sessions.", []);
+            var after = await AssignSession(request.SessionId.Trim(), add, remove, cancellationToken).ConfigureAwait(false);
+            return after is null ? new("not_found", "The session is not known.", []) : new("ok", null, after);
+        }
+        catch (ArgumentException exception)
+        {
+            return new("invalid", exception.Message, []);
+        }
+        catch (CodeAlta.Orchestration.Runtime.SessionInUseException exception)
+        {
+            return new("conflict", exception.Message, []);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new("write_failed", null, []);
+        }
+        catch (Exception exception) when (Unreadable(exception))
+        {
+            return new("unreadable", null, []);
+        }
+    }
+
     private async Task<LabelChangeResponse> ChangeAsync(string? expectedEpoch, Func<Task<LabelChange>> change)
     {
         if (Refuse(expectedEpoch) is { } refused) return new(refused, null, null);
@@ -143,7 +189,7 @@ internal sealed class LabelsService
 
     private static LabelItem Item(LabelDescriptor label, IReadOnlyList<LabelDescriptor> labels, IReadOnlyList<string> projectIds)
         => new(label.Id, label.Name, label.Description, label.Icon, label.Color, label.Order, label.Parent, label.Favorite, label.Space,
-            LabelCatalog.PathOf(label, labels), [.. projectIds]) { Repository = label.Repository };
+            LabelCatalog.PathOf(label, labels), [.. projectIds]) { Repository = label.Repository, ForSessions = label.IsForSessions ? true : null };
 }
 
 /// <summary>Asks for the labels.</summary>
@@ -174,6 +220,10 @@ internal sealed record LabelItem(string Id, string Name, string? Description, st
     // change; absent for a label of the user.
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Repository { get; init; }
+
+    /// <summary>Gets true for a label given to sessions rather than to projects; absent for a label of projects. A sub-label is for what its parent is for.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ForSessions { get; init; }
 }
 
 /// <summary>Creates a label.</summary>
@@ -187,7 +237,12 @@ internal sealed record LabelItem(string Id, string Name, string? Description, st
 /// <param name="Description">What it stands for.</param>
 /// <param name="ProjectIds">The projects that get it.</param>
 internal sealed record LabelCreateRequest(string ExpectedEpoch, string? Name, string? Parent, string? Icon, string? Color, string? Space, bool Favorite,
-    string? Description, IReadOnlyList<string>? ProjectIds);
+    string? Description, IReadOnlyList<string>? ProjectIds)
+{
+    /// <summary>Gets true for a top-level label given to sessions rather than to projects; absent for a label of projects.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ForSessions { get; init; }
+}
 
 /// <summary>Changes a label; a value left null stays as it is, and an empty one is removed.</summary>
 internal sealed record LabelUpdateRequest(string ExpectedEpoch, string? Id, string? Name, string? Description, string? Icon, string? Color, bool? Favorite, string? Space);
@@ -200,6 +255,19 @@ internal sealed record LabelDeleteRequest(string ExpectedEpoch, string? Id);
 
 /// <summary>Names the labels a project gets and loses.</summary>
 internal sealed record LabelAssignRequest(string ExpectedEpoch, string? ProjectId, IReadOnlyList<string>? Add, IReadOnlyList<string>? Remove);
+
+/// <summary>Names the labels for sessions a session gets and loses.</summary>
+internal sealed record LabelSessionAssignRequest(string ExpectedEpoch, string? SessionId, IReadOnlyList<string>? Add, IReadOnlyList<string>? Remove);
+
+/// <summary>
+/// The labels of a session after a change. Status is <c>ok</c>, <c>invalid</c> (with a message), <c>not_found</c>,
+/// <c>conflict</c> (another process holds the session), <c>write_failed</c>, <c>unreadable</c>, <c>unavailable</c> or
+/// <c>stale_epoch</c>.
+/// </summary>
+/// <param name="Status">How the change ended.</param>
+/// <param name="Message">What was wrong, for a change that was not made.</param>
+/// <param name="Labels">The identifiers of the labels of the session after the change; empty when it was not made.</param>
+internal sealed record LabelSessionAssignResponse(string Status, string? Message, IReadOnlyList<string> Labels);
 
 /// <summary>
 /// Status is <c>ok</c>, <c>invalid</c> (with a message), <c>not_found</c>, <c>conflict</c>, <c>write_failed</c>,

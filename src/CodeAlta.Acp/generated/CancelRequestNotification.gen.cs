@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Notification to cancel an ongoing request.
 /// 
-/// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v1/draft/cancellation)
+/// See protocol docs: [Request Cancellation](https://agentclientprotocol.com/protocol/v1/draft/cancellation)
 /// </summary>
 public sealed partial record CancelRequestNotification
 {

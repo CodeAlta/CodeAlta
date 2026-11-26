@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { LabelItem } from "#neoastra";
 import { labelMoveTarget } from "./labelDrag";
-import { canMoveLabel, labelPath, labelsOfSpace, labelSubtreeProjects, readLabels, type Label } from "./labels";
+import { canMoveLabel, hasLabelWords, labelPath, labelsOfSpace, labelSubtreeProjects, projectLabelsOnly, readLabels, sameLabels, sessionLabels, sessionLabelsOnly, splitLabelWords, type Label } from "./labels";
 import { steppedPlace } from "./LabelSettings";
 
 const item = (id: string, look: Partial<LabelItem> = {}): LabelItem =>
@@ -17,6 +17,26 @@ test("the labels the host lists are read safely: a parent that is not listed is 
   assert.equal(labelPath(labels[2], labels), "INFRA › HELM › CHARTS");
   assert.deepEqual(labelsOfSpace(labels, "personal").map(label => label.id), ["infra", "helm", "charts", "tools"]);
   assert.deepEqual(labelsOfSpace(labels, "work").map(label => label.id), ["infra", "helm", "charts", "tools", "ops"]);
+});
+
+test("the labels for sessions are a tree of their own, and a session names its labels", () => {
+  const all = readLabels([item("infra"), item("audit", { forSessions: true }), item("weekly", { parent: "audit", forSessions: true }), item("bug", { forSessions: true })]);
+  assert.deepEqual(projectLabelsOnly(all).map(label => label.id), ["infra"]);
+  assert.deepEqual(sessionLabelsOnly(all).map(label => label.id), ["audit", "weekly", "bug"]);
+  assert.equal(projectLabelsOnly(labels), labels, "Without labels for sessions, the labels are the same list.");
+  assert.deepEqual(sessionLabels({ labels: ["bug", "gone", "audit"] }, sessionLabelsOnly(all)).map(label => label.id), ["audit", "bug"], "In the order of their tree; one not listed is left out.");
+  assert.deepEqual(sessionLabels({}, all), []);
+  assert.equal(sameLabels(all, readLabels([item("infra"), item("audit"), item("weekly", { parent: "audit", forSessions: true }), item("bug", { forSessions: true })])), false);
+});
+
+test("a word label: of a filter keeps the sessions with a label whose id starts with it", () => {
+  assert.deepEqual(splitLabelWords(["login", "label:Audit", "label:pr"]), { words: ["login"], labels: ["audit", "pr"] });
+  const words = ["login"];
+  assert.equal(splitLabelWords(words).words, words);
+  assert.equal(hasLabelWords({ labels: ["audit", "pr-review"] }, ["audit", "pr"]), true);
+  assert.equal(hasLabelWords({ labels: ["audit"] }, ["audit", "pr"]), false, "Every label word is needed.");
+  assert.equal(hasLabelWords({ labels: null }, []), true);
+  assert.equal(hasLabelWords({}, ["audit"]), false);
 });
 
 test("a label never goes under itself, under its own sub-labels, or deeper than labels go", () => {

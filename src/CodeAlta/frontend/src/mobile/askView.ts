@@ -1,6 +1,6 @@
-import { questionTabTitle } from "../askReview";
+import { questionTabTitle, toggleChoice } from "../askReview";
 import {
-  askBadge, askChoice, askCommentsText, askGo, askLimits, askPrimaryLabel, askReviewWhat, askReviewWhere, askSendable, askStep, askTextRoom, askVerdict, askVerdicts,
+  askBadge, askChoices, askCommentsText, askGo, askLimits, askPrimaryLabel, askReviewWhat, askReviewWhere, askSendable, askStep, askTextRoom, askVerdict, askVerdicts,
   type AskDraft,
 } from "./ask";
 import type { Ask } from "./contract";
@@ -115,14 +115,15 @@ export function createAskView(options: Readonly<{
       part.append(make("h4", null, question.question));
       if (question.description) part.append(make("p", "detail", question.description));
       if (question.choices.length) {
+        const multi = !!question.allowMultiSelect;
         const choices = make("div", "ask-choices");
-        choices.setAttribute("role", "radiogroup");
+        choices.setAttribute("role", multi ? "group" : "radiogroup");
         choices.setAttribute("aria-label", question.title);
         question.choices.forEach((choice, index) => {
           const label = make("label", "ask-choice");
           const input = make("input", "sr-only");
-          input.type = "radio";
-          input.name = `ask-choice-${draft.index}`;
+          input.type = multi ? "checkbox" : "radio";
+          input.name = multi ? `ask-choice-${draft.index}-${index}` : `ask-choice-${draft.index}`;
           input.value = String(index);
           input.dataset.choice = String(index);
           const text = make("span", "ask-choice-text");
@@ -221,9 +222,9 @@ export function createAskView(options: Readonly<{
       const mark = button.querySelector(".ask-step-mark")!;
       if (!current && seen) mark.replaceChildren(icon(document, "check")); else mark.textContent = String(index + 1);
     }
-    const choice = askChoice(ask, draft, draft.index);
+    const choices = askChoices(ask, draft, draft.index);
     for (const input of Array.from(form.querySelectorAll<HTMLInputElement>("input[data-choice]"))) {
-      const on = Number(input.dataset.choice) === choice;
+      const on = choices.includes(Number(input.dataset.choice));
       input.checked = on;
       input.closest("label")!.toggleAttribute("data-selected", on);
     }
@@ -268,7 +269,14 @@ export function createAskView(options: Readonly<{
 
   root.addEventListener("change", event => {
     const target = event.target as HTMLInputElement;
-    if (!shown || target.type !== "radio") return;
+    if (!shown) return;
+    if (target.type === "checkbox" && target.dataset.choice !== undefined) {
+      const index = shown.draft.index;
+      shown.draft.multiChoices.set(index, toggleChoice(shown.draft.multiChoices.get(index), Number(target.dataset.choice), true));
+      sync();
+      return;
+    }
+    if (target.type !== "radio") return;
     if (target.dataset.choice !== undefined) shown.draft.choices.set(shown.draft.index, Number(target.dataset.choice));
     else if (target.dataset.verdict) shown.draft.verdict = target.dataset.verdict as AskDraft["verdict"];
     sync();

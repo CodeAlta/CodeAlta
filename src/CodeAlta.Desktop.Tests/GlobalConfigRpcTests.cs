@@ -460,7 +460,7 @@ type = "fake-agent"
         public async Task SignInAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings, string methodId,
             Func<CodeAlta.Plugins.Abstractions.PluginProviderSignInPrompt, CancellationToken, ValueTask> onPrompt, CancellationToken cancellationToken)
         {
-            await onPrompt(new(new Uri("https://auth.example.com/device"), "ABCD-1234", DateTimeOffset.UtcNow.AddMinutes(15)), cancellationToken);
+            await onPrompt(new(new Uri("https://auth.example.com/device"), "ABCD-1234", DateTimeOffset.UtcNow.AddMinutes(15)), cancellationToken); // not a limit
             if (Failure is { } failure) throw new InvalidOperationException(failure);
         }
     }
@@ -472,7 +472,7 @@ type = "fake-agent"
         var read = fixture.Service.Read(new(Epoch));
         Assert.AreEqual("ok", read.Status);
         Assert.AreEqual(CodeAltaConfigStore.GetDefaultGlobalConfigContent(), read.Content);
-        Assert.AreEqual(GlobalConfigService.Revision(read.Content!), read.Revision);
+        Assert.AreEqual(CodeAltaConfigStore.GetGlobalConfigRevision(read.Content!), read.Revision);
         Assert.IsFalse(File.Exists(fixture.ConfigPath), "Reading must not create the file.");
         Assert.AreEqual("stale_epoch", fixture.Service.Read(new("another")).Status);
         Assert.AreEqual("stale_epoch", fixture.Service.Read(new(null)).Status);
@@ -505,7 +505,7 @@ type = "fake-agent"
 
         var saved = fixture.Service.Save(new(Epoch, edited, read.Revision, false));
         Assert.AreEqual("ok", saved.Status);
-        Assert.AreEqual(GlobalConfigService.Revision(edited), saved.Revision);
+        Assert.AreEqual(CodeAltaConfigStore.GetGlobalConfigRevision(edited), saved.Revision);
         Assert.AreEqual(0, saved.ProvidersApplied);
         Assert.AreEqual(edited, File.ReadAllText(fixture.ConfigPath));
 
@@ -571,7 +571,7 @@ type = "fake-agent"
         Assert.AreEqual("ok", listed.Status);
         Assert.AreEqual("local", listed.DefaultProvider);
         Assert.AreEqual("local", listed.StartingProvider, "The configured default is enabled: a new session starts with it.");
-        Assert.AreEqual(GlobalConfigService.Revision(File.ReadAllText(fixture.ConfigPath)), listed.Revision);
+        Assert.AreEqual(CodeAltaConfigStore.GetGlobalConfigRevision(File.ReadAllText(fixture.ConfigPath)), listed.Revision);
         var local = listed.Providers.Single(provider => provider.Key == "local");
         Assert.IsTrue(local.Enabled);
         Assert.IsTrue(local.HasApiKey);
@@ -1457,6 +1457,39 @@ type = "fake-agent"
         var cleared = fixture.Service.SaveProvider(new(Epoch, after.Revision, "local", edit with { ApiKeyEnv = "LOCAL_KEY", ClearApiKey = true }, false, false));
         Assert.AreEqual("ok", cleared.Status, cleared.Message);
         Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("secret-value", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task SaveProvider_TwoEditorsOnTheSameRevisionHaveOnlyOneWinner()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var root = Path.GetDirectoryName(fixture.ConfigPath)!;
+        var competing = new GlobalConfigService(new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root }), fixture.Registry, root, Epoch);
+        var revision = fixture.Service.Providers(new(Epoch)).Revision;
+        var edit = new GlobalConfigProviderEdit("local", "openai-chat", true, "First edit", "model-a", null, "http://127.0.0.1:9999/v1", null, null, false);
+        var threadStarted = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<GlobalConfigSaveResponse> second;
+        GlobalConfigSaveResponse first;
+        bool waitingForLock;
+        // The competing editor has its own in-process gate. Make it reach the file lock before the first editor
+        // writes: if the revision check happens before taking that lock, both editors accept the old revision.
+        using (fixture.Store.LockGlobalConfig())
+        {
+            second = Task.Factory.StartNew(() =>
+            {
+                threadStarted.SetResult(Thread.CurrentThread);
+                return competing.SaveProvider(new(Epoch, revision, "local", edit with { DisplayName = "Second edit" }, false, false));
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            var writer = threadStarted.Task.WithinAsync(TestTime.Seconds(5)).GetAwaiter().GetResult();
+            waitingForLock = SpinWait.SpinUntil(() => (writer.ThreadState & ThreadState.WaitSleepJoin) != 0, TestTime.Seconds(5));
+            first = fixture.Service.SaveProvider(new(Epoch, revision, "local", edit, false, false));
+        }
+
+        var refused = await second.WithinAsync(TestTime.Seconds(10));
+        Assert.IsTrue(waitingForLock, "The second editor reached the file lock before the first saved.");
+        Assert.AreEqual(("ok", "conflict"), (first.Status, refused.Status));
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "display_name = \"First edit\"");
+        Assert.AreEqual(first.Revision, competing.Read(new(Epoch)).Revision);
     }
 
     [TestMethod]

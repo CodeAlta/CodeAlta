@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Capability to cancel work in a subagent session without ending that session.
 /// 
 /// Supplying `{}` advertises support. An omitted or `null` `cancel` does not.

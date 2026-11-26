@@ -1,5 +1,5 @@
 // Isolated project-opening bridge; no native host or user catalog is touched.
-import type { WorkspaceDirectoryCompletionRequest, WorkspaceDirectoryCompletionResponse, WorkspaceOpenProjectRequest,
+import type { WorkspaceDeleteProjectRequest, WorkspaceDeleteProjectResponse, WorkspaceDirectoryCompletionRequest, WorkspaceDirectoryCompletionResponse, WorkspaceMoveSessionRequest, WorkspaceMoveSessionResponse, WorkspaceOpenProjectRequest,
   WorkspaceOpenProjectResponse, WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
 import { workspace as fixtureWorkspace } from "./settingsShell.neoastra.mount";
 export * from "./settingsShell.neoastra.mount";
@@ -10,12 +10,14 @@ import { desktopShell as demoShell } from "./demo-api";
 
 const imported: WorkspaceProject[] = [];
 const imports: WorkspaceOpenProjectRequest[] = [];
+const deletions: { request: WorkspaceDeleteProjectRequest; resolve: (reply: WorkspaceDeleteProjectResponse) => void }[] = [];
+const moves: { request: WorkspaceMoveSessionRequest; resolve: (reply: WorkspaceMoveSessionResponse) => void }[] = [];
 // The folder dialog of the test: it answers with `pick` and records what it was asked.
 type ShellNotice = { kind: string; runningSessions: number; busyTerminals: number };
-const fixture: { imports: WorkspaceOpenProjectRequest[]; pick: { status: string; path: string | null };
+const fixture: { imports: WorkspaceOpenProjectRequest[]; deletions: typeof deletions; moves: typeof moves; pick: { status: string; path: string | null };
   picks: { title: string | null; initialDirectory: string | null }[];
   /** What the page asked of the shell, in order, and the notice the test sends as the host does. */
-  shell: string[]; notify: (notice: ShellNotice) => void } = { imports, pick: { status: "unavailable", path: null }, picks: [], shell: [], notify: () => { } };
+  shell: string[]; notify: (notice: ShellNotice) => void } = { imports, deletions, moves, pick: { status: "unavailable", path: null }, picks: [], shell: [], notify: () => { } };
 Object.assign(window, { projectFocusFixture: fixture });
 // A shell where the application can keep running without its window, and nothing is remembered yet.
 const closing = { onClose: "ask" };
@@ -46,9 +48,14 @@ export const desktopShell = {
 };
 export const workspace = {
   ...fixtureWorkspace,
+  deleteProject: (request: WorkspaceDeleteProjectRequest) => new Promise<WorkspaceDeleteProjectResponse>(resolve => deletions.push({ request, resolve })),
+  moveSession: (request: WorkspaceMoveSessionRequest) => new Promise<WorkspaceMoveSessionResponse>(resolve => moves.push({ request, resolve })),
   snapshot: async (): Promise<WorkspaceSnapshot> => {
     const snapshot = await fixtureWorkspace.snapshot() as WorkspaceSnapshot;
-    return { ...snapshot, projects: [...snapshot.projects, ...imported] };
+    const sessions = localStorage.getItem("archivedInfoFixture") === "true" ? [...snapshot.sessions,
+      { ...snapshot.sessions[0], id: "recorded-info", title: "Closed transcript", fullTitle: "Closed transcript", archived: true, archivedAt: "2026-10-16T00:00:00Z" }]
+      : snapshot.sessions;
+    return { ...snapshot, projects: [...snapshot.projects, ...imported], sessions };
   },
   completeDirectory: async (request: WorkspaceDirectoryCompletionRequest): Promise<WorkspaceDirectoryCompletionResponse> => ({
     status: "complete", hostEpoch: request.expectedHostEpoch, directoryPath: request.directoryPath, prefix: request.prefix,

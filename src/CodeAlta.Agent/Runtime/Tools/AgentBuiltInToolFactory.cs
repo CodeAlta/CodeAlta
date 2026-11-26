@@ -212,11 +212,26 @@ public static partial class AgentBuiltInToolFactory
     ];
 
     /// <summary>
-    /// Creates the default built-in tools.
+    /// Creates the built-in tools a session offers its model: those its provider takes
+    /// (<see cref="AgentBuiltInToolOptions.Provider"/>) and the session does not turn off
+    /// (<see cref="AgentBuiltInToolOptions.DisabledTools"/>).
     /// </summary>
     /// <param name="options">Tool options.</param>
     /// <returns>The built-in tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
     public static IReadOnlyList<AgentToolDefinition> CreateDefaultTools(AgentBuiltInToolOptions options)
+        => [.. CreateAllTools(options).Where(tool => ShouldIncludeBuiltInTool(options, tool.Spec.Name))];
+
+    /// <summary>
+    /// Creates every built-in tool, whatever the provider takes and the session turns off: for what runs the calls of a
+    /// session in its place (the worker of its sandbox), which is sent the calls of the tools the session offers and
+    /// decides nothing about them. A second choice made there, without the description of the provider, would refuse a
+    /// tool the model was offered.
+    /// </summary>
+    /// <param name="options">Tool options.</param>
+    /// <returns>The built-in tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    public static IReadOnlyList<AgentToolDefinition> CreateAllTools(AgentBuiltInToolOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -306,9 +321,7 @@ public static partial class AgentBuiltInToolFactory
                 (invocation, cancellationToken) => RequestUserInputAsync(options, invocation, cancellationToken))];
         }
 
-        return tools
-            .Where(tool => ShouldIncludeBuiltInTool(options, tool.Spec.Name))
-            .ToArray();
+        return tools;
     }
 
     private static Task<AgentToolResult> ReadFileAsync(
@@ -858,7 +871,7 @@ public static partial class AgentBuiltInToolFactory
             Reason: "The agent requested local shell execution.",
             Network: null,
             ProposedExecPolicyAmendment: null,
-            ProposedNetworkPolicyAmendments: null);
+            ProposedNetworkPolicyAmendments: null) { DenialTakesFeedback = true };
 
         var decision = await options.OnPermissionRequest(permissionRequest, cancellationToken).ConfigureAwait(false);
         switch (decision.Kind)
@@ -1635,7 +1648,7 @@ public static partial class AgentBuiltInToolFactory
             GrantRoot: workingDirectory,
             Reason: touchedPaths.Count == 0
                 ? $"The agent requested filesystem edits via {toolName}."
-                : $"The agent requested filesystem edits via {toolName} affecting {touchedPaths.Count} path(s).");
+                : $"The agent requested filesystem edits via {toolName} affecting {touchedPaths.Count} path(s).") { DenialTakesFeedback = true };
         var decision = await options.OnPermissionRequest(permissionRequest, cancellationToken).ConfigureAwait(false);
         return decision.Kind switch
         {

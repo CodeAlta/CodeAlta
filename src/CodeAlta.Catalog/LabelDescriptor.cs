@@ -1,13 +1,23 @@
 namespace CodeAlta.Catalog;
 
+/// <summary>What a label is given to.</summary>
+public enum LabelTarget
+{
+    /// <summary>Projects: the Explorer lists the projects of a space under their labels.</summary>
+    Projects,
+    /// <summary>Sessions: the Explorer can list the sessions of a project under their labels.</summary>
+    Sessions,
+}
+
 /// <summary>
-/// Describes a label: a name the user gives to some projects to find them together, shown as a badge of its own icon
-/// and color. A label can be under another label, and a project can have several.
+/// Describes a label: a name the user gives to some projects, or to some sessions, to find them together, shown as a
+/// badge of its own icon and color. A label can be under another label, and a project or a session can have several.
 /// </summary>
 /// <remarks>
 /// A label is the file <c>labels/&lt;id&gt;.md</c> of the catalog: its front matter, and its body, which is the
-/// description. The projects of a label are the ones whose own file names it. Only a top-level label has a space: its
-/// sub-labels are in the same one.
+/// description. The projects of a label are the ones whose own file names it; the sessions of a label are the ones whose
+/// journal names it. Only a top-level label has a space and a target: its sub-labels are in the same space and for the
+/// same things.
 /// </remarks>
 public sealed class LabelDescriptor
 {
@@ -53,6 +63,15 @@ public sealed class LabelDescriptor
     /// </summary>
     public string? Space { get; set; }
 
+    /// <summary>
+    /// Gets or sets what the label is given to: the target the file of its top-level label names, for a sub-label too.
+    /// It is chosen when the label is created and does not change.
+    /// </summary>
+    public LabelTarget Target { get; set; }
+
+    /// <summary>Gets whether the label is given to sessions rather than to projects.</summary>
+    public bool IsForSessions => Target == LabelTarget.Sessions;
+
     /// <summary>Gets or sets the file the label was read from; <see langword="null"/> before it is written.</summary>
     public string? SourcePath { get; set; }
 
@@ -87,7 +106,7 @@ public sealed class LabelDescriptor
     /// <returns>An identifier, which may already be taken.</returns>
     public static string IdFromName(string? name) => SpaceDescriptor.IdFromName(name, "label");
 
-    /// <summary>Reads the labels a project file names: the valid identifiers, each once, in the order of the file.</summary>
+    /// <summary>Reads the labels a project file or a session names: the valid identifiers, each once, in the order given.</summary>
     /// <param name="ids">The identifiers as written; <see langword="null"/> for none.</param>
     /// <returns>The identifiers kept.</returns>
     public static List<string> NormalizeIds(IEnumerable<string?>? ids)

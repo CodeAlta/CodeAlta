@@ -181,6 +181,11 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
     internal string BuiltInSkillRoot { get; }
     internal string DatabasesRoot { get; }
 
+    /// <summary>The record of MCP ports of the hosts of this root, in a folder of its own.</summary>
+    internal CodeAlta.Core.IO.McpPortRecord McpPorts => _mcpPorts ??= new(Path.Combine(Root, "mcp-ports"));
+
+    private CodeAlta.Core.IO.McpPortRecord? _mcpPorts;
+
     /// <summary>Creates a private database under this root, disposed with it.</summary>
     internal PrivateApplicationDatabase CreateDatabase()
     {
@@ -196,10 +201,14 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
     internal async Task<CodeAltaHost> CreateHostAsync(ScriptedTurnProvider provider, bool readOnlyGlobalState = false, bool separateStateRoot = false,
         string? scratchpadRoot = null, string? currentProject = null, bool fullTrust = false, bool headlessInstructions = false,
         CodeAltaConfigOptions? config = null, bool listsSkills = true, string? sessionLeaseOwner = null, bool followExternalSessions = false,
-        bool enableOwnedAsks = false, bool sessionPermissionModes = false, bool inheritPermissionMode = false, ISandboxBackend? sandboxBackend = null)
+        bool enableOwnedAsks = false, bool sessionPermissionModes = false, bool inheritPermissionMode = false, ISandboxBackend? sandboxBackend = null,
+        Func<IReadOnlyCollection<int>>? reservedPorts = null)
     {
         var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
+            // A record of its own: the ports of the instances of CodeAlta that run on this computer are not those of a test.
+            McpPorts = McpPorts,
+            ReservedLocalPorts = reservedPorts,
             SessionLeaseOwner = sessionLeaseOwner,
             FollowExternalSessions = followExternalSessions,
             GlobalRoot = GlobalRoot,

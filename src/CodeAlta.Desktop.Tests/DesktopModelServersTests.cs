@@ -1,4 +1,5 @@
 using System.Net;
+using CodeAlta.Catalog;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.ModelServers;
 using CodeAlta.Desktop.SessionHosts;
@@ -12,6 +13,47 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopModelServersTests
 {
     public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    public void AddLocalProvider_LeavesOtherProvidersAsWritten()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-model-server-provider-");
+        try
+        {
+            var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.FullName });
+            File.WriteAllText(store.ConfigPath, """
+                [providers.codex]
+                type = "codex"
+
+                [providers.spare]
+                type = "llama-cpp"
+                enabled = false
+                server = "local/spare"
+
+                [providers.future]
+                type = "future-provider"
+                future_setting = "kept"
+                """);
+
+            DesktopModelServers.SaveLocalProviderDefinition(store, "llama-coder", "Coder", "local/coder");
+
+            var written = File.ReadAllText(store.ConfigPath);
+            Assert.IsFalse(written.Contains("api_url", StringComparison.Ordinal), "Implicit endpoints are not written, even for a disabled model server.");
+            Assert.IsFalse(written.Contains("max_concurrent_requests", StringComparison.Ordinal));
+            Assert.IsFalse(written.Contains("model_discovery", StringComparison.Ordinal));
+            StringAssert.Contains(written, "[providers.future]");
+            StringAssert.Contains(written, "future_setting = \"kept\"");
+            var raw = store.LoadGlobal().Providers!;
+            Assert.IsFalse(raw["spare"].Enabled);
+            Assert.AreEqual("local/spare", raw["spare"].Server);
+            Assert.AreEqual("llama-cpp", raw["llama-coder"].ProviderType);
+            Assert.AreEqual("local/coder", raw["llama-coder"].Server);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
 
     [TestMethod]
     public async Task RemoteServers_AreWatchedOnConnectionAndReconnection_WithoutOpeningSettings()

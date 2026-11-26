@@ -29,7 +29,7 @@ public sealed class NodeProviderSignInTests
             ProviderLogin = async (definition, _, way, onPrompt, cancellationToken) =>
             {
                 mode = way;
-                await onPrompt(new ProviderLoginPrompt(new Uri("https://console.mistral.ai/vibe/sign-in/p1"), null, DateTimeOffset.UtcNow.AddMinutes(10)), cancellationToken);
+                await onPrompt(new ProviderLoginPrompt(new Uri("https://console.mistral.ai/vibe/sign-in/p1"), null, DateTimeOffset.UtcNow.AddMinutes(10)), cancellationToken); // not a limit
                 await consoleSaid.Task.WaitAsync(cancellationToken);
                 return new ProviderLoginStatus(true, null, null, null);
             },

@@ -410,7 +410,7 @@ public sealed class BrowserPluginTests
         Assert.AreEqual(0, (await RunAsync(plugin, folder, "s1", ["browser", "activate"])).Exit);
         var tools = plugin.CreateTools(plugin.SessionOf("s1")!);
         Assert.IsTrue((await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{site.Origin}}/form"}""")).Success);
-        var deadline = DateTime.UtcNow.AddSeconds(30);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(30);
         while (plugin.SessionOf("s1")!.IsOpen && DateTime.UtcNow < deadline) await Task.Delay(200);
         Assert.IsFalse(plugin.SessionOf("s1")!.IsOpen, "the tabs closed while no tool was called");
         Assert.IsTrue(plugin.IsActive("s1"), "the session keeps its tools");
@@ -467,11 +467,11 @@ public sealed class BrowserPluginTests
         var snapshot = Text(await CallAsync(tools, "s1", "take_snapshot", "{}"));
         var button = BrowserToolTesting.Uid(snapshot, "button \"Start recording\"");
         Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{button}}"}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync((await session.SelectedPageAsync(CancellationToken.None))!);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Make it bigger"}""")).Success);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
         var annotations = session.Annotations!;
-        var deadline = DateTime.UtcNow.AddSeconds(20);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(20);
         while ((annotations.Pending.Count == 0 || annotations.Pending[0].Sources.Count == 0) && DateTime.UtcNow < deadline) await Task.Delay(100);
         Assert.AreEqual(1, annotations.Pending.Count);
         var title = Text(await CallAsync(tools, "s1", "evaluate_script", """{"function":"() => document.title"}"""));
@@ -488,7 +488,7 @@ public sealed class BrowserPluginTests
         foreach (var expected in new[] { "light", "dark" })
         {
             Assert.IsTrue((await CallAsync(tools, "s1", "click_at", themeButton)).Success);
-            for (var wait = DateTime.UtcNow.AddSeconds(10); plugin.Settings.ToolbarTheme != expected && DateTime.UtcNow < wait;) await Task.Delay(100);
+            for (var wait = DateTime.UtcNow + TestTime.Seconds(10); plugin.Settings.ToolbarTheme != expected && DateTime.UtcNow < wait;) await Task.Delay(100);
             Assert.AreEqual(expected, plugin.Settings.ToolbarTheme, "the toolbar keeps the look the user chose");
         }
 
@@ -500,7 +500,7 @@ public sealed class BrowserPluginTests
         var barLeft = await BarLeftAsync(tools, numbers[1] - 31);
         Assert.IsTrue(barLeft > 0, "the bar is at the bottom right");
         await tab.DragAsync(BrowserPoint.OfPage(tab.MainFrame, barLeft + 20, numbers[1] - 31), BrowserPoint.OfPage(tab.MainFrame, barLeft + 20 - 200, numbers[1] - 31 - 100), CancellationToken.None);
-        for (var wait = DateTime.UtcNow.AddSeconds(10); plugin.Settings.ToolbarPosition is null && DateTime.UtcNow < wait;) await Task.Delay(100);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); plugin.Settings.ToolbarPosition is null && DateTime.UtcNow < wait;) await Task.Delay(100);
         Assert.IsNotNull(plugin.Settings.ToolbarPosition, "the place of the bar is kept");
         Assert.AreEqual(16 + 200, plugin.Settings.ToolbarPosition.Right, 2);
         Assert.AreEqual(16 + 100, plugin.Settings.ToolbarPosition.Bottom, 2);
@@ -527,7 +527,7 @@ public sealed class BrowserPluginTests
         // from the button of the page, Tab reaches Annotate, the count and Send; Enter opens the popup, Tab its switch.
         Assert.IsTrue((await CallAsync(tools, "s1", "evaluate_script", """{"function":"() => { document.getElementById('record').focus(); return 'focused'; }"}""")).Success);
         foreach (var key in new[] { "Tab", "Tab", "Tab", "Enter", "Tab", "Space" }) Assert.IsTrue((await CallAsync(tools, "s1", "press_key", $$"""{"key":"{{key}}"}""")).Success);
-        for (var wait = DateTime.UtcNow.AddSeconds(10); !plugin.Settings.AnnotationDetails && DateTime.UtcNow < wait;) await Task.Delay(100);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); !plugin.Settings.AnnotationDetails && DateTime.UtcNow < wait;) await Task.Delay(100);
         Assert.IsTrue(plugin.Settings.AnnotationDetails, "the choice of the details is kept");
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Escape"}""")).Success);
         Assert.AreEqual(1, annotations.Pending.Count, "the popup closed without sending");
@@ -576,7 +576,7 @@ public sealed class BrowserPluginTests
         var file = await RunAsync(plugin, folder, "s1", ["browser", "open", "docs/preview.html"]);
         Assert.IsTrue(file.Records[^1].GetProperty("toolbar").GetBoolean(), file.Records[^1].ToString());
         var movedLeft = -1d;
-        for (var wait = DateTime.UtcNow.AddSeconds(10); movedLeft < 0 && DateTime.UtcNow < wait; await Task.Delay(100)) movedLeft = await BarLeftAsync(tools, numbers[1] - 131);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); movedLeft < 0 && DateTime.UtcNow < wait; await Task.Delay(100)) movedLeft = await BarLeftAsync(tools, numbers[1] - 131);
         Assert.AreEqual(barLeft - 200, movedLeft, 3, "the next page shows the bar where the user put it");
         Assert.AreEqual("docs/preview.html", file.Records[^1].GetProperty("file").GetString());
         var served = new Uri(file.Records[^1].GetProperty("url").GetString()!);
@@ -592,10 +592,10 @@ public sealed class BrowserPluginTests
         Assert.IsTrue(annotate.Records[^1].GetProperty("annotating").GetBoolean(), annotate.Records[^1].ToString());
         var save = BrowserToolTesting.Uid(Text(await CallAsync(tools, "s1", "take_snapshot", "{}")), "button \"Save the day\"");
         Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{save}}"}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync((await session.SelectedPageAsync(CancellationToken.None))!);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Say it louder"}""")).Success);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
-        for (var wait = DateTime.UtcNow.AddSeconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
         Assert.AreEqual(1, annotations.Pending.Count);
         Assert.AreEqual("The annotation was sent to the session.", await annotations.SendAsync("Fix it"));
         Assert.IsTrue(window.Sent.TryDequeue(out var sent));
@@ -675,7 +675,7 @@ public sealed class BrowserPluginTests
         annotations.Attach(page);
         await page.ReadyAsync();
         await page.ReportAsync("""{"type":"annotation","id":"a1","note":"Rounder","elements":[{"tag":"button","id":"save","html":"<button id=\"save\">Save</button>"}],"area":{"x":0,"y":0,"width":80,"height":20}}""");
-        for (var wait = DateTime.UtcNow.AddSeconds(10); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(20);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(20);
         await annotations.Pending.Single().Ready;
 
         // The disk is slow: the toolbar handles its next message, the Send, while the choice of the details is written.
@@ -684,13 +684,13 @@ public sealed class BrowserPluginTests
         await page.ReportAsync("""{"type":"details","on":true}""");
         await page.ReportAsync("""{"type":"send","text":"Fix it"}""");
         (string Session, string Text) sent = default;
-        for (var wait = DateTime.UtcNow.AddSeconds(10); !window.Sent.TryDequeue(out sent) && DateTime.UtcNow < wait;) await Task.Delay(20);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); !window.Sent.TryDequeue(out sent) && DateTime.UtcNow < wait;) await Task.Delay(20);
         Assert.IsNotNull(sent.Text, "the Send of the toolbar sent no prompt");
         StringAssert.Contains(sent.Text, "```html", "the prompt carries the details the user chose just before");
         Assert.IsFalse(sent.Text.Contains("are left out", StringComparison.Ordinal), sent.Text);
 
         written.SetResult();
-        for (var wait = DateTime.UtcNow.AddSeconds(10); (await state.ReadJsonAsync<BrowserSettings>(PluginStateScope.User, "settings.json"))?.AnnotationDetails != true && DateTime.UtcNow < wait;) await Task.Delay(20);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); (await state.ReadJsonAsync<BrowserSettings>(PluginStateScope.User, "settings.json"))?.AnnotationDetails != true && DateTime.UtcNow < wait;) await Task.Delay(20);
         Assert.IsTrue((await state.ReadJsonAsync<BrowserSettings>(PluginStateScope.User, "settings.json"))!.AnnotationDetails, "the choice is kept");
         Assert.IsTrue(plugin.Settings.AnnotationDetails);
     }
@@ -866,7 +866,7 @@ public sealed class BrowserPluginTests
         var start = box.IndexOf("at=", StringComparison.Ordinal) + 3;
         var at = box[start..box.IndexOf(';', start)].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         Assert.IsTrue((await CallAsync(tools, "s1", "click_at", $$"""{"x":{{at[0]}},"y":{{at[1]}}}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync(tab);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Like this mockup"}""")).Success);
         var png = BrowserAnnotationsTests.Png(8, 8, noise: false);
         var dropped = System.IO.Path.Combine(folder.Path, "mockup.png");
@@ -874,7 +874,7 @@ public sealed class BrowserPluginTests
         await BrowserAnnotationsTests.DropAsync(tab, at[2], at[3], [dropped], CancellationToken.None);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
         var annotations = session.Annotations!;
-        for (var wait = DateTime.UtcNow.AddSeconds(20); (annotations.Pending.Count == 0 || annotations.Pending[0].Images.Count == 0 || annotations.Pending[0].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(20); (annotations.Pending.Count == 0 || annotations.Pending[0].Images.Count == 0 || annotations.Pending[0].Picture is null) && DateTime.UtcNow < wait;) await Task.Delay(100);
         var annotation = annotations.Pending.Single();
         var image = annotation.Images.Single();
         Assert.AreEqual(System.IO.Path.GetDirectoryName(annotation.Picture), System.IO.Path.GetDirectoryName(image.File), "the image is kept beside the picture of the annotation");
@@ -986,13 +986,13 @@ public sealed class BrowserPluginTests
             "http://localhost:5173|https://example.com:8080/path?x=1|http://127.0.0.1:3000|http://[::1]:8080|http://localhost|https://example.com|http://example.com:81|https://localhost:5173/|about:blank|mailto:a@example.com");
         Assert.IsTrue((await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{other.Url("/styled")}}"}""")).Success);
         var tab = (await session.SelectedPageAsync(CancellationToken.None))!;
-        Assert.IsTrue(await session.Annotations!.AnnotateAsync(tab, TimeSpan.FromSeconds(10), CancellationToken.None), "the toolbar of a page that is not of the project");
+        Assert.IsTrue(await session.Annotations!.AnnotateAsync(tab, TestTime.Seconds(10), CancellationToken.None), "the toolbar of a page that is not of the project");
         var button = BrowserToolTesting.Uid(Text(await CallAsync(tools, "s1", "take_snapshot", "{}")), "button \"Start recording\"");
         Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{button}}"}""")).Success);
-        await Task.Delay(200);
+        await BrowserWait.EditorAsync(tab);
         Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Like this, but blue"}""")).Success);
         Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
-        for (var wait = DateTime.UtcNow.AddSeconds(20); session.Annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(20); session.Annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
         var annotation = session.Annotations.Pending.Single();
         Assert.IsNull(annotation.Project);
         await annotation.Ready;

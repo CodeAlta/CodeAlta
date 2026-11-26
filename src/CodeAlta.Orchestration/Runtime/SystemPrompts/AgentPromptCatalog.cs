@@ -134,7 +134,7 @@ public sealed class AgentPromptCatalog
                 var applied = chains[id].Applied;
                 var top = applied[^1];
                 return new AgentPromptInheritedPrompt(top.PromptName, LastNonBlank(applied.Select(static prompt => prompt.DisplayName)) ?? top.PromptName,
-                    top.SourceKind, JoinPromptBodies(applied.Select(static prompt => prompt.Body)));
+                    top.SourceKind, JoinPromptBodies(applied.Select(static prompt => prompt.Body))) { SourcePath = top.SourcePath };
             })
             .ToArray();
         var files = prompts.SelectMany(prompt => chains[prompt.PromptName].Applied).ToArray();
@@ -857,7 +857,11 @@ public sealed record AgentPromptInheritance(IReadOnlyList<AgentPromptInheritedPr
 /// <param name="DisplayName">The name it is shown with.</param>
 /// <param name="SourceKind">Where the file in effect for it is kept.</param>
 /// <param name="Body">Its own text, with the files that add to it, without the text of the prompts it inherits itself.</param>
-public sealed record AgentPromptInheritedPrompt(string PromptName, string DisplayName, AgentPromptSourceKind SourceKind, string Body);
+public sealed record AgentPromptInheritedPrompt(string PromptName, string DisplayName, AgentPromptSourceKind SourceKind, string Body)
+{
+    /// <summary>Gets the path of the highest-precedence file applied to the prompt, or null when not supplied.</summary>
+    public string? SourcePath { get; init; }
+}
 
 /// <summary>
 /// Describes a discovered system prompt resource.

@@ -29,7 +29,7 @@ The fleet is mostly an extension of invariants the runtime already keeps. Each o
 | Component | Executable | Role in a fleet |
 | --- | --- | --- |
 | CodeAlta Desktop | `alta` | A node while it runs (its sessions are visible and drivable from other devices when its space allows it), and the **console of the fleet**: canvases over the server's REST API for machines, automations and runs, statistics, people and access, policies, audit, the server itself, and the setup ([console](console.md)). |
-| CodeAlta TUI | `altatui` | A node while it runs. No fleet console (no new TUI features, see `AGENTS.md`); it keeps working beside the rest. |
+| CodeAlta TUI | `altatui` | A node while it runs. No fleet console (see the [frontend scope rules](../development-guide.md#architecture-rules)). |
 | CodeAlta CLI | `altacli` | Unchanged: runs beside an instance of its machine. Later, `altacli` may drive remote nodes for scripts. |
 | **CodeAlta Node** | `altanode` (new) | A headless CodeAlta host that runs as a service: the always-on machine, the build Mac, the cloud VM. Same runtime, providers, tools, plugins and sandbox, no window. |
 | **CodeAlta Server** | `altaserver` (new) | The coordinator: a complete REST API (no administration interface of its own), identity and access control, devices, directory and presence, routing and relay, session ownership, automations' schedules and runs, statistics, what people share, policies, audit, notifications. It runs **no agent** and reads **no content** it was not given. |

@@ -16,10 +16,10 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record Error
 {
-    /// <summary>A number indicating the error type that occurred. This must be an integer as defined in the JSON-RPC specification.</summary>
+    /// <summary>A number indicating the error type that occurred. This MUST be an integer as defined in the JSON-RPC specification.</summary>
     [JsonPropertyName("code")]
     public ErrorCode Code { get; set; } = default!;
-    /// <summary>A string providing a short description of the error. The message should be limited to a concise single sentence.</summary>
+    /// <summary>A string providing a short description of the error. The message SHOULD be limited to a concise single sentence.</summary>
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
     /// <summary>Optional primitive or structured value that contains additional information about the error. This may include debugging information or context-specific details.</summary>

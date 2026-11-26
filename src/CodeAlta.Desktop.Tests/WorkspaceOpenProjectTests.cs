@@ -75,7 +75,7 @@ public sealed class WorkspaceOpenProjectTests
             Assert.AreEqual("confirmation_required", (await service.OpenProjectAsync(new(Epoch, root, false), CancellationToken.None)).Status);
             var filesystemRoot = Path.GetPathRoot(root)!;
             Assert.AreEqual(filesystemRoot, (await service.OpenProjectAsync(new(Epoch, filesystemRoot, false), CancellationToken.None)).ProjectPath);
-            Assert.AreEqual("unconfigured", (await new WorkspaceService((string?)null).OpenProjectAsync(new(Epoch, root, true), CancellationToken.None)).Status);
+            Assert.AreEqual("unconfigured", (await new WorkspaceService(catalog.Options.GlobalRoot).OpenProjectAsync(new(Epoch, root, true), CancellationToken.None)).Status);
             Assert.IsFalse(Directory.Exists(catalog.Options.ProjectsRoot));
         }
         finally { Directory.Delete(root, recursive: true); }

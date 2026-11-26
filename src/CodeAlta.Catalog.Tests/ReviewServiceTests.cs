@@ -364,7 +364,9 @@ public sealed class ReviewServiceTests
     }
 
     [TestMethod]
-    public async Task ASnapshot_WhoseIndexGitCannotReplace_IsWrittenThroughAnIndexGitCreates()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ASnapshot_WhoseIndexGitCannotReplace_IsWrittenThroughAnIndexGitCreates(bool conflicted)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -372,10 +374,45 @@ public sealed class ReviewServiceTests
         }
 
         using var repository = GitRepository.Create();
+        const string tracked = "bin/trackéd.txt";
+        var bin = Directory.CreateDirectory(Path.Combine(repository.Root, "bin")).FullName;
+        var trackedFile = Path.Combine(repository.Root, tracked);
+        File.WriteAllText(Path.Combine(repository.Root, ".gitignore"), "bin/\n");
+        File.WriteAllText(trackedFile, "original\n");
+        File.WriteAllText(Path.Combine(bin, "removed.txt"), "original\n");
+        repository.Git("add", ".gitignore");
+        repository.Git("add", "-f", tracked, "bin/removed.txt");
+        repository.Git("commit", "-q", "-m", "Track an ignored file");
+        if (conflicted)
+        {
+            repository.Git("branch", "other");
+            CommitTrackedFile("ours");
+            repository.Git("switch", "other");
+            CommitTrackedFile("theirs");
+            repository.Git("switch", "main");
+            var merge = await GitWorktreeService.RunGitAsync(repository.Root, ["merge", "--no-ff", "--no-edit", "other"], TestTime.Seconds(20), default);
+            Assert.AreEqual(1, merge.ExitCode, merge.Error);
+            Assert.IsNotEmpty(repository.Git("ls-files", "--unmerged", "--", tracked));
+        }
+
+        repository.Git("rm", "--cached", "--", "bin/removed.txt");
+        File.WriteAllText(trackedFile, "edited\n");
+        File.WriteAllText(Path.Combine(bin, "staged.txt"), "staged\n");
+        repository.Git("add", "-f", "bin/staged.txt");
+        File.WriteAllText(Path.Combine(bin, "staged.txt"), "edited after staging\n");
+        File.WriteAllText(Path.Combine(bin, "ignored.txt"), "not tracked\n");
         File.WriteAllText(Path.Combine(repository.Root, "readme.md"), "one\nchanged\n");
         File.WriteAllText(Path.Combine(repository.Root, "new.txt"), "new\n");
-        var expected = await GitSnapshot.WriteTreeAsync(repository.Root, default);
-        Assert.IsNotNull(expected);
+        var realIndex = Path.Combine(repository.Root, ".git", "index");
+        var before = File.ReadAllBytes(realIndex);
+        var (expected, diagnostic) = await GitSnapshot.WriteTreeWithDiagnosticAsync(repository.Root, default);
+        Assert.IsNotNull(expected, diagnostic);
+        var files = repository.Git("ls-tree", "-r", "--name-only", expected);
+        StringAssert.Contains(files, "bin/staged.txt");
+        Assert.IsFalse(files.Contains("bin/removed.txt", StringComparison.Ordinal));
+        Assert.IsFalse(files.Contains("bin/ignored.txt", StringComparison.Ordinal));
+        Assert.AreEqual("edited\n", repository.Git("show", expected + ":" + tracked));
+        Assert.AreEqual("edited after staging\n", repository.Git("show", expected + ":bin/staged.txt"));
 
         // The copy of the index is held as a file system filter holds what the process wrote (an antivirus scanning
         // it): git cannot put the index it writes in its place. The tree is written through an index git creates.
@@ -384,11 +421,51 @@ public sealed class ReviewServiceTests
         var paths = new Queue<string>([held, Path.Combine(repository.Home, "created.index")]);
         using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
-            Assert.AreEqual(expected, await GitSnapshot.WriteTreeAsync(repository.Root, paths.Dequeue, default));
+            var (snapshot, failure) = await GitSnapshot.WriteTreeWithDiagnosticAsync(repository.Root, default, paths.Dequeue);
+            Assert.AreEqual(expected, snapshot, failure);
+            Assert.IsNotNull(failure, "The reason for the fallback is kept even on success.");
+            Assert.IsTrue(failure.Contains("unable to write new index file", StringComparison.OrdinalIgnoreCase), failure);
         }
 
         Assert.IsEmpty(paths, "The first index could not be replaced: the second one was used.");
         Assert.IsFalse(File.Exists(Path.Combine(repository.Home, "created.index")), "The temporary index is removed.");
+        CollectionAssert.AreEqual(before, File.ReadAllBytes(realIndex), "Neither attempt changes the checkout's index.");
+
+        void CommitTrackedFile(string content)
+        {
+            File.WriteAllText(trackedFile, content + "\n");
+            repository.Git("add", "-f", tracked);
+            repository.Git("commit", "-q", "-m", content);
+        }
+    }
+
+    [TestMethod]
+    public async Task ASnapshot_WhenGitAddFails_KeepsTheStageAndError()
+    {
+        using var repository = GitRepository.Create();
+        var index = Path.Combine(repository.Home, "snapshot.index");
+        File.WriteAllText(index + ".lock", string.Empty);
+
+        var (snapshot, diagnostic) = await GitSnapshot.WriteTreeWithDiagnosticAsync(repository.Root, default, () => index);
+
+        Assert.IsNull(snapshot);
+        Assert.IsNotNull(diagnostic);
+        StringAssert.StartsWith(diagnostic, "git add: ");
+        Assert.IsTrue(diagnostic.Contains("unable to create", StringComparison.OrdinalIgnoreCase), diagnostic);
+        Assert.IsLessThanOrEqualTo(600, diagnostic.Length);
+    }
+
+    [TestMethod]
+    public async Task ASnapshot_WhenCopyingTheIndexFails_KeepsTheStageAndError()
+    {
+        using var repository = GitRepository.Create();
+        var index = Path.Combine(repository.Home, "missing", "snapshot.index");
+
+        var (snapshot, diagnostic) = await GitSnapshot.WriteTreeWithDiagnosticAsync(repository.Root, default, () => index);
+
+        Assert.IsNull(snapshot);
+        Assert.IsNotNull(diagnostic);
+        StringAssert.StartsWith(diagnostic, "copy index: DirectoryNotFoundException");
     }
 
     [TestMethod]

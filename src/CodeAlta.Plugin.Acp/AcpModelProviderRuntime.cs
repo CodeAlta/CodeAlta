@@ -254,7 +254,8 @@ internal static partial class AcpAgentInspector
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
-            var capabilities = AcpAgentCapabilities.Read(JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions()));
+            var initialize = JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions());
+            var capabilities = options.Quirks.Capabilities(AcpAgentCapabilities.Read(initialize), initialize);
             options.Profile.Capabilities = capabilities;
             var name = capabilities.AgentName ?? options.AgentName;
             var version = capabilities.AgentVersion is { } agentVersion ? $" {agentVersion}" : string.Empty;

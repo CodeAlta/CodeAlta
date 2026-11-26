@@ -1657,7 +1657,7 @@ public sealed class CodeModeToolTests
             Runs = runs,
             Cache = new CodeModeScriptCache(),
             Library = library,
-            SourceFolder = sourceFolder is null ? null : _ => sourceFolder,
+            SourceFolder = sourceFolder is null ? null : (_, _) => ValueTask.FromResult<string?>(sourceFolder),
         });
         return tools.Single();
     }

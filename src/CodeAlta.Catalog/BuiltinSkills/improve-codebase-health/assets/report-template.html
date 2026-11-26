@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codebase health report</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem("health-report-theme") || "auto"; } catch (e) { /* no storage for this file: stay on auto */ }</script>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#f8f7f4, #101214);
+  --surface: light-dark(#ffffff, #181b1e);
+  --sunken: light-dark(#f1efea, #0b0d0e);
+  --ink: light-dark(#1d1c1a, #e9e7e2);
+  --muted: light-dark(#6a675f, #9b988f);
+  --line: light-dark(#e3e0d8, #2a2e33);
+  --accent: light-dark(#255f85, #7db8dc);
+  --good: light-dark(#1f7a55, #5fcf9d);
+  --good-bg: light-dark(#e3f3ea, #12301f);
+  --warn: light-dark(#9a6200, #e8b455);
+  --warn-bg: light-dark(#fbefd5, #33270c);
+  --bad: light-dark(#b3352b, #f08a7e);
+  --bad-bg: light-dark(#fbe6e2, #3a1512);
+  --info-bg: light-dark(#e4eff6, #12283a);
+  --mute-bg: light-dark(#eceae4, #22262a);
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 4rem; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--mono); font-size: .87em; }
+code { background: var(--mute-bg); padding: .08em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; margin: 0; }
+h1 { font-size: 2.3rem; letter-spacing: -.01em; }
+h2 { font-size: 1.55rem; }
+h3 { font-size: 1.15rem; }
+p { margin: 0 0 .7em; }
+p:last-child, ul:last-child { margin-bottom: 0; }
+ul { margin: 0 0 .7em; padding-left: 1.15em; }
+li { margin: .15em 0; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 1.5rem; }
+.eyebrow { font-size: .74rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+
+/* top bar */
+.bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.bar .wrap { display: flex; align-items: center; gap: 1.1rem; height: 3rem; }
+.bar nav { display: flex; gap: 1rem; flex: 1; overflow-x: auto; white-space: nowrap; font-size: .88rem; }
+.bar nav a { color: var(--muted); }
+.bar nav a:hover { color: var(--ink); text-decoration: none; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: .2rem .7rem; font-size: .8rem; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.ghost { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: .2rem .75rem; font-size: .8rem; color: var(--muted); }
+.ghost:hover { color: var(--ink); }
+
+/* header */
+header.top { padding: 3.2rem 0 1.4rem; }
+header.top h1 { margin: .5rem 0 1rem; }
+.verdict { font-family: var(--serif); font-size: 1.28rem; line-height: 1.45; max-width: 46rem; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; margin: 2rem 0 0; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .85rem 1rem; }
+.tile b { display: block; font: 600 1.7rem/1.1 var(--serif); }
+.tile span { display: block; font-size: .82rem; }
+.tile small { display: block; color: var(--muted); font-size: .76rem; margin-top: .2rem; }
+.tile.good b { color: var(--good); } .tile.warn b { color: var(--warn); } .tile.bad b { color: var(--bad); }
+
+section { padding: 2.4rem 0; border-top: 1px solid var(--line); }
+section > .wrap > h2 { margin-bottom: .35rem; }
+.lead { color: var(--muted); max-width: 46rem; margin-bottom: 1.3rem; }
+
+/* start here */
+.moves { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .8rem; counter-reset: move; }
+.move { display: block; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; color: inherit; counter-increment: move; }
+.move:hover { border-color: var(--accent); text-decoration: none; }
+.move::before { content: counter(move); font: 600 1.6rem/1 var(--serif); color: var(--accent); display: block; margin-bottom: .45rem; }
+.move b { display: block; margin-bottom: .25rem; }
+.move span { font-size: .88rem; color: var(--muted); }
+
+/* badges */
+.badge { display: inline-block; font-size: .72rem; line-height: 1; padding: .28em .6em; border-radius: 999px; background: var(--mute-bg); color: var(--muted); white-space: nowrap; }
+.badge.strong { background: var(--good-bg); color: var(--good); }
+.badge.worth-exploring { background: var(--warn-bg); color: var(--warn); }
+.badge.speculative { background: var(--mute-bg); color: var(--muted); }
+.badge.act { background: none; border: 1px solid var(--line); color: var(--ink); }
+.badge.act.delete, .badge.act.merge, .badge.act.simplify { border-color: var(--good); color: var(--good); }
+.badge.act.add { border-color: var(--warn); color: var(--warn); }
+.badge.risk-high { background: var(--bad-bg); color: var(--bad); }
+
+/* maps */
+.maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 1.2rem; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; min-width: 0; }
+.panel h3 { margin-bottom: .2rem; }
+.panel > p { font-size: .84rem; color: var(--muted); margin-bottom: .8rem; }
+table.grid { border-collapse: separate; border-spacing: 4px; width: 100%; table-layout: fixed; font-size: .8rem; }
+table.grid th { font-weight: 500; color: var(--muted); text-align: left; padding: .2rem .3rem; overflow-wrap: anywhere; }
+table.grid thead th { text-align: center; font-size: .74rem; }
+table.grid th:first-child { width: 27%; }
+table.heat th:first-child { width: 36%; }
+table.grid td { background: var(--sunken); border-radius: 6px; padding: .35rem; vertical-align: top; height: 3rem; }
+table.grid td.best { outline: 2px dashed var(--good); outline-offset: -2px; }
+table.heat td { text-align: center; vertical-align: middle; height: 2.1rem; cursor: pointer; font-weight: 600; }
+table.heat td { padding: 0; }
+table.heat button.cell { all: unset; display: block; width: 100%; line-height: 2.1rem; text-align: center; font-weight: 600; cursor: pointer; border-radius: 6px; }
+table.heat button.cell:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.chip { display: inline-block; margin: 2px; padding: .12em .5em; border-radius: 5px; font: 600 .74rem/1.5 var(--mono); background: var(--mute-bg); color: var(--ink); }
+.chip.strong { background: var(--good-bg); color: var(--good); }
+.chip.worth-exploring { background: var(--warn-bg); color: var(--warn); }
+.chip:hover { text-decoration: none; outline: 1px solid currentColor; }
+.panel.wide { grid-column: 1 / -1; }
+table.who th:first-child { width: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+table.who th a { color: var(--ink); }
+table.who thead th:not(:first-child) { width: 7.5rem; }
+table.who td { height: auto; text-align: center; vertical-align: middle; font-size: .76rem; font-weight: 600; padding: .3rem; }
+td.vote-cell.found, td.vote-cell.confirmed { background: var(--good-bg); color: var(--good); }
+td.vote-cell.refined { background: var(--warn-bg); color: var(--warn); }
+td.vote-cell.disputed { background: var(--bad-bg); color: var(--bad); }
+.scatter { width: 100%; height: auto; max-width: 780px; display: block; margin-bottom: 1rem; }
+.scatter text { font: 10px var(--sans); fill: var(--muted); }
+.scatter .axis { stroke: var(--line); }
+.scatter circle { fill: var(--muted); fill-opacity: .45; stroke: var(--surface); }
+.scatter a circle { fill: var(--accent); fill-opacity: .85; }
+.scatter .name { fill: var(--ink); }
+
+/* filters */
+.filters { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; margin: 0 0 1.4rem; }
+.filters .group { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; margin-right: .7rem; }
+.filters .group > span { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-right: .15rem; }
+.filters button.f { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: .15rem .65rem; font-size: .8rem; color: var(--muted); }
+.filters button.f[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.filters input { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: .22rem .8rem; font: inherit; font-size: .82rem; min-width: 11rem; }
+.count { font-size: .8rem; color: var(--muted); margin-left: auto; }
+
+/* themes and findings */
+.theme { margin: 0 0 2rem; }
+.theme > h3 { font-size: 1.25rem; }
+.theme > p { color: var(--muted); max-width: 46rem; margin: .25rem 0 .8rem; }
+details.finding { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin: .5rem 0; }
+details.finding[open] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+details.finding > summary { list-style: none; cursor: pointer; padding: .8rem 1.1rem; display: grid; grid-template-columns: auto 1fr auto; gap: .2rem .9rem; align-items: baseline; }
+details.finding > summary::-webkit-details-marker { display: none; }
+.fid { font: 600 .8rem var(--mono); color: var(--muted); }
+.ftitle { font-weight: 600; }
+.fclaim { grid-column: 2 / 3; color: var(--muted); font-size: .9rem; }
+.fmeta { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.votes { display: inline-flex; gap: 3px; margin-left: .25rem; }
+.vote { width: 1.25rem; height: 1.25rem; border-radius: 50%; font: 700 .68rem/1.25rem var(--sans); text-align: center; background: var(--mute-bg); color: var(--muted); }
+.vote.found, .vote.confirmed { background: var(--good-bg); color: var(--good); }
+.vote.refined { background: var(--warn-bg); color: var(--warn); }
+.vote.disputed { background: var(--bad-bg); color: var(--bad); }
+.fbody { padding: .3rem 1.1rem 1.2rem; border-top: 1px solid var(--line); }
+.fbody h4 { font: 600 .74rem var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 1.2rem 0 .4rem; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 2rem; }
+.evidence { list-style: none; padding: 0; }
+.evidence li { padding: .35rem 0 .35rem .8rem; border-left: 2px solid var(--line); margin: .3rem 0; font-size: .92rem; }
+.evidence .where { display: block; font: .8rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.balance { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; }
+.balance > div { border-radius: 8px; padding: .6rem .8rem; font-size: .92rem; }
+.balance .minus { background: var(--good-bg); }
+.balance .plus { background: var(--warn-bg); }
+.balance b { display: block; font-size: .74rem; letter-spacing: .07em; text-transform: uppercase; margin-bottom: .25rem; }
+.balance .minus b { color: var(--good); } .balance .plus b { color: var(--warn); }
+.delta { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .6rem; }
+.delta span { font: 600 .78rem var(--mono); padding: .15em .55em; border-radius: 5px; background: var(--mute-bg); }
+.delta span.neg { background: var(--good-bg); color: var(--good); }
+.delta span.pos { background: var(--warn-bg); color: var(--warn); }
+.callout { border-radius: 8px; padding: .6rem .8rem; font-size: .92rem; background: var(--info-bg); margin-top: .9rem; }
+.callout.dissent { background: var(--warn-bg); }
+.callout b { font-size: .74rem; letter-spacing: .07em; text-transform: uppercase; display: block; margin-bottom: .15rem; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1.1rem; align-items: center; font-size: .82rem; color: var(--muted); }
+
+/* before / after */
+.ba { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: .8rem; }
+.ba > div { background: var(--sunken); border-radius: 8px; padding: .8rem; min-width: 0; }
+.ba .tag { font: 600 .7rem var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: .6rem; }
+.ba .after .tag { color: var(--good); }
+.dg + .dg { margin-top: .7rem; }
+.dg-note { font-size: .8rem; color: var(--muted); margin-top: .4rem; }
+.box { border: 1.5px solid var(--line); background: var(--surface); border-radius: 7px; padding: .4rem .6rem; font-size: .82rem; min-width: 0; }
+.box > b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.box > small { color: var(--muted); display: block; }
+.box.deep { border-width: 3px; border-color: var(--ink); }
+.box.good { border-color: var(--good); background: var(--good-bg); }
+.box.warn { border-color: var(--warn); background: var(--warn-bg); }
+.box.bad { border-color: var(--bad); background: var(--bad-bg); }
+.box.gone { border-style: dashed; opacity: .55; text-decoration: line-through; }
+.box.faded { opacity: .55; }
+.boxes { display: flex; flex-wrap: wrap; gap: .45rem; }
+.boxes > .box { flex: 1 1 110px; }
+.box .boxes { margin-top: .4rem; }
+.layers { display: flex; flex-direction: column; gap: 3px; }
+.layers .box { border-radius: 4px; border-left-width: 5px; }
+.layers .arrow, .flow .arrow { color: var(--muted); text-align: center; font-size: .8rem; line-height: 1; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.flow .box { flex: 0 1 auto; }
+.bars { display: grid; grid-template-columns: minmax(70px, auto) 1fr auto; gap: .3rem .6rem; align-items: center; font-size: .82rem; }
+.bars .track { background: var(--mute-bg); border-radius: 4px; height: .8rem; overflow: hidden; }
+.bars .fill { height: 100%; background: var(--muted); border-radius: 4px; }
+.bars .fill.good { background: var(--good); } .bars .fill.warn { background: var(--warn); } .bars .fill.bad { background: var(--bad); }
+.bars .num { font-family: var(--mono); font-size: .78rem; text-align: right; }
+.mass { display: flex; gap: .8rem; align-items: flex-end; flex-wrap: wrap; }
+.mass figure { margin: 0; text-align: center; font-size: .78rem; flex: 1 1 80px; }
+.mass .if { background: var(--warn); border-radius: 4px 4px 0 0; }
+.mass .im { background: var(--ink); opacity: .8; border-radius: 0 0 4px 4px; margin-top: 2px; }
+.mass figcaption { margin-top: .3rem; color: var(--muted); overflow-wrap: anywhere; }
+.text { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: .6rem .75rem; font-size: .88rem; white-space: pre-wrap; }
+.text + .dg-note { font-family: var(--mono); }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: .6rem .75rem; font: .78rem/1.5 var(--mono); overflow-x: auto; }
+.edges { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .3rem .5rem; align-items: center; }
+.edges .arrow { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+
+/* roadmap */
+.waves { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+.wave { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
+.wave > p { font-size: .84rem; color: var(--muted); margin: .2rem 0 .6rem; }
+.wave ol { margin: 0; padding-left: 1.2rem; }
+.wave li { margin: .45rem 0; font-size: .92rem; }
+.wave li small { display: block; color: var(--muted); }
+
+/* appendix */
+details.more { border-top: 1px solid var(--line); padding: .7rem 0; }
+details.more > summary { cursor: pointer; font-weight: 600; }
+details.more > div { padding: .8rem 0 .3rem; }
+table.plain { border-collapse: collapse; width: 100%; font-size: .86rem; }
+table.plain th, table.plain td { text-align: left; padding: .35rem .6rem .35rem 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+table.plain th { font-weight: 500; color: var(--muted); font-size: .78rem; }
+table.plain td.n { font-family: var(--mono); text-align: right; white-space: nowrap; }
+footer { padding: 2rem 0 3rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); }
+.hidden { display: none !important; }
+@media (max-width: 640px) {
+  h1 { font-size: 1.8rem; }
+  details.finding > summary { grid-template-columns: auto 1fr; }
+  .fmeta { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media print {
+  .bar, .filters, .actions button { display: none !important; }
+  :root, :root[data-theme] { color-scheme: light !important; }
+  details.finding { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="bar"><div class="wrap">
+  <nav id="nav"></nav>
+  <button class="ghost" id="toggle-all" type="button">Open all</button>
+  <div class="seg" role="group" aria-label="Theme">
+    <button type="button" data-theme-set="auto">Auto</button>
+    <button type="button" data-theme-set="light">Light</button>
+    <button type="button" data-theme-set="dark">Dark</button>
+  </div>
+</div></div>
+<main id="app"></main>
+<script id="report-data" type="application/json">__REPORT_DATA__</script>
+<script>
+"use strict";
+(function () {
+  const R = JSON.parse(document.getElementById("report-data").textContent);
+  const app = document.getElementById("app");
+  const root = document.documentElement;
+
+  /* ---------- helpers ---------- */
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => (/^(https?:|#|\.{0,2}\/|[\w-]+\/)/.test(u) ? `<a href="${u}">${t}</a>` : m));
+  /* Text with blank-line paragraphs and "- " bullets; an array is a bullet list. */
+  function block(s) {
+    if (s == null || s === "") return "";
+    if (Array.isArray(s)) return s.length ? "<ul>" + s.map((x) => "<li>" + inline(x) + "</li>").join("") + "</ul>" : "";
+    let out = "", list = [], para = [];
+    const flush = () => {
+      if (para.length) { out += "<p>" + inline(para.join(" ")) + "</p>"; para = []; }
+      if (list.length) { out += "<ul>" + list.map((x) => "<li>" + inline(x) + "</li>").join("") + "</ul>"; list = []; }
+    };
+    for (const line of String(s).split("\n")) {
+      if (/^\s*[-*]\s+/.test(line)) { if (para.length) flush(); list.push(line.replace(/^\s*[-*]\s+/, "")); }
+      else if (!line.trim()) flush();
+      else { if (list.length) flush(); para.push(line.trim()); }
+    }
+    flush();
+    return out;
+  }
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "html") el.innerHTML = v;
+      else if (k === "text") el.textContent = v;
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid);
+    return el;
+  }
+  const findings = R.findings || [];
+  const byId = Object.fromEntries(findings.map((f) => [f.id, f]));
+  const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const links = Object.assign({ root: "../../..", blob: "" }, R.links || {});
+  function fileLink(file, line) {
+    const label = file + (line ? ":" + line : "");
+    const href = links.blob ? links.blob.replace(/\/?$/, "/") + file + (line ? "#L" + String(line).split("-")[0] : "") : links.root.replace(/\/?$/, "/") + file;
+    return `<a class="mono" href="${esc(href)}">${esc(label)}</a>`;
+  }
+  const VOTE = { found: ["●", "found it", "found"], confirmed: ["✓", "confirmed it", "confirmed"], refined: ["~", "refined it", "simplified"], disputed: ["✕", "disputed it", "disputed"], unreviewed: ["·", "did not review it", ""] };
+  const EFFORT = { S: "small", M: "medium", L: "large" };
+
+  /* ---------- diagrams ---------- */
+  function box(item) {
+    if (typeof item === "string") item = { label: item };
+    return h("div", { class: "box " + (item.tone || "") },
+      h("b", { html: inline(item.label) }),
+      item.note ? h("small", { html: inline(item.note) }) : null,
+      item.children && item.children.length ? h("div", { class: "boxes" }, item.children.map(box)) : null);
+  }
+  function diagram(spec) {
+    if (!spec) return null;
+    if (Array.isArray(spec)) return h("div", {}, spec.map(diagram));
+    if (typeof spec === "string") spec = { type: "text", text: spec };
+    const wrap = h("div", { class: "dg" });
+    const items = spec.items || [];
+    switch (spec.type) {
+      case "boxes": wrap.append(h("div", { class: "boxes" }, items.map(box))); break;
+      case "layers": {
+        const el = h("div", { class: "layers" });
+        items.forEach((it, i) => { if (i) el.append(h("div", { class: "arrow", text: "↓" })); el.append(box(it)); });
+        wrap.append(el); break;
+      }
+      case "flow": {
+        const el = h("div", { class: "flow" });
+        items.forEach((it, i) => { if (i) el.append(h("div", { class: "arrow", text: "→" })); el.append(box(it)); });
+        wrap.append(el); break;
+      }
+      case "bars": {
+        const max = Math.max(spec.max || 0, ...items.map((it) => Number(it.value) || 0)) || 1;
+        const el = h("div", { class: "bars" });
+        for (const it of items) el.append(
+          h("div", { html: inline(it.label) }),
+          h("div", { class: "track" }, h("div", { class: "fill " + (it.tone || ""), style: `width:${Math.max(1.5, (100 * it.value) / max)}%` })),
+          h("div", { class: "num", text: Number(it.value).toLocaleString("en") + (spec.unit ? " " + spec.unit : "") }));
+        wrap.append(el); break;
+      }
+      case "mass": {
+        const max = Math.max(...items.map((it) => (it.interface || 0) + (it.implementation || 0))) || 1;
+        wrap.append(h("div", { class: "mass" }, items.map((it) => h("figure", {},
+          h("div", { class: "if", title: "interface: what a caller must know", style: `height:${Math.max(3, (130 * (it.interface || 0)) / max)}px` }),
+          h("div", { class: "im", title: "implementation", style: `height:${Math.max(3, (130 * (it.implementation || 0)) / max)}px` }),
+          h("figcaption", { html: inline(it.label) })))));
+        wrap.append(h("div", { class: "dg-note", html: '<span style="color:var(--warn)">■</span> what a caller must know &nbsp; <span style="color:var(--ink)">■</span> what it does for them' }));
+        break;
+      }
+      case "text": {
+        wrap.append(h("div", { class: "text", text: spec.text || "" }));
+        const words = (spec.text || "").trim().split(/\s+/).filter(Boolean).length;
+        wrap.append(h("div", { class: "dg-note", text: words + " words" }));
+        break;
+      }
+      case "code": wrap.append(h("pre", { class: "code", text: spec.code || "" })); break;
+      case "edges": {
+        const el = h("div", { class: "edges" });
+        for (const it of items) el.append(box({ label: it.from, tone: it.tone }), h("div", { class: "arrow", text: it.note ? "— " + it.note + " →" : "→" }), box({ label: it.to, tone: it.tone }));
+        wrap.append(el); break;
+      }
+      default: wrap.append(h("pre", { class: "code", text: JSON.stringify(spec, null, 1) }));
+    }
+    if (spec.note) wrap.append(h("div", { class: "dg-note", html: inline(spec.note) }));
+    return wrap;
+  }
+
+  /* ---------- finding ---------- */
+  const DELTA = { lines: "lines", files: "files", concepts: "concepts", words: "words", tests: "tests", dependencies: "dependencies", seconds: "s of test time" };
+  function deltaPills(delta) {
+    if (!delta) return null;
+    const pills = Object.entries(delta).filter(([, v]) => typeof v === "number" && v !== 0).map(([k, v]) =>
+      h("span", { class: v < 0 ? "neg" : "pos", text: (v < 0 ? "−" : "+") + Math.abs(v).toLocaleString("en") + " " + (DELTA[k] || k) }));
+    return pills.length ? h("div", { class: "delta" }, pills) : null;
+  }
+  function mainDelta(f) {
+    const entry = Object.entries((f.balance && f.balance.delta) || {}).filter(([, v]) => typeof v === "number" && v !== 0).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))[0];
+    if (!entry) return null;
+    const [k, v] = entry;
+    return h("span", { class: "badge " + (v < 0 ? "strong" : "worth-exploring"), text: (v < 0 ? "−" : "+") + Math.abs(v).toLocaleString("en") + " " + (DELTA[k] || k) });
+  }
+  function votes(f) {
+    const analysts = R.analysts || [];
+    if (!f.votes || !analysts.length) return null;
+    return h("span", { class: "votes" }, analysts.map((a) => {
+      const v = f.votes[a.id] || "unreviewed";
+      return h("span", { class: "vote " + v, title: (a.name || a.model || a.id) + " " + VOTE[v][1], text: VOTE[v][0] });
+    }));
+  }
+  function brief(f) {
+    const open = f.strength !== "strong";
+    const L = [`${open ? "Investigate" : "Implement"} finding ${f.id} of the health report${R.path ? " `" + R.path + "/report.json`" : ""}: ${f.title}`, ""];
+    if (open) L.push("The review found the problem real and left the cure open. Take the first step only, report what it shows, and change nothing more before the user decides.", "");
+    const add = (title, v) => { if (v && v.length) L.push(`## ${title}`, Array.isArray(v) ? v.map((x) => "- " + x).join("\n") : v, ""); };
+    add("Problem", f.claim);
+    add("Evidence", (f.evidence || []).map((e) => (e.file ? "`" + e.file + (e.line ? ":" + e.line : "") + "` " : "") + (e.text || "") + (e.command ? " (`" + e.command + "`)" : "")));
+    add("Change", f.change);
+    if (f.balance) { add("Removes", f.balance.removes); add("Adds", f.balance.adds); }
+    add("First step", f.firstStep); add("Then", f.steps); add("Verify", f.verify); add("Risks", f.risks); add("Not part of this", f.outOfScope);
+    add("Disagreement in the review", f.dissent);
+    if (f.dependsOn && f.dependsOn.length) add("Depends on", f.dependsOn.map((d) => d + (byId[d] ? ": " + byId[d].title : "")));
+    L.push("Check the evidence against the current code first: the report was written at commit " + (R.commit || "?") + ". Keep structural and behavioral changes in separate commits.");
+    return L.join("\n");
+  }
+  function copy(text, button) {
+    const done = () => { const t = button.textContent; button.textContent = "Copied"; setTimeout(() => (button.textContent = t), 1400); };
+    const fallback = () => { const ta = h("textarea", { style: "position:fixed;opacity:0" }); ta.value = text; document.body.append(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ } ta.remove(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+  }
+  function findingBody(f) {
+    const body = h("div", { class: "fbody" });
+    const sec = (title, node) => { if (node) body.append(h("h4", { text: title }), node); };
+    const blk = (v) => (v && v.length ? h("div", { html: block(v) }) : null);
+    if (f.before || f.after) sec("Before and after", h("div", { class: "ba" },
+      h("div", { class: "before" }, h("div", { class: "tag", text: "Before" }), diagram(f.before)),
+      h("div", { class: "after" }, h("div", { class: "tag", text: "After" }), diagram(f.after))));
+    if (f.evidence && f.evidence.length) sec("Evidence", h("ul", { class: "evidence" }, f.evidence.map((e) => h("li", {
+      html: inline(e.text || "") + (e.file ? `<span class="where">${fileLink(e.file, e.line)}</span>` : "") + (e.command ? `<span class="where">$ ${esc(e.command)}</span>` : "") }))));
+    sec("Change", blk(f.change));
+    if (f.balance) sec("What it removes, what it adds", h("div", {},
+      h("div", { class: "balance" },
+        h("div", { class: "minus" }, h("b", { text: "Removes" }), h("div", { html: block(f.balance.removes) || "nothing" })),
+        h("div", { class: "plus" }, h("b", { text: "Adds" }), h("div", { html: block(f.balance.adds) || "nothing" }))),
+      deltaPills(f.balance.delta)));
+    const cols = h("div", { class: "cols" });
+    const col = (title, v) => { if (v && v.length) cols.append(h("div", {}, h("h4", { text: title }), h("div", { html: block(v) }))); };
+    col("First step", f.firstStep); col("Then", f.steps); col("How we know it worked", f.verify); col("Risks", f.risks); col("If we leave it", f.ifNot); col("Not part of this", f.outOfScope);
+    if (f.files && f.files.length) cols.append(h("div", {}, h("h4", { text: "Files" }), h("div", { html: "<ul>" + f.files.map((p) => "<li>" + fileLink(p) + "</li>").join("") + "</ul>" })));
+    if (cols.children.length) body.append(cols);
+    if (f.dissent) body.append(h("div", { class: "callout dissent" }, h("b", { text: "Disagreement" }), h("div", { html: block(f.dissent) })));
+    if (f.dependsOn && f.dependsOn.length) body.append(h("div", { class: "callout" }, h("b", { text: "Do first" }),
+      h("div", { html: f.dependsOn.map((d) => `<a href="#${esc(d)}">${esc(d)}</a>` + (byId[d] ? " " + esc(byId[d].title) : "")).join(" · ") })));
+    const actions = h("div", { class: "actions" });
+    if (f.strength !== "speculative" && !["rejected", "deferred", "done"].includes(f.status)) {
+      const b = h("button", { class: "ghost", type: "button", text: "Copy as a prompt" });
+      b.addEventListener("click", () => copy(brief(f), b));
+      actions.append(b);
+    }
+    if (f.task) actions.append(h("span", { html: "Tracked as " + inline(f.task) }));
+    if (f.candidates && f.candidates.length) actions.append(h("span", { text: "From " + f.candidates.join(", ") + " of analysis/candidates.md" }));
+    if (f.status && f.status !== "proposed") actions.append(h("span", { class: "badge", text: f.status }));
+    const who = (R.analysts || []).filter((a) => f.votes && f.votes[a.id]).map((a) => (a.name || a.id) + " " + VOTE[f.votes[a.id]][1]);
+    if (who.length) actions.append(h("span", { text: who.join(" · ") }));
+    body.append(actions);
+    return body;
+  }
+  function finding(f) {
+    const d = h("details", { class: "finding", id: f.id, "data-lens": f.lens || "", "data-area": f.area || "", "data-strength": f.strength || "", "data-action": f.action || "" });
+    d.append(h("summary", {},
+      h("span", { class: "fid", text: f.id }),
+      h("span", { class: "ftitle", html: inline(f.title) }),
+      h("span", { class: "fmeta" },
+        f.action ? h("span", { class: "badge act " + f.action, text: f.action }) : null,
+        f.strength ? h("span", { class: "badge " + f.strength, text: f.strength.replace("-", " ") }) : null,
+        f.effort ? h("span", { class: "badge", text: (EFFORT[f.effort] || f.effort) + " effort", title: "effort" }) : null,
+        mainDelta(f),
+        f.risk === "high" ? h("span", { class: "badge risk-high", text: "high risk" }) : null,
+        votes(f)),
+      h("span", { class: "fclaim", html: inline(f.claim) + (f.area ? ` <span class="mono">${esc(f.area)}</span>` : "") })));
+    /* The body is built when the finding is first opened; printing builds them all. */
+    let filled = false;
+    d.fill = () => { if (!filled) { filled = true; d.append(findingBody(f)); } };
+    d.addEventListener("toggle", () => { if (d.open) d.fill(); });
+    return d;
+  }
+
+  /* ---------- sections ---------- */
+  const nav = document.getElementById("nav");
+  function section(id, title, lead) {
+    const wrap = h("div", { class: "wrap" }, h("h2", { text: title }), lead ? h("p", { class: "lead", html: inline(lead) }) : null);
+    app.append(h("section", { id }, wrap));
+    nav.append(h("a", { href: "#" + id, text: title }));
+    return wrap;
+  }
+  document.title = R.title || "Codebase health report";
+  const meta = [R.repo, R.commit && "at " + R.commit, R.date, R.scope].filter(Boolean).join(" · ");
+  const head = h("div", { class: "wrap" }, h("div", { class: "eyebrow", text: meta }), h("h1", { text: R.title || "Codebase health report" }), h("div", { class: "verdict", html: block(R.verdict) }));
+  if (R.metrics && R.metrics.length) head.append(h("div", { class: "tiles" }, R.metrics.map((m) =>
+    h("div", { class: "tile " + (m.tone || "") }, h("b", { text: m.value }), h("span", { html: inline(m.label) }), m.note ? h("small", { html: inline(m.note) }) : null))));
+  app.append(h("header", { class: "top" }, head));
+
+  const first = (R.roadmap || [])[0];
+  if (first && first.items && first.items.length) {
+    const s = section("start", "Start here", first.note || "The first changes to make, in order.");
+    s.append(h("div", { class: "moves" }, first.items.filter((it) => !["rejected", "deferred", "done"].includes((byId[it.finding] || {}).status)).slice(0, 6).map((it) => {
+      const f = byId[it.finding] || {};
+      return h("a", { class: "move", href: "#" + it.finding }, h("b", { html: inline(f.title || it.finding) }), h("span", { html: inline(it.note || f.claim || "") }));
+    })));
+  }
+
+  /* map: impact x effort, and lens x area */
+  const state = { lens: null, area: null, strength: null, action: null, q: "" };
+  if (findings.length > 2) {
+    const s = section("map", "Where it pays", "Each finding by what it gains and what it costs, and where the findings concentrate.");
+    const maps = h("div", { class: "maps" });
+    const impacts = ["high", "medium", "low"], efforts = ["S", "M", "L"];
+    const t = h("table", { class: "grid" }, h("thead", {}, h("tr", {}, h("th", {}), efforts.map((e) => h("th", { text: EFFORT[e] + " effort" })))));
+    const tb = h("tbody");
+    for (const im of impacts) tb.append(h("tr", {}, h("th", { text: im + " impact" }), efforts.map((e) => h("td", { class: im === "high" && e === "S" ? "best" : "" },
+      findings.filter((f) => f.impact === im && f.effort === e).map((f) => h("a", { class: "chip " + (f.strength || ""), href: "#" + f.id, title: f.title, text: f.id }))))));
+    t.append(tb);
+    maps.append(h("div", { class: "panel" }, h("h3", { text: "Impact and effort" }), h("p", { text: "Dashed cell: high impact for a small effort. Green: strong, amber: worth exploring, gray: speculative." }), t));
+
+    const lenses = [...new Set(findings.map((f) => f.lens).filter(Boolean))];
+    const areaCount = {};
+    for (const f of findings) if (f.area) areaCount[f.area] = (areaCount[f.area] || 0) + 1;
+    const areas = Object.keys(areaCount).sort((a, b) => areaCount[b] - areaCount[a]).slice(0, 10);
+    if (lenses.length > 1 && areas.length > 1) {
+      const ht = h("table", { class: "grid heat" }, h("thead", {}, h("tr", {}, h("th", {}), lenses.map((l) => h("th", { text: l })))));
+      const hb = h("tbody");
+      const peak = Math.max(...areas.flatMap((a) => lenses.map((l) => findings.filter((f) => f.area === a && f.lens === l).length))) || 1;
+      for (const a of areas) hb.append(h("tr", {}, h("th", { class: "mono", text: a }), lenses.map((l) => {
+        const n = findings.filter((f) => f.area === a && f.lens === l).length;
+        const td = h("td", { class: n ? "" : "zero", style: n ? `background: color-mix(in srgb, var(--accent) ${Math.round(18 + (62 * n) / peak)}%, var(--sunken)); color: ${n / peak > 0.5 ? "var(--bg)" : "var(--ink)"}` : "" });
+        if (n) {
+          const show = h("button", { type: "button", class: "cell", text: n, title: `Show the ${n} finding(s): ${l} in ${a}` });
+          show.addEventListener("click", () => { state.lens = l; state.area = a; applyFilters(); document.getElementById("findings").scrollIntoView(); });
+          td.append(show);
+        }
+        return td;
+      })));
+      ht.append(hb);
+      maps.append(h("div", { class: "panel" }, h("h3", { text: "Where the findings are" }), h("p", { text: "Findings per area and lens. Click a cell to list them." }), ht));
+    }
+    s.append(maps);
+  }
+
+  /* findings by theme */
+  const fs = section("findings", "Findings", findings.length ? "Grouped by theme. Open a finding for its evidence, the change, and how to start." : null);
+  const filterBar = h("div", { class: "filters" });
+  const countEl = h("span", { class: "count" });
+  function group(label, key, values) {
+    if (values.length < 2) return;
+    filterBar.append(h("div", { class: "group" }, h("span", { text: label }), values.map((v) => {
+      const b = h("button", { class: "f", type: "button", "data-key": key, "data-value": v, "aria-pressed": "false", text: v.replace("-", " ") });
+      b.addEventListener("click", () => { state[key] = state[key] === v ? null : v; if (key === "lens") state.area = null; applyFilters(); });
+      return b;
+    })));
+  }
+  const uniq = (k) => [...new Set(findings.map((f) => f[k]).filter(Boolean))];
+  group("Lens", "lens", uniq("lens"));
+  group("Strength", "strength", ["strong", "worth-exploring", "speculative"].filter((v) => findings.some((f) => f.strength === v)));
+  group("Action", "action", uniq("action"));
+  const search = h("input", { type: "search", placeholder: "Filter by text or path", "aria-label": "Filter findings" });
+  search.addEventListener("input", () => { state.q = search.value.toLowerCase(); applyFilters(); });
+  const areaChip = h("button", { class: "f hidden", type: "button", "aria-pressed": "true", title: "Show every area" });
+  areaChip.addEventListener("click", () => { state.area = null; state.lens = null; applyFilters(); }); // a cell of the map set both
+  filterBar.append(search, areaChip, countEl);
+  if (findings.length > 2) fs.append(filterBar);
+  if (!findings.length) fs.append(h("p", { class: "muted", text: "The review kept no finding." }));
+  const placed = new Set();
+  const themes = (R.themes || []).slice();
+  for (const th of themes) (th.findings || []).forEach((id) => placed.add(id));
+  const rest = findings.filter((f) => !placed.has(f.id)).map((f) => f.id);
+  if (rest.length) themes.push({ id: "other", title: themes.length ? "Other findings" : "", findings: rest });
+  for (const th of themes) {
+    const el = h("div", { class: "theme", id: "theme-" + slug(th.id || th.title) }, th.title ? h("h3", { html: inline(th.title) }) : null, th.thesis ? h("p", { html: inline(th.thesis) }) : null);
+    for (const id of th.findings || []) if (byId[id]) el.append(finding(byId[id]));
+    fs.append(el);
+  }
+  const haystack = {};
+  function searchText(f) {
+    return haystack[f.id] || (haystack[f.id] = [f.id, f.title, f.claim, f.change, f.area, f.lens, f.firstStep, ...(f.files || []),
+      ...(f.evidence || []).flatMap((e) => [e.text, e.file, e.command])].filter(Boolean).join(" ").toLowerCase());
+  }
+  function applyFilters() {
+    let shown = 0;
+    for (const d of document.querySelectorAll("details.finding")) {
+      const f = byId[d.id];
+      const text = state.q ? searchText(f) : "";
+      const ok = (!state.lens || f.lens === state.lens) && (!state.area || f.area === state.area) && (!state.strength || f.strength === state.strength)
+        && (!state.action || f.action === state.action) && (!state.q || text.includes(state.q));
+      d.classList.toggle("hidden", !ok);
+      if (ok) shown++;
+    }
+    for (const t of document.querySelectorAll(".theme")) t.classList.toggle("hidden", !t.querySelector("details.finding:not(.hidden)"));
+    for (const b of filterBar.querySelectorAll("button.f[data-key]")) b.setAttribute("aria-pressed", String(state[b.dataset.key] === b.dataset.value));
+    areaChip.classList.toggle("hidden", !state.area);
+    areaChip.textContent = state.area ? state.area + " ✕" : "";
+    countEl.textContent = shown === findings.length ? `${shown} findings` : `${shown} of ${findings.length}`;
+  }
+  applyFilters();
+
+  /* roadmap */
+  if (R.roadmap && R.roadmap.length) {
+    const s = section("roadmap", "Order of work", "What to do first and what waits for it.");
+    s.append(h("div", { class: "waves" }, R.roadmap.map((w) => h("div", { class: "wave" }, h("h3", { html: inline(w.title) }), w.note ? h("p", { html: inline(w.note) }) : null,
+      h("ol", {}, (w.items || []).map((it) => {
+        const f = byId[it.finding];
+        return h("li", {}, h("a", { href: "#" + it.finding, html: `<span class="mono">${esc(it.finding)}</span> ` + inline(f ? f.title : "") }), it.note ? h("small", { html: inline(it.note) }) : null);
+      }))))));
+  }
+
+  /* Hotspots as commits against size: the top right is where a change costs most. A file of a finding links to it. */
+  function scatter(hot) {
+    const W = 680, H = 300, L = 48, B = 30, T = 14, RIGHT = 16;
+    const maxC = Math.max(...hot.map((x) => x.commits)) || 1, maxL = Math.max(...hot.map((x) => x.loc)) || 1, maxF = Math.max(...hot.map((x) => x.fixes || 0)) || 1;
+    const X = (c) => L + ((W - L - RIGHT) * c) / maxC, Y = (l) => H - B - (H - B - T) * Math.sqrt(l / maxL);
+    const owner = (p) => findings.find((f) => (f.files || []).includes(p) || (f.evidence || []).some((e) => e.file === p));
+    const named = new Set(hot.slice().sort((a, b) => b.commits * b.loc - a.commits * a.loc).slice(0, 6).map((x) => x.path));
+    let s = `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hotspots: commits against lines">`
+      + `<line class="axis" x1="${L}" y1="${H - B}" x2="${W - RIGHT}" y2="${H - B}"/><line class="axis" x1="${L}" y1="${T}" x2="${L}" y2="${H - B}"/>`
+      + `<text x="${W - RIGHT}" y="${H - 8}" text-anchor="end">commits →  (${maxC} at most)</text><text x="${L - 6}" y="${T + 4}" text-anchor="end">lines</text>`
+      + `<text x="${L - 6}" y="${Y(maxL) + 16}" text-anchor="end">${Number(maxL).toLocaleString("en")}</text>`;
+    for (const x of hot) {
+      const f = owner(x.path), r = 4 + (7 * (x.fixes || 0)) / maxF, cx = X(x.commits), cy = Y(x.loc), base = x.path.split("/").pop();
+      const dot = `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(x.path)}: ${x.commits} commits, ${x.loc} lines${x.fixes ? ", " + x.fixes + " fixes" : ""}${f ? " · " + esc(f.id) : ""}</title></circle>`;
+      s += f ? `<a href="#${esc(f.id)}">${dot}</a>` : dot;
+      if (named.has(x.path)) s += `<text class="name" x="${(cx > W - 150 ? cx - r - 4 : cx + r + 4).toFixed(1)}" y="${(cy + 3).toFixed(1)}" text-anchor="${cx > W - 150 ? "end" : "start"}">${esc(base)}${f ? " · " + esc(f.id) : ""}</text>`;
+    }
+    return s + "</svg><p class='muted' style='font-size:.8rem;margin:-.4rem 0 1rem'>Larger dot: fixed more often. Colored: a finding of this report changes it.</p>";
+  }
+
+  /* evidence and method */
+  const ev = section("evidence", "Evidence and method", "What the review rests on, what it kept out, and the full analyses.");
+  function more(title, node, open) { if (!node) return; ev.append(h("details", Object.assign({ class: "more" }, open ? { open: "" } : {}), h("summary", { text: title }), h("div", {}, node))); }
+  function plain(headers, rows) {
+    return h("table", { class: "plain" }, h("thead", {}, h("tr", {}, headers.map((x) => h("th", { text: x })))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, r.map((c) => (c && c.nodeType ? c : h("td", typeof c === "number" ? { class: "n", text: c.toLocaleString("en") } : { html: c })))))));
+  }
+  if (R.healthy && R.healthy.length) more("In good shape: keep as it is", plain(["What", "Why it works"], R.healthy.map((x) => [inline(x.title), inline(x.note || "")])));
+  if (R.dropped && R.dropped.length) more("Considered and dropped", plain(["Idea", "Why not", "Raised by"], R.dropped.map((x) => [inline(x.title), inline(x.reason || ""), esc(x.raisedBy || "")])));
+  const sig = R.signals || {};
+  if (sig.hotspots && sig.hotspots.length) {
+    const max = Math.max(...sig.hotspots.map((x) => x.commits)) || 1;
+    const bars = h("div", { class: "bars" });
+    for (const x of sig.hotspots.slice(0, 15)) bars.append(h("div", { html: fileLink(x.path) }),
+      h("div", { class: "track" }, h("div", { class: "fill " + (x.tone || ""), style: `width:${(100 * x.commits) / max}%` })),
+      h("div", { class: "num", text: `${x.commits} commits · ${Number(x.loc).toLocaleString("en")} lines` + (x.fixes ? ` · ${x.fixes} fixes` : "") }));
+    more("Hotspots: files changed often and large", h("div", {}, sig.note ? h("p", { class: "muted", html: inline(sig.note) }) : null,
+      sig.hotspots.length > 3 ? h("div", { html: scatter(sig.hotspots) }) : null, bars));
+  }
+  if (sig.coupling && sig.coupling.length) more("Files that change together across areas", plain(["File", "File", "Shared commits", "Share"],
+    sig.coupling.slice(0, 15).map((c) => [fileLink(c.a), fileLink(c.b), c.shared, Math.round(c.degree * 100) + "%"])));
+  const panel = R.analysts || [];
+  if (panel.length > 1 && findings.some((f) => f.votes)) {
+    const vt = h("table", { class: "grid who" }, h("thead", {}, h("tr", {}, h("th", {}), panel.map((a) => h("th", { text: a.name || a.id })))));
+    vt.append(h("tbody", {}, findings.map((f) => h("tr", {},
+      h("th", {}, h("a", { href: "#" + f.id, title: f.title, html: `<span class="mono">${esc(f.id)}</span> ` + inline(f.title) })),
+      panel.map((a) => { const v = (f.votes || {})[a.id] || "unreviewed"; return h("td", { class: "vote-cell " + v, text: VOTE[v][2] }); })))));
+    more("Who found what", h("div", {}, h("p", { class: "muted", text: "Each analyst worked alone, then tried to refute the findings of the others without knowing who made them." }), vt));
+  }
+  if (R.analysts && R.analysts.length) more("Analysts and their full analyses", h("div", {},
+    plain(["Analyst", "Model", "Role", "Analysis", "Review of the others"], R.analysts.map((a) => [esc(a.name || a.id), `<span class="mono">${esc(a.model || "")}</span>`, esc(a.role || ""),
+      a.analysis ? `<a href="${esc(a.analysis)}">${esc(a.analysis)}</a>` : "", a.review ? `<a href="${esc(a.review)}">${esc(a.review)}</a>` : ""])),
+    h("p", { class: "muted", style: "margin-top:.7rem", text: "On each finding: ● found it · ✓ confirmed it · ~ refined it · ✕ disputed it · · did not review it." })));
+  if (R.method) more("Method and limits", h("div", { html: block(R.method.text) + (R.method.notExamined && R.method.notExamined.length ? "<h4 class='eyebrow' style='margin:.9rem 0 .3rem'>Not examined</h4>" + block(R.method.notExamined) : "") }));
+  for (const x of R.sections || []) more(x.title, h("div", { html: block(x.text) }));
+  if (!ev.querySelector("details.more")) ev.parentElement.remove();
+  app.append(h("footer", {}, h("div", { class: "wrap", text: [R.title, R.date, R.path].filter(Boolean).join(" · ") })));
+
+  /* ---------- theme, open all, deep links ---------- */
+  function setTheme(t) {
+    root.dataset.theme = t;
+    for (const b of document.querySelectorAll("[data-theme-set]")) b.setAttribute("aria-pressed", String(b.dataset.themeSet === t));
+    try { localStorage.setItem("health-report-theme", t); } catch (e) { /* storage is not available for a file opened from disk in some browsers */ }
+  }
+  for (const b of document.querySelectorAll("[data-theme-set]")) b.addEventListener("click", () => setTheme(b.dataset.themeSet));
+  let saved = "auto";
+  try { saved = localStorage.getItem("health-report-theme") || "auto"; } catch (e) { /* same */ }
+  setTheme(saved);
+
+  const toggleAll = document.getElementById("toggle-all");
+  toggleAll.addEventListener("click", () => {
+    const open = toggleAll.textContent === "Open all";
+    for (const d of document.querySelectorAll("details.finding:not(.hidden), details.more")) d.open = open;
+    toggleAll.textContent = open ? "Close all" : "Open all";
+  });
+  function openHash() {
+    const el = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!el || el.tagName !== "DETAILS") return;
+    if (el.classList.contains("hidden")) { Object.assign(state, { lens: null, area: null, strength: null, action: null, q: "" }); search.value = ""; applyFilters(); }
+    el.open = true; el.scrollIntoView();
+  }
+  addEventListener("hashchange", openHash);
+  openHash();
+  addEventListener("beforeprint", () => { for (const d of document.querySelectorAll("details")) { if (d.fill) d.fill(); d.open = true; } });
+
+})();
+</script>
+</body>
+</html>

@@ -10,7 +10,7 @@ public sealed class MobileJobsTests
     {
         var alta = new FakeAlta().Answer("session status a", FakeAlta.Status("a", "p", "work", running: false))
             .Answer("job list", Job("job-running", "a"), Job("job-recent", "a", "succeeded", DateTimeOffset.UtcNow),
-                Job("job-old", "a", "failed", DateTimeOffset.UtcNow.AddMinutes(-11)), Job("job-other", "b"));
+                Job("job-old", "a", "failed", DateTimeOffset.UtcNow.AddMinutes(-11)), Job("job-other", "b")); // not a limit
         var api = Api(alta);
         var result = await api.JobsAsync("a", default);
         CollectionAssert.AreEqual(new[] { "job-running", "job-recent" }, result!["jobs"]!.AsArray().Select(job => (string)job!["id"]!).ToArray());
@@ -50,7 +50,7 @@ public sealed class MobileJobsTests
     private static JsonObject Job(string id, string session, string state = "running", DateTimeOffset? ended = null) => new()
     {
         ["type"] = "alta.job", ["id"] = id, ["sessionId"] = session, ["state"] = state,
-        ["command"] = "dotnet test", ["folder"] = "/project", ["startedAt"] = DateTimeOffset.UtcNow.AddMinutes(-1), ["endedAt"] = ended,
+        ["command"] = "dotnet test", ["folder"] = "/project", ["startedAt"] = DateTimeOffset.UtcNow.AddMinutes(-1), ["endedAt"] = ended, // not a limit
     };
 
     private static JsonObject Status(string id, string session)

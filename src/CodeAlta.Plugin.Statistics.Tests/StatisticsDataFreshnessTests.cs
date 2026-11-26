@@ -23,7 +23,7 @@ public sealed class StatisticsDataFreshnessTests
     [TestMethod]
     public async Task UpdateTimeComesFromCommittedData_NotTheQueryClock_AndSurvivesRestart()
     {
-        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1); // not a limit
         await using var harness = await QueryHarness.CreateAsync(sessions: 1, entries: 1);
         var updated = await UpdatedAtAsync(harness.Queries);
         Assert.IsNotNull(updated, "The overview must receive the stored data-update time.");
@@ -55,7 +55,7 @@ public sealed class StatisticsDataFreshnessTests
         {
             ["data.updated_ms"] = earlier.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture),
         });
-        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1); // not a limit
         var forgotten = await harness.Store.Store.ForgetDeletedAsync();
         Assert.AreEqual(1, forgotten.Sessions);
         var updated = await UpdatedAtAsync(harness.Queries);

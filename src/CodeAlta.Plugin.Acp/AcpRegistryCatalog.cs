@@ -7,7 +7,8 @@ namespace CodeAlta.Plugin.Acp;
 
 /// <summary>
 /// The agents of the ACP registry, which the Add provider dialog lists and installs. The last copy of the registry
-/// is kept for when it cannot be fetched, with the icons of its agents.
+/// is kept for when it cannot be fetched, with the icons of its agents. An agent whose vendor releases a better program
+/// than the one of the registry is installed from that release (<see cref="AntigravityCliReleases"/>).
 /// </summary>
 internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
 {
@@ -18,6 +19,7 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
     private readonly HttpClient _httpClient;
     private readonly Uri _registryUri;
     private readonly AcpAgentInstaller _installer;
+    private readonly AntigravityCliReleases _antigravity;
     private readonly Logger? _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AcpRegistryDocument? _document;
@@ -29,6 +31,7 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _registryUri = registryUri ?? AcpRegistryClient.DefaultRegistryUri;
         _installer = new AcpAgentInstaller(Path.Combine(root, "agents"), httpClient);
+        _antigravity = new AntigravityCliReleases(httpClient, logger);
         _logger = logger;
     }
 
@@ -47,9 +50,11 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
         }
 
         var icons = await Task.WhenAll(document.Agents.Select(agent => ReadIconAsync(agent, refresh, cancellationToken))).ConfigureAwait(false);
-        var entries = document.Agents
-            .Select((agent, index) =>
+        var releases = await Task.WhenAll(document.Agents.Select(agent => InstalledReleaseAsync(agent, refresh, cancellationToken))).ConfigureAwait(false);
+        var entries = releases
+            .Select((release, index) =>
             {
+                var agent = release.Manifest;
                 var (kind, distribution, unavailable) = AcpAgentInstaller.Describe(agent);
                 return new PluginProviderCatalogEntry(agent.Id, string.IsNullOrWhiteSpace(agent.Name) ? agent.Id : agent.Name, NullIfEmpty(agent.Version))
                 {
@@ -73,8 +78,9 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
         ArgumentNullException.ThrowIfNull(progress);
         var manifest = await FindAsync(entryId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"The ACP registry has no agent '{entryId}'.");
-        var installed = await _installer.InstallAsync(manifest, progress, cancellationToken).ConfigureAwait(false);
-        return new PluginProviderInstallResult(manifest.Id, string.IsNullOrWhiteSpace(manifest.Name) ? manifest.Id : manifest.Name, CreateValues(manifest, installed));
+        var release = await InstalledReleaseAsync(manifest, refresh: false, cancellationToken).ConfigureAwait(false);
+        var installed = await _installer.InstallAsync(release, progress, cancellationToken).ConfigureAwait(false);
+        return new PluginProviderInstallResult(manifest.Id, string.IsNullOrWhiteSpace(manifest.Name) ? manifest.Id : manifest.Name, CreateValues(release.Manifest, installed));
     }
 
     public async Task<string?> GetUpdateAsync(PluginProviderSettings settings, CancellationToken cancellationToken)
@@ -86,7 +92,8 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
         }
 
         var manifest = await FindAsync(agentId, cancellationToken).ConfigureAwait(false);
-        return manifest is not null && IsNewer(manifest.Version, settings.GetString(AcpAgentSettings.AgentVersionKey)) ? manifest.Version : null;
+        var release = manifest is null ? null : await UpdateReleaseAsync(manifest, refresh: false, cancellationToken).ConfigureAwait(false);
+        return release is not null && IsNewer(release.Manifest.Version, settings.GetString(AcpAgentSettings.AgentVersionKey)) ? release.Manifest.Version : null;
     }
 
     public async Task<IReadOnlyDictionary<string, object?>> UpdateAsync(PluginProviderSettings settings, IProgress<PluginProviderInstallProgress> progress, CancellationToken cancellationToken)
@@ -96,8 +103,10 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
             ?? throw new InvalidOperationException($"The provider '{settings.ProviderKey}' was not added from the ACP registry.");
         var manifest = await FindAsync(agentId, cancellationToken, refresh: true).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"The ACP registry no longer has the agent '{agentId}'.");
-        var installed = await _installer.InstallAsync(manifest, progress, cancellationToken).ConfigureAwait(false);
-        return CreateValues(manifest, installed);
+        var release = await UpdateReleaseAsync(manifest, refresh: true, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"The release of {manifest.Name} could not be read: try again later.");
+        var installed = await _installer.InstallAsync(release, progress, cancellationToken).ConfigureAwait(false);
+        return CreateValues(release.Manifest, installed);
     }
 
     /// <summary>Returns the manifest of an agent of the registry, or <see langword="null"/>.</summary>
@@ -106,6 +115,18 @@ internal sealed class AcpRegistryCatalog : IPluginProviderCatalog
         var (document, _, _) = await LoadAsync(refresh, cancellationToken).ConfigureAwait(false);
         return document?.Agents.FirstOrDefault(agent => string.Equals(agent.Id, agentId, StringComparison.OrdinalIgnoreCase));
     }
+
+    // What adding an agent installs: the release of its vendor when CodeAlta reads one for it, else its entry of the
+    // registry, so that an agent can still be added while the release of its vendor cannot be read.
+    private async Task<AcpAgentRelease> InstalledReleaseAsync(AcpRegistryAgentManifest entry, bool refresh, CancellationToken cancellationToken)
+        => await UpdateReleaseAsync(entry, refresh, cancellationToken).ConfigureAwait(false) ?? new AcpAgentRelease(entry);
+
+    // What an agent is updated to, or null when it cannot be read: an agent that has a release of its vendor is
+    // updated from it only, since the entry of the registry is another program with versions of its own.
+    private async Task<AcpAgentRelease?> UpdateReleaseAsync(AcpRegistryAgentManifest entry, bool refresh, CancellationToken cancellationToken)
+        => AntigravityCliReleases.Serves(entry)
+            ? await _antigravity.FindAsync(entry, refresh, cancellationToken).ConfigureAwait(false)
+            : new AcpAgentRelease(entry);
 
     private static Dictionary<string, object?> CreateValues(AcpRegistryAgentManifest manifest, AcpInstalledAgent installed)
     {

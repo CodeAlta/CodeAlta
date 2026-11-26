@@ -269,7 +269,7 @@ public sealed class DesktopSearchTests
         // A pass that finds the file as it was keeps its body; an edit is read again.
         search.Indexer.SignalPass();
         File.WriteAllText(file, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nWatch the giraffe cross.\n");
-        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(1));
+        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(1)); // not a limit
         search.Indexer.SignalPass();
         await UntilAsync(async () => await FoundAsync("giraffe") == 1);
         Assert.AreEqual(0, await FoundAsync("zebra"));
@@ -302,7 +302,7 @@ public sealed class DesktopSearchTests
         await UntilAsync(async () => await FoundAsync("zebra") == 1);
         // The link stays as it was: the length and the time of the file it leads to tell the edit.
         File.WriteAllText(target, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nWatch the giraffe cross.\n");
-        File.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddMinutes(1));
+        File.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddMinutes(1)); // not a limit
         search.Indexer.SignalPass();
         await UntilAsync(async () => await FoundAsync("giraffe") == 1);
         Assert.AreEqual(0, await FoundAsync("zebra"));

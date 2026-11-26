@@ -1,7 +1,7 @@
-import { Button, Checkbox, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
@@ -11,11 +11,11 @@ import { FleetOverview } from "./fleet/console/FleetOverview";
 import { settingsGroups, settingsPageOf, type SettingsPageId } from "./settings/settingsPages";
 import { glowSetting } from "./settings/settingsGlow";
 import { createSettingsHub } from "./settings/settingsHub";
-import { mergeSettings, settingText } from "./settings/settingsCatalog";
+import { mergeSettings, settingText, type SettingEntry } from "./settings/settingsCatalog";
 import { groupResults, matchCounts, searchSettings } from "./settings/settingsSearch";
 import { SettingsSearchResults } from "./settings/SettingsSearchResults";
 import { PluginSettingsForm, pluginPageId, typedSettingsPages } from "./settings/PluginSettingsForm";
-import { parseSettingValue, settingValueSource, settingValueText } from "./settings/settingValues";
+import { parseSettingValue, settingValueSource, settingValueText, type SettingValueSource } from "./settings/settingValues";
 import { useWindowSettingBindings, useWindowSettingsBridge } from "./settings/windowSettings";
 import { dismissStartupScreen } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
@@ -77,7 +77,9 @@ import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
+import { useProjectArchiveQuestion } from "./explorer/ProjectArchiveQuestion";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
+import { useProjectDeleteQuestion } from "./explorer/ProjectDeleteQuestion";
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
@@ -178,8 +180,8 @@ import { createCoalescedRead } from "./coalescedRead";
 import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDrag, type SessionRowDrag } from "./explorer/sessionDrag";
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
+import { useSessionMoveDialog } from "./explorer/SessionMoveDialog";
 import { confirmDeletedSession, createSessionDeletion, deleteSelectionCurrent, hostSessionPresence, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
-import { ConfirmPopover } from "./ConfirmPopover";
 import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
@@ -200,11 +202,11 @@ import { SubProjectsWindow } from "./subprojects/SubProjectsWindow";
 import { monorepoSetupPrompt } from "./subprojects/subProjects";
 import "./subprojects/subprojects.css";
 import { createLabelsHub } from "./labels/labelsHub";
-import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, ownLabels, projectLabels } from "./labels/labels";
+import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, ownLabels, projectLabels, projectLabelsOnly, sessionLabels, sessionLabelsOnly } from "./labels/labels";
 import { LabelRailRow, type LabelRowEditing } from "./labels/LabelRailRow";
 import { LabelDragGhost, LabelFormPopover } from "./labels/LabelViews";
 import { LabelSettings } from "./labels/LabelSettings";
-import { ProjectLabelBadges, ProjectLabelsPopover } from "./labels/ProjectLabels";
+import { LabelBadges, ProjectLabelsPopover, SessionLabelsPopover } from "./labels/ProjectLabels";
 import { labelMoveTarget, useRailDrag, type RailDrag, type RailDrop } from "./labels/labelDrag";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { ProjectSecurityPopover, projectSecurityApi } from "./explorer/ProjectSecurityPopover";
@@ -251,8 +253,9 @@ import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { terminalPaste } from "./terminal/shellBlocks";
-import { ExplorerSessions, SessionListDisclosure, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
-import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
+import { ExplorerSessions, SessionLabelGroupRow, SessionListDisclosure, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey, type SessionLabelGrouping } from "./explorer/ExplorerSessions";
+import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry, type SessionTreeEntry } from "./explorer/sessionTree";
+import { groupSessionsByLabels } from "./explorer/sessionLabelGroups";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
 import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode, readClaudeCodeConversations, type ClaudeCodeConversations } from "./claudeCodeImport/claudeCodeSessions";
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
@@ -270,7 +273,7 @@ import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type Sess
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { startSplitterDrag } from "./splitterPress";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
-  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, isLabelFolded, setLabelFolded, type ProjectTree } from "./explorer/projectTree";
+  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, isLabelFolded, setLabelFolded, isGroupedByLabels, setGroupedByLabels, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
@@ -344,7 +347,7 @@ import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { QueuedSessionNotice } from "./machines/QueuedSessionNotice";
 import { newSessionProblem, noRemoteSelection, offersProviderSetup, remoteSelection, remoteStartBlocker, remoteStartPrompt, remoteStartRequest, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
-import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
+import { useMoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
@@ -352,17 +355,19 @@ import { SpaceActivityBar, SpaceIcon, SpaceSwitch } from "./spaces/SpaceViews";
 import { readSpacePageLink, spacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
-import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
+import { useMoveToSpaceDialog, type SpaceMoveSource } from "./spaces/MoveToSpaceDialog";
 import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
 import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
 import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
+import { useSessionArchiveQuestion } from "./sessionArchive/SessionArchiveQuestion";
+import { useArchivedSessionInfo } from "./sessionArchive/ArchivedSessionInfo";
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveLevelOf, adaptiveTierOf, composerAdaptiveEntry, composerTierEntries, readAdaptiveTier, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
-import { cloudPlace, deletedSessionWorktree, existingPlace, folderName, makesWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, worktreeFirstSession, worktreesLeft, type DeletedWorktree, type WorkPlace, type Worktree } from "./worktrees/worktrees";
+import { cloudPlace, existingPlace, folderName, makesWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, worktreeFirstSession, worktreesLeft, type DeletedWorktree, type WorkPlace, type Worktree } from "./worktrees/worktrees";
 import { createSessionFolderSwitch, type FolderSwitchResult, type FolderTarget } from "./worktrees/sessionFolder";
 import { bringBackCommand, cloudOf, inCloud, pendingCloudStartKey, providerHasCloudSessions, readPendingCloudStart, runCloudStart, type CloudStartState,
   type PendingCloudStart } from "./cloudSessions/cloudSessions";
@@ -385,6 +390,7 @@ import { aboutFacts, AboutSettings } from "./AboutDialog";
 import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
+import { useSessionDeleteQuestion } from "./sessionChildren/SessionDeleteQuestion";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { GlobalSearch, type ContentSearch, type SearchChoice, type SearchStart } from "./search/GlobalSearch";
 import { PluginUiHost } from "./PluginUiHost";
@@ -839,8 +845,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsVisible = useRef(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
-  // What the search of Settings has typed; Settings opened by the user starts in that search, one opened on a setting does not.
-  const [settingsQuery, setSettingsQuery] = useState("");
+  const resetSettingsSearch = useRef<(() => void) | null>(null);
+  // Settings opened by the user starts in its search; one opened on a setting does not.
   const settingsFocusSearch = useRef(true);
   // The space whose page Settings > Spaces shows, at which section; null for the cards of every space.
   const [spacePage, setSpacePage] = useState<SpacePageTarget | null>(null);
@@ -862,7 +868,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
   function closeSettings() {
     invalidateCreation();
-    setSettingsQuery("");
     settingsVisible.current = false;
     setSettingsOpen(false);
     setProviderGuide(false);
@@ -911,7 +916,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const notesVersion = readReleaseNotesPage(page);
     if (notesVersion !== undefined) { setReleaseNotesShown({ version: notesVersion }); return; }
     // The page asked for is shown, not the results of a search typed before.
-    setSettingsQuery("");
+    resetSettingsSearch.current?.();
     // `secrets/<tab>`, or `secrets` with the setting of a tab, opens Secrets and environment on that tab.
     const secretsTab = readSecretsPageLink(page, setting);
     if (secretsTab !== undefined) {
@@ -1100,7 +1105,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [projectDeletion] = useState(() => createProjectDeletion((request, options) => projectDeleteRpc.current(request, options)));
   const [projectRename] = useState(() => createProjectRename(workspace.readProjectName, workspace.renameProject));
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectNameTarget | null>(null);
-  const [projectRenameName, setProjectRenameName] = useState("");
   const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [projectRenameConflict, setProjectRenameConflict] = useState(false);
   const [projectRenameNotice, setProjectRenameNotice] = useState<WorkflowNotice>("");
@@ -1120,12 +1124,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
     conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview,
     conversations: workspace.claudeCodeConversations }));
-  // The session whose project is being chosen, with the project it is in when its menu was used.
-  const [movingSession, setMovingSession] = useState<SessionMoveDrag | null>(null);
-  // The session the window that gives it another space is open for, with the space it is in now.
-  // The session Move to machine… moves, while its window is open.
-  const [machineMove, setMachineMove] = useState<WorkspaceSession | null>(null);
-  const [movingToSpace, setMovingToSpace] = useState<Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }> | null>(null);
   // The window of the sessions below a session; `deleting` when Delete led to it.
   const [childrenView, setChildrenView] = useState<Readonly<{ id: string; title: string; deleting: boolean }> | null>(null);
   // The row of a session dragged onto the row of another project, and that project; a Claude Code conversation dragged
@@ -1136,26 +1134,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   });
   const [movingBusy, setMovingBusy] = useState(false);
   const movingPending = useRef(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const spaceMoveDialog = useMoveToSpaceDialog(spacesState.spaces, movingBusy, (moving, space) => void moveSessionToSpaceNow(moving, space));
   const [deletingBusy, setDeletingBusy] = useState(false);
-  const [deletingMessage, setDeletingMessage] = useState("");
-  // The question of a deletion also asks to remove the worktree of the session; off each time it is asked.
-  const [deletingWorktree, setDeletingWorktree] = useState(false);
-  // What the host says of the worktree of the session asked about: whether another session works in it, null while it checks.
-  const [deletingWorktreeCheck, setDeletingWorktreeCheck] = useState<{ id: string; shared: boolean | null } | null>(null);
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
-  // The session asked about beside its row before it is archived: one with child sessions, which go with it by default.
-  // The archive of a session with child sessions that asks, and where it was asked: the Explorer or the composer.
-  const [sessionArchiving, setSessionArchiving] = useState<Readonly<{ id: string; count: number; withChildren: boolean; from: "explorer" | "composer" }> | null>(null);
   const [sessionArchiveBusy, setSessionArchiveBusy] = useState(false);
-  const [sessionArchiveNotice, setSessionArchiveText] = useState("");
+  const sessionArchiveQuestion = useSessionArchiveQuestion({
+    busy: sessionArchiveBusy, t, onArchive: (row, withChildren) => void archiveSessionNow(row, withChildren, true),
+  });
   const sessionArchivePending = useRef(false);
-  // The archived session whose info the saved sessions show, by its id: the catalog is read again meanwhile.
-  const [archivedInfo, setArchivedInfo] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renamingTitle, setRenamingTitle] = useState("");
   const [renamingBusy, setRenamingBusy] = useState(false);
   const [renamingMessage, setRenamingMessage] = useState<WorkflowNotice>("");
   const renamingPending = useRef(false);
@@ -1373,6 +1362,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
+  const sessionMoveDialog = useSessionMoveDialog(snapshot?.projects, movingBusy, (moving, project) => void moveSessionTo(moving, project));
   // A project file of the catalog that cannot be read leaves its project out of the lists: the main window says so once,
   // and again when the files change.
   const unreadableProjects = snapshot?.unreadableProjectFiles?.join("\n") ?? "";
@@ -1384,23 +1374,27 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (message) showToast({ intent: "warning", icon: "warning-sign", timeout: 20_000, message });
     // Told when the files change, not when another snapshot or the language does.
   }, [secondary, unreadableProjects]);
-  // The filter at the top of the sidebar: while something is typed, the sidebar shows only the sessions, the projects
-  // and the Claude Code sessions started elsewhere whose title has every word, open. Nothing of the tree is changed.
-  const [sidebarText, setSidebarText] = useState("");
+  // The applied filter opens scopes with matches. Its temporary folds are cleared with the filter; the tree stays as it was.
+  const [sidebarFilter, setSidebarFilter] = useState<Readonly<{
+    text: string; words: readonly string[]; folded: ReadonlySet<string | null>;
+  }>>(() => ({ text: "", words: [], folded: new Set() }));
+  const { text: sidebarText, words: sidebarWords, folded: filterFolded } = sidebarFilter;
+  const applySidebarFilter = useCallback((text: string) => {
+    setSidebarFilter(current => {
+      if (current.text === text) return current;
+      const words = readQuery(text).words;
+      return { text, words, folded: words.length ? current.folded : new Set() };
+    });
+  }, []);
   // What the search of the window and the saved sessions look for, which the list of the sessions is read with.
   const [searchWant, setSearchWant] = useState<WorkspaceWantedSearch | null>(null);
   const [browserWant, setBrowserWant] = useState<Readonly<{ projectId: string | null; text: string; rows: number }> | null>(null);
-  const sidebarWords = useMemo(() => readQuery(sidebarText).words, [sidebarText]);
   // The Claude Code sessions started elsewhere the search and the filter look through, read when one of them is used.
   const [searchedClaudeCode, setSearchedClaudeCode] = useState<ClaudeCodeConversations | null>(null);
   // Whether that read answered (with nothing when it failed): until then, the filter does not say that nothing matches.
   const [claudeCodeSearched, setClaudeCodeSearched] = useState(false);
   const filterView = useMemo(() => sidebarWords.length && snapshot ? sidebarFilterView(snapshot, sidebarWords, searchedClaudeCode?.conversations) : null,
     [snapshot, sidebarWords, searchedClaudeCode]);
-  // The scopes the filter opens that are folded while it is used; the tree of the sidebar is left as it is.
-  const [filterFolded, setFilterFolded] = useState<ReadonlySet<string | null>>(() => new Set());
-  const filtering = sidebarWords.length > 0;
-  useEffect(() => { if (!filtering) setFilterFolded(new Set()); }, [filtering]);
   const fullListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
   // A sub-project found keeps the repositories above it, unopened, so that it stays in its place in their groups.
   const filterShows = (id: string) => !!filterView && (filterView.projects.has(id) || !!filterView.frames?.has(id));
@@ -1408,23 +1402,28 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     favorites: fullListing.projects.slice(0, fullListing.favorites).filter(project => filterShows(project.id)).length } : fullListing;
   // The labels of the shown space, and the parts of the Explorer when it lists the projects under them: while the list
   // is filtered, only the labels with a project that matches, unfolded.
-  const spaceLabels = useMemo(() => labelsOfSpace(labelsState.labels, spaceId), [labelsState.labels, spaceId]);
+  // The labels for projects make the tree of the projects; the labels for sessions group the sessions of a project.
+  const projectLabelCatalog = useMemo(() => projectLabelsOnly(labelsState.labels), [labelsState.labels]);
+  const spaceLabels = useMemo(() => labelsOfSpace(projectLabelCatalog, spaceId), [projectLabelCatalog, spaceId]);
+  const spaceSessionLabels = useMemo(() => labelsOfSpace(sessionLabelsOnly(labelsState.labels), spaceId), [labelsState.labels, spaceId]);
   const railGroups = projectListing && labelsState.available && projectGrouping === "labels"
     ? projectRailGroups(projectListing.projects, projectListing.favorites, spaceLabels, !filterView) : [];
   // A label made from the Explorer at the top is in the shown space, or in every space from the default one.
   const labelSpace = spaceId === defaultSpaceId ? null : spaceId;
   const [newLabel, setNewLabel] = useState<{ busy: boolean; error: string | null } | null>(null);
+  // The session whose labels are shown in a popover beside its row in the list of the selected scope.
+  const [labelingSession, setLabelingSession] = useState<string | null>(null);
   async function createTopLabel(name: string, icon: string, color: string) {
     setNewLabel({ busy: true, error: null });
     const outcome = await labelsHub.create(name, { icon: icon || null, color: color || null, space: labelSpace });
     setNewLabel(outcome.ok ? null : { busy: false, error: outcome.message ?? t("The label could not be created.") });
   }
-  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: ownLabels(labelsState.labels), update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
-    create: (name, look) => labelsHub.create(name, { ...look, space: look.parent ? null : labelSpace }) }), [labelsState.labels, labelsHub, labelSpace]);
+  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: ownLabels(projectLabelCatalog), update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
+    create: (name, look) => labelsHub.create(name, { ...look, space: look.parent ? null : labelSpace }) }), [projectLabelCatalog, labelsHub, labelSpace]);
   // A label dragged before, after or under another one; a project dragged onto a label gets it, and leaves the label
   // it was dragged out of unless Ctrl or Alt is held; dropped on the projects of no label, it leaves that label.
   function railDropAccepts(drag: RailDrag, drop: RailDrop): boolean {
-    const all = labelsState.labels;
+    const all = projectLabelCatalog;
     if (drag.kind === "project") {
       if (!drop.labelId) return drag.from !== null;
       return drop.labelId !== drag.from && !all.find(label => label.id === drop.labelId)?.projectIds.includes(drag.projectId);
@@ -1435,7 +1434,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   async function railDropped(drag: RailDrag, drop: RailDrop, copy: boolean) {
     const outcome = drag.kind === "project"
       ? await labelsHub.assign(drag.projectId, drop.labelId ? [drop.labelId] : [], drag.from && (!copy || !drop.labelId) ? [drag.from] : [])
-      : await (async () => { const target = labelMoveTarget(labelsState.labels, drag.labelId, drop); return target ? labelsHub.move(drag.labelId, target.parent, target.index) : null; })();
+      : await (async () => { const target = labelMoveTarget(projectLabelCatalog, drag.labelId, drop); return target ? labelsHub.move(drag.labelId, target.parent, target.index) : null; })();
     if (outcome && !outcome.ok) showToast({ message: outcome.message ?? t("The labels could not be changed."), intent: "danger" });
   }
   const railDrag = useRailDrag(railDropAccepts, (drag, drop, copy) => void railDropped(drag, drop, copy));
@@ -3001,7 +3000,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // rows of the open lists, what is typed in the filter, the search and the saved sessions, and the archived sessions
   // while the saved sessions show them.
   const [storedSessions] = useState(() => storedTabSessions(localStorage));
-  const typedFilter = useSettled(sidebarWords.join(" "), 200);
+  const typedFilter = sidebarWords.join(" ");
   const typedSearch = useSettled(searchOpen ? searchWant : null, 200);
   const typedBrowser = useSettled(dialog === "sessions" ? browserWant : null, 200);
   const openTabSessions = tabs.open.map(tab => tab.sessionId).join("\n");
@@ -3080,6 +3079,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const selectedSession = snapshot && tabs.active?.sessionId === sessionId && !resolveSessionTab(snapshot, tabs.active)
     ? undefined : snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
+  const sessionDeleteQuestion = useSessionDeleteQuestion({
+    railVisible, pending: deletingPending, alive: creationAlive, project: selectedProject, catalog, busy: deletingBusy, checkWorktrees: checkDeletedWorktrees, t,
+    onDelete: (session, remember, worktree) => {
+      if (remember) setConfirm("sessionDelete", false);
+      void deleteSessionRow(session, true, worktree);
+    },
+  });
   // What a canvas that is opened without a choice is about: the project in front, and the session in front with its project.
   const canvasSelection: CanvasSelection = {
     project: selectedProject && !selectedProject.archived ? { id: selectedProject.id, path: selectedProject.path } : null,
@@ -3105,6 +3111,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const machineMoveDialog = useMoveToMachineDialog(owned ? status!.hostEpoch! : null, (result, machine) => {
+    showToast({ message: t("The session runs on {machine} now.", { machine }), intent: "success", icon: "tick", timeout: 4000 });
+    // The session opens where it runs now: the list says so once read again.
+    void refreshProjects(creationRefresh.current.signal).then(fresh => {
+      const moved = fresh?.sessions.find(value => value.id === result.sessionId && (value.machineId ?? null) === (result.machineId ?? null));
+      if (moved) revealSession(moved);
+    });
+  });
   // At startup, the release notes open once after an update, unless the person chose not to see them; never in the
   // developer instance, nor for a build of the repository.
   const releaseNotesChecked = useRef(false);
@@ -3164,7 +3178,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const automationState = useSyncExternalStore(automationsHub.subscribe, automationsHub.getSnapshot);
   // An automation starts a session without the window asking: the sessions are read again when its runs change.
   const automationRuns = automationState.runs.map(run => `${run.id}:${run.status}:${run.sessionId ?? ""}`).join("|");
-  useEffect(() => { if (automationRuns) readSessionList.current(); }, [automationRuns]);
+  // Its first run may create the label of its runs: the labels are read again too.
+  useEffect(() => { if (automationRuns) { readSessionList.current(); void labelsHub.refresh(); } }, [automationRuns]);
   const [automationFocus, setAutomationFocus] = useState<string | null>(null);
   function openAutomations(id: string | null = null) {
     if (id) setAutomationFocus(id);
@@ -3330,9 +3345,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const workByProject = useMemo(() => workCounts(work, runningSessionIds), [work, runningSessionIds]);
   const [workFocus, setWorkFocus] = useState<WorkItemsFocus | null>(null);
   const [workBusy, setWorkBusy] = useState<ReadonlySet<string>>(new Set());
-  function openWorkItems(focus: WorkItemsFocus | null = null) {
+  function openWorkItems(focus: WorkItemsFocus | null = null, fromSession: string | null = null) {
     // The window that holds the tab shows the item: it is told which, and comes to the front.
-    if (focus && heldElsewhere(workItemsTab)) { windowsHub.focusTab(fileTabRef(workItemsTab), JSON.stringify(focus)); return; }
+    if (focus && heldElsewhere(workItemsTab)) {
+      windowsHub.focusTab(fileTabRef(workItemsTab), JSON.stringify(focus));
+      // Nothing changes here: the row of the session the item was opened from says the click was heard.
+      if (fromSession && sessionRail.current) for (const row of rowsOfSession(sessionRail.current, fromSession)) flashElement(row);
+      return;
+    }
     if (focus) setWorkFocus(focus);
     openFile(workItemsTab);
   }
@@ -3934,13 +3954,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The pages of the plugins in Settings: their settings canvases, and a page for the settings of a plugin that has none.
   const allPluginPages = useMemo(() => [...pluginPages, ...typedSettingsPages(settingEntries)], [pluginPages, settingEntries]);
   const pluginSettingEntries = (page: PluginSettingsPage) => settingEntries.filter(entry => entry.plugin && entry.page === pluginPageId(page));
-  const settingsSearch = useMemo(() => settingsOpen && settingsQuery.trim() ? searchSettings(settingEntries, settingsQuery, language.locale) : null,
-    [settingsOpen, settingsQuery, settingEntries, language.locale]);
-  // A result of the search of Settings shows its page, with the setting glowing.
-  function openSearchedSetting(page: string, setting: string | null) {
-    setSettingsQuery("");
-    settingsNavigation.open({ page, setting });
-  }
   useEffect(() => settingsHub.onEvent(event => {
     if (event.kind === "show" && event.page) openSettingsAt.current({ page: event.page, setting: event.id ?? null });
     else if (event.kind === "changed" && event.id) { setSettingsChanges(count => count + 1); announceSettingChange.current(event); }
@@ -4494,10 +4507,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setSessionId(nextSessionId);
     setRenamingId(null);
     setRenamingMessage("");
-    setDeletingId(null);
-    setDeletingMessage("");
-    if (!archiveBusy) { setArchiveAsk(null); setArchiveMessage(""); }
-    if (!projectDeleteBusy) { setProjectDeleteTarget(null); setProjectDeleteMessage(""); }
+    sessionDeleteQuestion.close();
+    sessionDeleteQuestion.setError("");
+    if (!archiveBusy) projectArchiveQuestion.reset();
+    if (!projectDeleteBusy) { setProjectDeleteTarget(null); projectDeleteQuestion.clearError(); }
     navigate("workspace");
     setCreatingVisible(false);
     setCreatingMessage("");
@@ -4612,18 +4625,38 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (pending.action === "move") { beginSessionMove(rows[0]); return; }
     if (pending.action === "space") { beginSpaceMove(rows[0]); return; }
     if (pending.action === "archive") { beginSessionArchive(rows[0]); return; }
-    if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
+    if (pending.action === "rename") { beginSessionRename(rows[0]); sessionDeleteQuestion.close(); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
+  // The sessions of a scope under their labels, when its list is grouped: while the sidebar is filtered, no group is folded.
+  const groupEntries = (scope: string | null, entries: readonly SessionTreeEntry[]): readonly SessionTreeEntry[] =>
+    labelsState.available && isGroupedByLabels(projectTree, scope)
+      ? groupSessionsByLabels(entries, spaceSessionLabels, scopeKey(scope), key => !filterView && isLabelFolded(projectTree, key)) : entries;
+  const sessionGrouping: SessionLabelGrouping = {
+    labels: spaceSessionLabels,
+    fold: (key, folded) => setProjectTree(current => setLabelFolded(current, key, folded)),
+    activity: sessions => <><WaitingBadge count={sessions.reduce((count, session) => count + (waitingSessions.has(session.id) ? 1 : 0), 0)} />
+      {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tabs={sessions.map(session => ({ projectId: session.projectId, sessionId: session.id, path: session.workspacePath }))} />}</>,
+  };
+  // The labels of a session in a popover beside its row, from Labels… in its menu: the labels for sessions of the shown space.
+  const sessionLabelsPopover = owned && labelsState.available ? (session: WorkspaceSession, close: () => void) => <SessionLabelsPopover sessionId={session.id}
+    sessionTitle={plainTitle(session.title)} current={session.labels ?? []} labels={ownLabels(spaceSessionLabels)}
+    // The Explorer shows the change with a fresh list of the sessions.
+    assign={async (id, add, remove) => { const outcome = await labelsHub.assignSession(id, add, remove); if (outcome.ok) readSessionList.current(); return outcome; }}
+    create={name => labelsHub.create(name, { space: labelSpace, forSessions: true })} onClose={close} /> : undefined;
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
+    // Grouped, a session at the top is listed under the first of its labels: its badges name the others. A session
+    // below another one follows it, whatever its own labels, and shows them all.
+    const labels = sessionLabels(session, spaceSessionLabels);
     return <>
+      <LabelBadges labels={isGroupedByLabels(projectTree, scope) && !session.parentSessionId ? labels.slice(1) : labels} all={spaceSessionLabels} className="session-label-badges" />
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
       <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />
       <SessionWindowMark window={windowsState.windows.find(window => window.id === windowsState.sessionWindows.get(session.id))} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
-      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} />
+      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) }, session.id)} />
       <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
       <CloudMark session={session} />
@@ -4654,7 +4687,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} unreachable={snapshot.wantedTruncated === true} filtered={!!filterView}
+    return <ExplorerSessions entries={withClaudeCodeSessions(groupEntries(scope, shown.entries as SessionTreeEntry[]), scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} omitted={omittedSessions(snapshot, scope)} unreachable={snapshot.wantedTruncated === true} filtered={!!filterView}
+      grouping={sessionGrouping} labels={sessionLabelsPopover}
       onBrowse={() => scopeSessionAction(scope, "browse")} browseKeys={commandKeys(commandDefinitions.find(command => command.id === "browseSessions")!)[0]}
       extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
@@ -4877,26 +4911,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   function beginSessionRename(row: WorkspaceSession) {
     setRenamingId(row.id);
-    setRenamingTitle(row.title);
     setRenamingMessage(renameLocked ? { key: "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." } : "");
   }
 
   // The session is the selected one. It is asked about beside its row, unless the user answered not to be asked again.
   function beginSessionDelete(row: WorkspaceSession) {
-    setDeletingMessage("");
-    setDeletingWorktree(false);
+    sessionDeleteQuestion.setError("");
     // A session that others come from is not deleted alone: what is below it is shown, with the choice to delete it all.
     if (knownChildren(row.id)) { showSessionChildren(row, true); return; }
-    setDeletingWorktreeCheck(null);
-    if (!confirms.sessionDelete) { setDeletingId(null); void deleteSessionRow(row, false); return; }
-    setDeletingId(row.id);
-    // The window may not list every session that works in the worktree: the host is asked while the question is open.
-    const worktree = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], row) : null;
-    if (!worktree || worktree.shared || !selectedProject) return;
-    setDeletingWorktreeCheck({ id: row.id, shared: null });
-    void checkDeletedWorktrees([{ projectId: selectedProject.id, name: worktree.name, path: worktree.path, shared: false, sessionIds: [row.id] }], [row.id])
-      .catch(() => null)
-      .then(checked => { if (creationAlive.current) setDeletingWorktreeCheck(value => value?.id === row.id ? { id: row.id, shared: checked?.[0]?.shared ?? false } : value); });
+    if (!confirms.sessionDelete) { sessionDeleteQuestion.close(); void deleteSessionRow(row, false); return; }
+    sessionDeleteQuestion.ask(row);
   }
 
   // Delete on the row of a session does what **Delete** of its menu does.
@@ -4928,10 +4952,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
       if (!access[action] || action === "archive" && sessionArchiveBusy) return;
       setMenuTarget(null);
-      if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); setDeletingMessage(""); }
+      if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); sessionDeleteQuestion.setError(""); }
       if (action === "fork") { branchHost.requests.open(row.id, "fork"); return; }
       if (action === "archive") { beginSessionArchive(row); return; }
-      setDeletingId(null);
+      sessionDeleteQuestion.close();
       beginSessionRename(row);
     });
   }
@@ -4963,10 +4987,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (action === "space") { dismissSessionMenu(false); beginSpaceMove(row); return; }
     if (action === "archive") { dismissSessionMenu(false); beginSessionArchive(row); return; }
     dismissSessionMenu(false);
-    if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
+    if (switching) { setRenamingMessage(""); sessionDeleteQuestion.setError(""); }
     if (action === "rename") {
       beginSessionRename(row);
-      setDeletingId(null);
+      sessionDeleteQuestion.close();
     } else {
       beginSessionDelete(row);
       setRenamingId(null);
@@ -4989,7 +5013,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   function showSessionChildren(row: WorkspaceSession, deleting: boolean) {
     setRenamingId(null);
-    setDeletingId(null);
+    sessionDeleteQuestion.close();
     setChildrenView({ id: row.id, title: plainTitle(row.title), deleting });
   }
   // The entries of a session's menu about its family: its child sessions, and its parent, which can be in another scope.
@@ -5002,7 +5026,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A session of a project goes to a paired machine, or from one to this computer or another machine.
   const sessionMachineEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && pairedMachines.length > 0 && !session.archived && !inCloud(session)
     && session.scopeKind === "project" && (!!session.machineId || !!session.projectId)
-    ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => setMachineMove(session) }] : [];
+    ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => machineMoveDialog.open(session) }] : [];
   // The code editor on the folder a session works in, as the code editor of its prompt opens it: its worktree while the
   // folder is there, else the project. A session of a paired machine works in a folder of that machine.
   const sessionEditorEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
@@ -5051,16 +5075,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     } finally { deletingPending.current = false; if (creationAlive.current) setDeletingBusy(false); }
   }
 
-  // The session is the selected one, in the selected project: the window asks which project it goes to.
   // A session chosen in its menu goes to another space: the space it is in now is not offered.
   function beginSpaceMove(row: WorkspaceSession) {
     if (movingPending.current) return;
     setRenamingId(null);
-    setDeletingId(null);
+    sessionDeleteQuestion.close();
     const home = sessionHome(spacesHub.getSnapshot().spaces, { spaceId: row.spaceId, projectId: row.scopeKind === "project" ? row.projectId : null });
-    setMovingToSpace({ id: row.id, title: plainTitle(row.title), projectId: row.scopeKind === "project" ? row.projectId : null, spaceId: home.id });
+    spaceMoveDialog.open({ id: row.id, title: plainTitle(row.title), projectId: row.scopeKind === "project" ? row.projectId : null, spaceId: home.id });
   }
-  async function moveSessionToSpaceNow(moving: NonNullable<typeof movingToSpace>, target: Space) {
+  async function moveSessionToSpaceNow(moving: SpaceMoveSource, target: Space) {
     const capability = mutation?.capability;
     if (movingPending.current || !owned || !capability?.canMutate() || target.id === moving.spaceId) return;
     movingPending.current = true;
@@ -5077,7 +5100,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }
       readAgain = result.kind === "moved" && !fresh?.configured;
       if (fresh?.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
-      setMovingToSpace(null);
+      spaceMoveDialog.close();
       if (result.kind === "moved") {
         // The session is in the other space now: a click there shows it.
         showToast({ message: t("Moved to {space}.", { space: target.name }), intent: "success", icon: "tick", timeout: 6000,
@@ -5099,26 +5122,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function beginSessionArchive(row: WorkspaceSession, from: "explorer" | "composer" = "explorer") {
     if (sessionArchivePending.current) return;
     setRenamingId(null);
-    setDeletingId(null);
-    setSessionArchiveText("");
+    sessionDeleteQuestion.close();
+    sessionArchiveQuestion.setError("");
     const below = archivableDescendants(catalog.current?.sessions ?? [], row.id).length;
-    if (below > 0) setSessionArchiving({ id: row.id, count: below, withChildren: true, from });
+    if (below > 0) sessionArchiveQuestion.ask(row.id, below, from);
     else void archiveSessionNow(row, false, false);
-  }
-  // The question of the archive of a session with child sessions: with them, by default, or alone.
-  function sessionArchiveQuestion(session: WorkspaceSession, placement: "right-start" | "top-end") {
-    if (sessionArchiving?.id !== session.id) return null;
-    return <ConfirmPopover always title={t("Archive this session?")} subject={plainTitle(session.title)} placement={placement}
-      detail={t("It leaves the Explorer and keeps its history. Saved sessions and the search find it, to restore it.")}
-      confirmLabel={t("Archive")} busy={sessionArchiveBusy} error={sessionArchiveNotice || null}
-      onConfirm={() => void archiveSessionNow(session, sessionArchiving.withChildren, true)}
-      onCancel={() => { setSessionArchiving(null); setSessionArchiveText(""); }}>
-      <RadioGroup className="confirm-choices" selectedValue={sessionArchiving.withChildren ? "tree" : "alone"} disabled={sessionArchiveBusy}
-        onChange={event => { const withChildren = event.currentTarget.value === "tree"; setSessionArchiving(value => value && { ...value, withChildren }); }}>
-        <Radio value="tree" label={sessionArchiving.count === 1 ? t("Archive with its child session") : t("Archive with its {count} child sessions", { count: sessionArchiving.count })} />
-        <Radio value="alone" label={t("Archive this session only")} />
-      </RadioGroup>
-    </ConfirmPopover>;
   }
   // Archives a session, with its child sessions when asked. What went wrong is said in the question that was asked,
   // or in a message when nothing was asked.
@@ -5126,7 +5134,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (sessionArchivePending.current || !owned || !mutation?.capability.canMutate()) return;
     sessionArchivePending.current = true;
     setSessionArchiveBusy(true);
-    setSessionArchiveText("");
+    sessionArchiveQuestion.setError("");
     try {
       const result = await setSessionArchived(workspace.archiveSession, status?.hostEpoch, row.id, withChildren);
       if (!creationAlive.current) return;
@@ -5137,13 +5145,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
       }
       if (result.kind === "done") {
-        setSessionArchiving(null);
+        sessionArchiveQuestion.close();
         showToast({ message: result.changed.length > 1 ? t("Archived {count} sessions.", { count: result.changed.length }) : t("Archived."),
           intent: "success", icon: "tick", timeout: 8000, action: { text: t("Restore"), onClick: () => void restoreSessionNow(row, false) } });
         return;
       }
       const message = t(sessionArchiveMessage(result.code));
-      if (asked) setSessionArchiveText(message);
+      if (asked) sessionArchiveQuestion.setError(message);
       else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
     } finally {
       sessionArchivePending.current = false;
@@ -5310,7 +5318,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!owned || !mutation?.capability.canMutate()) return undefined;
     return { sessions: shownArchived, busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
       restore: session => { setDialog(null); void restoreSessionNow(session, true); },
-      info: session => setArchivedInfo(session.id),
+      info: archivedSessionInfo.show,
       remove: deleteArchivedSession };
   }
   // The archived sessions the shown space lists: the saved sessions and the search find them there. The catalog is
@@ -5319,13 +5327,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const full = catalog.current;
     return full ? archivedSessions({ ...full, sessions: archivedInView(full, spaceView(spacesState.spaces, spaceId, showOthers)) }) : [];
   }, [snapshot, spacesState.spaces, spaceId, showOthers]);
+  const archivedSessionInfo = useArchivedSessionInfo(catalog, demoMode, row => owned && !demoMode
+    ? createSessionStorageHost(workspaceApi.sessionStorage, workspaceApi.revealSessionStorage, status?.hostEpoch, row.id, row.createdAt) : null);
 
   function beginSessionMove(row: WorkspaceSession) {
     const project = selectedProject;
     if (!project || project.archived || row.projectId !== project.id || row.workspacePath !== project.path || movingPending.current) return;
     setRenamingId(null);
-    setDeletingId(null);
-    setMovingSession({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
+    sessionDeleteQuestion.close();
+    sessionMoveDialog.open({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
   }
 
   // The row of a session of a project can be dragged onto the row of another project: the drop moves it there.
@@ -5362,7 +5372,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // The locks of the menu, again: a rename or a delete may have become pending or unconfirmed while the window was open.
     if (renamingBusy || deletingBusy || renamingPending.current || deletingPending.current
       || renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current) {
-      setMovingSession(null);
+      sessionMoveDialog.close();
       showToast({ message: t(sessionMoveMessage("busy")), intent: "warning", icon: "warning-sign", timeout: 6000 });
       return;
     }
@@ -5388,7 +5398,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         const selected = selectedSessionId.current;
         if (selected && result.moved.some(value => value.sessionId === selected)) selectProject(target.id, selected);
       }
-      setMovingSession(null);
+      sessionMoveDialog.close();
       if (result.kind === "moved") {
         if (fresh && !movedSessionsVisible(fresh, result.moved))
           showToast({ message: t("The session moved, but the refreshed list does not show it in {project} yet. Refresh to check.", { project: target.name }),
@@ -5426,18 +5436,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         || currentHostEpoch.current !== status?.hostEpoch || !capability.canMutate()) return;
       if (result.kind === "ready") {
         setProjectRenameTarget(result.target);
-        setProjectRenameName(result.target.name);
         setProjectRenameConflict(false);
       } else setProjectRenameNotice(projectRenameMessage(result.code));
     } finally { projectRenamePending.current = false; if (creationAlive.current) setProjectRenameBusy(false); }
   }
 
-  async function saveProjectRename() {
+  async function saveProjectRename(name: string) {
     const target = projectRenameTarget;
     const capability = mutation?.capability;
     if (!target || !capability?.canMutate() || projectRenamePending.current || projectRenameConflict || projectRenameLocked
       || selectedScope.current !== target.id || currentHostEpoch.current !== target.epoch) return;
-    const name = projectRenameName;
     const generation = projectRenameGeneration.current;
     projectRenamePending.current = true;
     setProjectRenameBusy(true);
@@ -6049,7 +6057,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   branchActions.current = { fork: forkSessionOfPane, rewind: rewindSessionOfPane };
 
-  async function renameSelectedSession() {
+  async function renameSelectedSession(title: string) {
     const session = selectedSession;
     if (!session || session.id !== renamingId || selectedSessionId.current !== session.id
       || selectedScope.current !== (selectedProject?.id ?? null) || renamingPending.current
@@ -6063,7 +6071,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path }
       : { scope: "global", projectPath: session.workspacePath };
     const capability = mutation.capability;
-    const title = renamingTitle;
     renamingPending.current = true;
     setRenamingBusy(true);
     setRenamingMessage("");
@@ -6076,7 +6083,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         if (fresh && renamedSessionVisible(fresh, result) && capability.canMutate()
           && renameSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
           setRenamingId(null);
-          setRenamingTitle("");
         } else {
           uncertainRename.current = { id: session.id, title, target };
           setRenameLocked(true);
@@ -6177,11 +6183,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const index = sessionRows().findIndex(row => row.parentElement?.dataset.sessionId === session.id);
     const failed = (message: string) => {
       if (!asked) showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
-      else if (selectedSessionId.current === session.id) setDeletingMessage(message);
+      else if (selectedSessionId.current === session.id) sessionDeleteQuestion.setError(message);
     };
     deletingPending.current = true;
     setDeletingBusy(true);
-    setDeletingMessage("");
+    sessionDeleteQuestion.setError("");
     try {
       const result = await deleteSession(status?.hostEpoch, target, session.id, session.title, capability);
       if (!creationAlive.current) return;
@@ -6194,7 +6200,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           if (deleteSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
             setSessionId(recovered.sessionId);
           }
-          setDeletingId(null);
+          sessionDeleteQuestion.close();
           if (index >= 0) setDeletedRow({ index });
           if (worktree && selectedProject && status?.hostEpoch) void removeDeletedWorktrees(status.hostEpoch, [{ projectId: selectedProject.id, ...worktree }]);
         } else {
@@ -6204,7 +6210,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         }
       } else if (result.code === "has_children") {
         // Children the window did not know of: they are shown, with the choice to delete them with it.
-        setDeletingId(null);
+        sessionDeleteQuestion.close();
         showSessionChildren(session, true);
       } else {
         if (result.code === "delete_unconfirmed") {
@@ -6228,26 +6234,26 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (deleteSelectionCurrent(captured, selectedScope.current, selectedSessionId.current)) {
         setSessionId(recovered.sessionId);
       }
-      setDeletingId(null);
-      setDeletingMessage("");
+      sessionDeleteQuestion.close();
+      sessionDeleteQuestion.setError("");
     } else if (selectedSessionId.current === captured.id)
-      setDeletingMessage("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
+      sessionDeleteQuestion.setError("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
   }
 
-  // Archiving the selected project, or taking it out of the archive, is asked about beside its row, unless the
-  // user answered not to be asked again. The project file is read and written in one go once the answer is yes.
-  const [archiveAsk, setArchiveAsk] = useState<{ id: string; archived: boolean } | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
-  const [archiveMessage, setArchiveMessage] = useState("");
+  const projectArchiveQuestion = useProjectArchiveQuestion({
+    project: selectedProject, railVisible, busy: archiveBusy, t,
+    onConfirm: remember => { if (remember) setConfirm("projectArchive", false); void archiveSelectedProject(true); },
+  });
   const [projectDeleteTarget, setProjectDeleteTarget] = useState<ProjectDeleteTarget | null>(null);
   const [projectDeleteBusy, setProjectDeleteBusy] = useState(false);
-  const [projectDeleteMessage, setProjectDeleteMessage] = useState("");
+  const projectDeleteQuestion = useProjectDeleteQuestion({
+    target: projectDeleteTarget, project: selectedProject, busy: projectDeleteBusy, t,
+    onConfirm: () => void deleteConfirmedProject(), onCancel: () => setProjectDeleteTarget(null),
+  });
   // A question is asked beside a row: when the Explorer goes, as in a window made narrow, it goes with its row.
   useEffect(() => {
-    if (railVisible) return;
-    if (!deletingPending.current) setDeletingId(null);
-    if (!archiveBusy) setArchiveAsk(null);
-    if (!projectDeleteBusy) setProjectDeleteTarget(null);
+    if (!railVisible && !projectDeleteBusy) setProjectDeleteTarget(null);
   }, [railVisible]);
   function archiveScope(): ArchiveScope | null {
     const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);
@@ -6259,20 +6265,20 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function beginProjectArchive() {
     const scope = archiveScope();
     if (!scope || archiveBusy || projectArchive.locked || projectDeleteBusy) return;
-    setArchiveMessage("");
+    projectArchiveQuestion.setError("");
     setProjectDeleteTarget(null);
-    if (confirms.projectArchive) setArchiveAsk({ id: scope.id, archived: scope.archived });
+    if (confirms.projectArchive) projectArchiveQuestion.ask(scope);
     else void archiveSelectedProject(false);
   }
   async function archiveSelectedProject(asked: boolean) {
     const failed = (message: string) => {
-      if (asked) setArchiveMessage(message); else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
+      if (asked) projectArchiveQuestion.setError(message); else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
     };
     const changed = "The project changed. Nothing was written.";
     const scope = archiveScope();
     if (!scope) { failed(changed); return; }
     setArchiveBusy(true);
-    setArchiveMessage("");
+    projectArchiveQuestion.setError("");
     try {
       const target = await projectArchive.prepare(scope);
       if (!creationAlive.current) return;
@@ -6281,7 +6287,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       const result = await projectArchive.confirm(target, archiveScope());
       if (!creationAlive.current) return;
       if (result?.state !== "confirmed") { failed(result?.status ?? changed); return; }
-      setArchiveAsk(null);
+      projectArchiveQuestion.close();
       // The write is confirmed even when the projects cannot be read again.
       if (currentHostEpoch.current !== target.epoch || !mutation?.capability.canMutate()) return;
       const version = browserRevision.current;
@@ -6321,16 +6327,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const target = projectDeleteScope();
     if (!target || projectDeletion.locked || projectArchive.locked || archiveBusy || projectRenamePending.current || !!projectRenameTarget
       || deletingPending.current || renamingPending.current) return;
-    setProjectDeleteMessage("");
-    setArchiveAsk(null);
-    setArchiveMessage("");
+    projectDeleteQuestion.clearError();
+    projectArchiveQuestion.reset();
     setProjectDeleteTarget(Object.freeze(target));
   }
   async function deleteConfirmedProject() {
     const target = projectDeleteTarget;
     if (!target || projectDeletion.locked) return;
     setProjectDeleteBusy(true);
-    setProjectDeleteMessage("");
+    projectDeleteQuestion.clearError();
     try {
       const outcome = await projectDeletion.confirm(target, projectDeleteScope());
       if (!creationAlive.current) return;
@@ -6339,10 +6344,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         // Do not redirect a newer selection when this original finishes.
         if (projectDeleteCurrent(target, projectDeleteScope())) selectProject(null);
       } else {
-        setProjectDeleteMessage(t(outcome === "inUse" ? "A session of this project is running or waits for an answer. Stop it or let it end first."
-          : outcome === "children" ? "A session of another project was started from this project. Delete that session first."
-            : outcome === "failed" ? "The project could not be deleted completely. Some of its sessions may be gone. Try again."
-              : "The project changed. Nothing was deleted."));
+        projectDeleteQuestion.reportFailure(outcome);
         if (outcome !== "failed") return;
       }
       // What is left is shown: the project is gone, or some of its sessions are.
@@ -6482,7 +6484,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         <SessionContentLayout sessionsHidden={!railVisible}
           projects={sessions => { const railHead = <>
           <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span>
-            {newLabel && <span className="label-new-anchor"><LabelFormPopover heading={t("New label")} submitLabel={t("Create")} labels={labelsState.labels} parent={null} ownId={null}
+            {newLabel && <span className="label-new-anchor"><LabelFormPopover heading={t("New label")} submitLabel={t("Create")} labels={projectLabelCatalog} parent={null} ownId={null}
               initial={{ name: "", icon: "", color: "" }} busy={newLabel.busy} error={newLabel.error}
               onSubmit={look => void createTopLabel(look.name, look.icon, look.color)} onCancel={() => setNewLabel(null)} /></span>}</span><span>
             {snapshot && <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="collapseAll" size={16} />} aria-label={t("Collapse all")} title={t("Collapse all")}
@@ -6547,14 +6549,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 drag={owned && !group.label.repository ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined}
                 activity={labelActivity(labelSubtreeProjects(group.label.id, spaceLabels))} />,
               repository: project => projectTitle(project, catalog.current?.projects ?? projectListing?.projects ?? []).repository,
-              badges: project => <ProjectLabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
+              badges: project => <LabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
               drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
             } : undefined}
-            filter={<SidebarFilterBox value={sidebarText} onChange={setSidebarText}
+            filter={<SidebarFilterBox applied={sidebarText} onApply={applySidebarFilter}
               empty={!!filterView && !filterView.scopes.size && !filterView.projects.size && !filterView.claudeCode.size && (!claudeCodeConfigured || claudeCodeSearched) && wantsServed} />}
             tree={{ expanded: id => filterView && filterOpens(filterView, id) ? !filterFolded.has(id) : isExpanded(projectTree, id),
-              toggle: id => filterView && filterOpens(filterView, id) ? setFilterFolded(current => toggleFilterFold(current, id))
+              toggle: id => filterView && filterOpens(filterView, id) ? setSidebarFilter(current => ({ ...current, folded: toggleFilterFold(current.folded, id) }))
                 : setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
@@ -6569,23 +6571,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} />
               {id !== null && <WorkItemsBadge counts={workByProject.get(id)} onOpen={owned ? () => openWorkItems({ projectId: id }) : undefined} />}</>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
-            renaming={projectRenaming && projectRenameTarget ? { id: projectRenameTarget.id, form: <RenamePopover label={t("Project name")}
-              value={projectRenameName} onChange={setProjectRenameName} busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
+            renaming={projectRenaming && projectRenameTarget ? { id: projectRenameTarget.id, form: <RenamePopover
+              key={`${projectRenameTarget.id}:${projectRenameTarget.revision}`} label={t("Project name")} initialValue={projectRenameTarget.name}
+              busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
               error={projectRenameNotice ? workflowNotice(language.locale, projectRenameNotice) : null}
-              onSubmit={() => void saveProjectRename()} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
-            asking={projectDeleteTarget && selectedProject && projectDeleteTarget.id === selectedProject.id ? { id: projectDeleteTarget.id,
-              form: <ConfirmPopover always title={t("Delete this project?")} subject={selectedProject.name}
-                detail={t("It is removed from CodeAlta and its sessions are deleted: they cannot be restored. Its folder and its files are kept.")}
-                confirmLabel={t("Delete")} intent="danger" busy={projectDeleteBusy} error={projectDeleteMessage || null}
-                onConfirm={() => void deleteConfirmedProject()}
-                onCancel={() => { setProjectDeleteTarget(null); setProjectDeleteMessage(""); }} /> }
-              : archiveAsk && selectedProject && archiveAsk.id === selectedProject.id && archiveAsk.archived === selectedProject.archived ? { id: archiveAsk.id,
-              form: <ConfirmPopover title={t(archiveAsk.archived ? "Unarchive this project?" : "Archive this project?")} subject={selectedProject.name}
-                detail={t(archiveAsk.archived ? "It can be worked in again. Nothing is started."
-                  : "It becomes read-only in CodeAlta until it is unarchived. Its files and its sessions are kept.")}
-                confirmLabel={t(archiveAsk.archived ? "Unarchive" : "Archive")} busy={archiveBusy} error={archiveMessage || null}
-                onConfirm={remember => { if (remember) setConfirm("projectArchive", false); void archiveSelectedProject(true); }}
-                onCancel={() => { setArchiveAsk(null); setArchiveMessage(""); }} /> } : undefined}
+              onSubmit={name => void saveProjectRename(name)} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
+            asking={projectDeleteQuestion.question ?? projectArchiveQuestion.question}
             creating={creatingShown ? { id: projectId, form: <NewSessionPopover heading={selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New chat")}
               title={creatingTitle} onTitle={setCreatingTitle} choices={creationProviderChoice(true)}
               place={selectedProject && <ProjectContext epoch={owned ? status?.hostEpoch ?? null : null} project={selectedProject} read={projectGit.status} branches
@@ -6619,6 +6610,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 all: () => openFile(canvasesTab) } : undefined,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
                 search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse"),
+                labels: labelsState.available ? { grouped: id => isGroupedByLabels(projectTree, id),
+                  setGrouped: (id, grouped) => setProjectTree(current => setGroupedByLabels(current, id, grouped)) } : undefined,
                 cloud: cloudOffered ? { create: newCloudSession, bring: id => { if (scopeCanCreateSession(id)) setCloudBring({ projectId: id, link: "" }); } } : undefined } }}
             editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
               unsaved: project => fileEditors.dirty(fileTabKey(editorTab(project))), show: project => openProjectEditor(project) } : undefined} />}
@@ -6644,10 +6637,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           </div>}
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
           <div className="session-list">
-            {selectedList.entries.map((entry, index) => {
+            {groupEntries(projectId, selectedList.entries).map((entry, index) => {
               if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
                 onMore={() => sessionTree.more(entry.parentId)} onFewer={() => sessionTree.fewer(entry.parentId)} />;
               if (entry.kind === "link") return <SessionLinkRow key={`link:${entry.parentId}:${entry.session.id}`} entry={entry} />;
+              if (entry.kind === "label") return <SessionLabelGroupRow key={entry.key} entry={entry} grouping={sessionGrouping} />;
               const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere, childrenElsewhere } = entry.row;
               const twist = sessionTwist(entry, sessionTree.toggle);
               const menu = activeMenu?.id === session.id ? activeMenu : null;
@@ -6689,7 +6683,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
                 onClick={event => {
                   const focusPrompt = event.detail > 0;
-                  protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage("");
+                  protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); sessionDeleteQuestion.close(); sessionDeleteQuestion.setError("");
                     if (focusPrompt) focusPromptSoon(); });
                 }}
                 onDoubleClick={() => keepSession(projectId, session)}>
@@ -6718,6 +6712,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   ...sessionLineageEntries(session),
                   ...sessionReviewEntries(session),
                   ...sessionMachineEntries(session),
+                  ...(sessionLabelsPopover ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => setLabelingSession(session.id) }] : []),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
@@ -6726,34 +6721,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", endNode: <KeyGesture gesture="Delete" />, danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
-              {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
+              {renamingId === session.id && <RenamePopover key={session.id} label={t("Session title")} initialValue={session.title}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
-                onSubmit={() => void renameSelectedSession()} onCancel={() => setRenamingId(null)} />}
-              {deletingId === session.id && (() => {
-                // A session that works in a worktree leaves it, with its branch: the question says where, and can remove it.
-                const found = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
-                const check = deletingWorktreeCheck?.id === session.id ? deletingWorktreeCheck : null;
-                const worktree = found && check?.shared ? { ...found, shared: true } : found;
-                const checking = !!found && !found.shared && check?.shared === null;
-                return <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
-                  detail={inCloud(session) ? `${t("Its history is deleted and cannot be restored. The files of the project are kept.")} ${t("The cloud session stays on claude.ai: archive or delete it there.")}`
-                    : t("Its history is deleted and cannot be restored. The files of the project are kept.")}
-                  confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
-                  onConfirm={remember => { if (remember) setConfirm("sessionDelete", false);
-                    void deleteSessionRow(session, true, worktree && !worktree.shared && deletingWorktree ? worktree : null); }}
-                  onCancel={() => { setDeletingId(null); setDeletingMessage(""); }}>
-                  {worktree && <div className="confirm-worktree">
-                    <p>{t("Its worktree {name} is kept in {path}, with its branch.", { name: worktree.name, path: worktree.path })}</p>
-                    {worktree.shared ? <p>{t("Other sessions work in this worktree: it stays.")}</p>
-                      : <>{checking && <p className="muted-text" role="status">{t("Checking which sessions still work in it…")}</p>}
-                        <Checkbox checked={deletingWorktree} disabled={deletingBusy || checking} label={t("Also remove the worktree")}
-                          onChange={event => setDeletingWorktree(event.currentTarget.checked)} /></>}
-                    {deletingWorktree && !worktree.shared && !checking && <p className="muted-text">
-                      {t("A worktree that holds changes that are not committed is kept, and its branch is deleted only when its commits are all in another branch.")}</p>}
-                  </div>}
-                </ConfirmPopover>;
-              })()}
-              {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
+                onSubmit={title => void renameSelectedSession(title)} onCancel={() => setRenamingId(null)} />}
+              {sessionDeleteQuestion.render(session)}
+              {sessionArchiveQuestion.render(session, "explorer")}
+              {labelingSession === session.id && sessionLabelsPopover?.(session, () => setLabelingSession(null))}
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && !filterView && omittedSessions(snapshot, projectId) === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
@@ -6801,7 +6774,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 heldElsewhere={elsewhereSessions.get(row.id) ?? null}
                 archive={owned && !row.archived && !row.machineId ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
                   run: () => { protectNavigation([row.id], () => beginSessionArchive(row, "composer")); },
-                  question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned && !row.machineId ? branchHost : null} bookmarks={owned && !row.machineId ? bookmarkHost : null}
+                  question: sessionArchiveQuestion.render(row, "composer") } : null} branch={owned && !row.machineId ? branchHost : null} bookmarks={owned && !row.machineId ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={listing} selectedProjectId={tab.projectId}
@@ -7014,17 +6987,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
-    {settingsOpen && <SettingsHelpContext.Provider value={settingsHelp}><SettingsOverlay section={settingsSection} onSection={page => { setSettingsQuery(""); navigate(page); }} onClose={closeSettings}
+    {settingsOpen && <SettingsHelpContext.Provider value={settingsHelp}><SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}
       spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}
-      pluginPages={owned ? allPluginPages : []} pluginPage={pluginPage} onPluginPage={page => { setSettingsQuery(""); openPluginSettings(page); }}
-      search={{ query: settingsQuery, onQuery: setSettingsQuery, counts: settingsSearch ? matchCounts(settingsSearch) : null, focusOnOpen: settingsFocusSearch.current,
-        onSubmit: () => {
-          const first = settingsSearch && (groupResults(settingsSearch, settingEntries)[0]?.settings[0] ?? null);
-          const page = first ? null : settingsSearch?.pages[0]?.page.id ?? null;
-          if (first) openSearchedSetting(first.page, first.id); else if (page) openSearchedSetting(page, null);
-        },
-        results: settingsSearch ? <SettingsSearchResults query={settingsQuery} result={settingsSearch} entries={settingEntries} source={settingValues} revision={settingsRevision}
-          onOpen={openSearchedSetting} /> : null }}>
+      pluginPages={owned ? allPluginPages : []} pluginPage={pluginPage} onPluginPage={openPluginSettings}
+      search={{ entries: settingEntries, source: settingValues, revision: settingsRevision, focusOnOpen: settingsFocusSearch.current, resetRef: resetSettingsSearch }}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: setRecentSessionCount, subAgentCount, setSubAgentCount,
@@ -7202,26 +7168,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }} onClose={() => setDialog(null)} />}
     {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
       style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
-    {machineMove && owned && <MoveToMachineDialog epoch={status!.hostEpoch!} session={machineMove} onClose={() => setMachineMove(null)}
-      onMoved={(result, machine) => {
-        setMachineMove(null);
-        showToast({ message: t("The session runs on {machine} now.", { machine }), intent: "success", icon: "tick", timeout: 4000 });
-        // The session opens where it runs now: the list says so once read again.
-        void refreshProjects(creationRefresh.current.signal).then(fresh => {
-          const moved = fresh?.sessions.find(value => value.id === result.sessionId && (value.machineId ?? null) === (result.machineId ?? null));
-          if (moved) revealSession(moved);
-        });
-      }} />}
-    {movingToSpace && <MoveToSpaceDialog title={movingToSpace.title} spaces={spacesState.spaces} currentId={movingToSpace.spaceId} busy={movingBusy}
-      onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => setMovingToSpace(null)} />}
+    {machineMoveDialog.dialog}
+    {spaceMoveDialog.dialog}
     {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}
       read={() => readSessionChildren(workspace.sessionChildren, status?.hostEpoch, childrenView.id)}
       projects={catalog.current?.projects ?? []} sessions={catalog.current?.sessions ?? []} spaces={spacesState.spaces} canDelete={owned && !!mutation?.capability.canMutate()}
       checkWorktrees={checkDeletedWorktrees}
       onOpen={session => { setChildrenView(null); revealSession(session); }} onDelete={deleteChildrenTree} onClose={() => setChildrenView(null)} />}
-    {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
-      projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
-      onClose={() => setMovingSession(null)} />}
+    {sessionMoveDialog.dialog}
     {continuingClaudeCode && snapshot && <MoveSessionDialog title={continuingClaudeCode.title} projectId={null} continuing
       projects={snapshot.projects} busy={claudeCodeImporting !== null} onMove={project => void importClaudeCodeInto(continuingClaudeCode, project)}
       onClose={() => { if (!claudeCodeImportPending.current) setContinuingClaudeCode(null); }} />}
@@ -7297,9 +7251,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         openingSession.current = tab.sessionId;
         selectSessionTab(tab); setBrowserWant(null); setDialog(null); return true;
       }} />}
-    {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
-      demo={demoMode} onClose={() => setArchivedInfo(null)}
-      storage={owned && !demoMode ? createSessionStorageHost(workspaceApi.sessionStorage, workspaceApi.revealSessionStorage, status?.hostEpoch, row.id, row.createdAt) : null} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
+    {archivedSessionInfo.dialog}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} unavailableReason={commandUnavailableReason} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
@@ -7360,9 +7312,6 @@ function fleetBar(projects: readonly WorkspaceProject[], onOpen: () => void) {
 /** The pages of the Fleet tab of Settings, the Overview first. */
 const fleetSettingsPages: ReadonlySet<string> = new Set(settingsGroups.find(({ group }) => group === "Fleet")?.pages.map(page => page.id) ?? []);
 
-/** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
-type SettingsSearchControls = Readonly<{ query: string; onQuery(query: string): void; counts: ReadonlyMap<string, number> | null; onSubmit(): void; focusOnOpen: boolean; results: ReactNode | null }>;
-
 // Native modal matches the other shell dialogs: showModal supplies inert background,
 // browser-managed focus trapping and nested native About dialog top-layer ordering.
 function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, pluginPages, pluginPage, onPluginPage, search, children }: {
@@ -7374,17 +7323,30 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   /** The settings pages of the plugins that run in the space the window shows, each a page of the Extensions group. */
   pluginPages: readonly PluginSettingsPage[];
   pluginPage: PluginSettingsPage | null; onPluginPage: (page: PluginSettingsPage) => void;
-  /** The search of Settings: what is typed, how many results each page has while it is typed, and what Enter opens. */
-  search: SettingsSearchControls;
+  /** The settings a search can show and edit, and how an explicit page request leaves the search. */
+  search: { entries: readonly SettingEntry[]; source: SettingValueSource; revision: unknown; focusOnOpen: boolean; resetRef: RefObject<(() => void) | null> };
   children: ReactNode;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
   const searchField = useRef<HTMLInputElement>(null);
-  const counts = search.counts;
+  const [query, setQuery] = useState("");
+  useImperativeHandle(search.resetRef, () => () => setQuery(""), []);
+  const result = useMemo(() => query.trim() ? searchSettings(search.entries, query, locale) : null, [search.entries, query, locale]);
+  const counts = result ? matchCounts(result) : null;
   const dimmed = (page: string) => counts !== null && !counts.has(page);
   const count = (page: string) => counts?.get(page) ? <small className="settings-nav-count">{counts.get(page)}</small> : null;
+  const selectSection = (next: SettingsSection) => { setQuery(""); onSection(next); };
+  const selectPluginPage = (page: PluginSettingsPage) => { setQuery(""); onPluginPage(page); };
+  const openResult = (page: string, setting: string | null) => settingsNavigation.open({ page, setting });
+  function submitSearch() {
+    if (!result) return;
+    const first = groupResults(result, search.entries)[0]?.settings[0];
+    const page = result.pages[0]?.page.id;
+    if (first) openResult(first.page, first.id);
+    else if (page) openResult(page, null);
+  }
   // Fleet is a whole of its own: its pages have their tab, and the other pages theirs; a search looks in both.
   const inFleet = fleetSettingsPages.has(section);
   const lastPage = useRef<{ general: SettingsSection; fleet: SettingsSection }>({ general: "appearance", fleet: "fleet" });
@@ -7406,19 +7368,19 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined} data-fleet={inFleet || undefined}>
         <div className="settings-mode" role="group" aria-label={t("Settings")}>
-          <button type="button" aria-pressed={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) onSection(lastPage.current.general); }}>
+          <button type="button" aria-pressed={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) selectSection(lastPage.current.general); }}>
             <AppIcon name="settings" size={15} /><span>{t("General")}</span></button>
-          <button type="button" aria-pressed={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) onSection(lastPage.current.fleet); }}>
+          <button type="button" aria-pressed={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) selectSection(lastPage.current.fleet); }}>
             <AppIcon name="fleet" size={15} /><span>{t("Fleet")}</span></button>
         </div>
         <div className="settings-search-bar"><InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
-          placeholder={t("Search settings")} aria-label={t("Search settings")} value={search.query} onValueChange={search.onQuery}
+          placeholder={t("Search settings")} aria-label={t("Search settings")} value={query} onValueChange={setQuery}
           onKeyDown={event => {
             // A key that commits a candidate of an input method (Japanese, Chinese) belongs to the input method.
             if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-            if (event.key === "Escape" && search.query) { event.preventDefault(); event.stopPropagation(); search.onQuery(""); }
-            else if (event.key === "Enter" && search.query.trim()) { event.preventDefault(); search.onSubmit(); }
-            else if (event.key === "ArrowDown" && search.query.trim()) {
+            if (event.key === "Escape" && query) { event.preventDefault(); event.stopPropagation(); setQuery(""); }
+            else if (event.key === "Enter" && result) { event.preventDefault(); submitSearch(); }
+            else if (event.key === "ArrowDown" && result) {
               const first = document.querySelector<HTMLElement>(".settings-search-results :is(button, input, select, [tabindex='0'])");
               if (first) { event.preventDefault(); first.focus(); }
             }
@@ -7428,26 +7390,28 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
           ? <div key={group} className="settings-dialog-group settings-dialog-spaces">
             <h3>{t(group)}</h3>
             {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id && (id !== "spaces" || !spacePage) ? "page" : undefined}
-              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => { onSection(id); if (id === "spaces") onSpacePage(null); }}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
+              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => { selectSection(id); if (id === "spaces") onSpacePage(null); }}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
             {spaces.map(space => <button key={space.id} type="button" aria-current={counts === null && section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
-              data-settings-space={space.id} data-dimmed={counts !== null || undefined} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
+              data-settings-space={space.id} data-dimmed={counts !== null || undefined} onClick={() => { selectSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
               <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}
           </div>
           : <div key={group} className="settings-dialog-group">
             <h3>{t(group)}</h3>
             {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id ? "page" : undefined}
-              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => onSection(id)}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
+              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => selectSection(id)}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
             {/* Each plugin that has a settings page has its own, after the pages of the extensions, named and iconed as its canvas. */}
             {group === "Extensions" && pluginPages.map(page => {
               const id = page.canvasId ? `plugin/${page.pluginKey}/${page.canvasId}` : `plugin/${page.pluginKey}`;
               return <button key={`${page.pluginKey}/${page.canvasId}`} type="button"
                 aria-current={counts === null && section === "plugin" && samePluginSettingsPage(pluginPage, page) ? "page" : undefined} data-settings-plugin={`${page.pluginKey}/${page.canvasId}`}
-                data-dimmed={dimmed(id) || undefined} onClick={() => onPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span>{count(id)}</button>;
+                data-dimmed={dimmed(id) || undefined} onClick={() => selectPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span>{count(id)}</button>;
             })}
           </div>)}
         <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span:last-child" />
       </nav>
-      <div className="settings-dialog-content" key={search.results ? "search" : section}>{search.results ?? children}</div>
+      <div className="settings-dialog-content" key={result ? "search" : section}>
+        {result ? <SettingsSearchResults query={query} result={result} entries={search.entries} source={search.source} revision={search.revision} onOpen={openResult} /> : children}
+      </div>
     </div>
   </AppWindow>;
 }

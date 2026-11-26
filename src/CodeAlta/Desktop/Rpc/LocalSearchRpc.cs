@@ -27,16 +27,11 @@ internal sealed class LocalSearchService
     /// <summary>The most commands of the window the page gives.</summary>
     internal const int MaximumCommands = 1000;
 
-    private readonly DesktopSearch? _search;
-    private readonly Func<string?, CancellationToken, Task<SpaceFilter?>>? _spaceFilter;
-    private readonly Func<string, CancellationToken, Task<IReadOnlySet<string>?>>? _spaceProjects;
-    private readonly IBookmarkJournal? _journal;
-    private readonly string? _epoch;
-
-    /// <summary>Creates an unavailable service for launches without an owned host.</summary>
-    internal LocalSearchService()
-    {
-    }
+    private readonly DesktopSearch _search;
+    private readonly Func<string?, CancellationToken, Task<SpaceFilter?>> _spaceFilter;
+    private readonly Func<string, CancellationToken, Task<IReadOnlySet<string>?>> _spaceProjects;
+    private readonly IBookmarkJournal _journal;
+    private readonly string _epoch;
 
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="search">The search of the window.</param>
@@ -70,7 +65,7 @@ internal sealed class LocalSearchService
             (kinds ??= []).Add(kind);
         }
 
-        var settings = _search!.Host.GetSettings();
+        var settings = _search.Host.GetSettings();
         if (!settings.Enabled) return new("disabled", [], false, "off", 0);
         try
         {
@@ -102,12 +97,12 @@ internal sealed class LocalSearchService
             return new("invalid_request", null, null, null);
         try
         {
-            if (await _search!.Service.FindAsync(reference, cancellationToken).ConfigureAwait(false) is not { SessionId: { } sessionId } item)
+            if (await _search.Service.FindAsync(reference, cancellationToken).ConfigureAwait(false) is not { SessionId: { } sessionId } item)
                 return new("not_found", null, null, null);
             var slash = reference.IndexOf('/', 4);
             if (slash < 0) return new("invalid_request", null, null, null);
             var contentId = reference[(slash + 1)..];
-            var found = await _journal!.FindAsync(sessionId, item.RunId, contentId, item.Role == SearchRole.Assistant ? "assistant" : "user", cancellationToken).ConfigureAwait(false);
+            var found = await _journal.FindAsync(sessionId, item.RunId, contentId, item.Role == SearchRole.Assistant ? "assistant" : "user", cancellationToken).ConfigureAwait(false);
             return found.Status switch
             {
                 BookmarkJournalStatus.Found => new("ok", sessionId, item.ProjectId, found.Message!.Offset.ToString(CultureInfo.InvariantCulture)),
@@ -130,7 +125,7 @@ internal sealed class LocalSearchService
         if (Refuse(request.ExpectedEpoch) is { } refused) return LocalSearchStatusResponse.Refused(refused);
         try
         {
-            var status = await _search!.Service.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var status = await _search.Service.GetStatusAsync(cancellationToken).ConfigureAwait(false);
             var settings = _search.Host.GetSettings();
             var counts = status.Counts;
             return new("ok", Settings(settings), MeaningOf(settings, counts), status.Indexer.Busy, status.Indexer.Ready, status.Indexer.JournalsDone, status.Indexer.JournalsTotal,
@@ -151,7 +146,7 @@ internal sealed class LocalSearchService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
-        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (_search.Meaning is not { } meaning) return new("unavailable");
         if (EmbeddingModelCatalog.Find(request.ModelId) is null) return new("invalid_request");
         try { meaning.TurnOn(request.ModelId!); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { return new("write_failed"); }
@@ -164,7 +159,7 @@ internal sealed class LocalSearchService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
-        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (_search.Meaning is not { } meaning) return new("unavailable");
         try { meaning.TurnOff(); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { return new("write_failed"); }
         return new("ok");
@@ -176,7 +171,7 @@ internal sealed class LocalSearchService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
-        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (_search.Meaning is not { } meaning) return new("unavailable");
         meaning.Paused = request.Paused;
         return new("ok");
     }
@@ -187,7 +182,7 @@ internal sealed class LocalSearchService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
-        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (_search.Meaning is not { } meaning) return new("unavailable");
         meaning.Installer.Cancel();
         return new("ok");
     }
@@ -198,7 +193,7 @@ internal sealed class LocalSearchService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
-        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (_search.Meaning is not { } meaning) return new("unavailable");
         if (EmbeddingModelCatalog.Find(request.ModelId) is null) return new("invalid_request");
         try { return new(await meaning.DeleteModelAsync(request.ModelId!, cancellationToken).ConfigureAwait(false) ? "ok" : "in_use"); }
         catch (Exception exception) when (Failure(exception, cancellationToken)) { return new("write_failed"); }
@@ -213,7 +208,7 @@ internal sealed class LocalSearchService
         if (request.Answer is not ("later" or "never")) return new("invalid_request", null);
         try
         {
-            return new("ok", Settings(_search!.AnswerMeaningOffer(request.Answer, DateOnly.FromDateTime(DateTime.Now))));
+            return new("ok", Settings(_search.AnswerMeaningOffer(request.Answer, DateOnly.FromDateTime(DateTime.Now))));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -230,7 +225,7 @@ internal sealed class LocalSearchService
         try
         {
             var scope = await ScopeAsync(request.SpaceId, null, cancellationToken).ConfigureAwait(false);
-            var overview = await _search!.Service.GetOverviewAsync(scope, DateTimeOffset.UtcNow.AddDays(-7), cancellationToken).ConfigureAwait(false);
+            var overview = await _search.Service.GetOverviewAsync(scope, DateTimeOffset.UtcNow.AddDays(-7), cancellationToken).ConfigureAwait(false);
             var counts = overview.Counts;
             return new("ok", counts.Items.ToDictionary(static pair => SearchNames.Of(pair.Key), static pair => Count(pair.Value)), Count(counts.Chunks), Count(counts.Sessions),
                 Count(counts.Recent), Count((counts.Bytes + 1023) / 1024), counts.Projects.ToDictionary(static pair => pair.Key, static pair => Count(pair.Value)),
@@ -253,7 +248,7 @@ internal sealed class LocalSearchService
         if (Refuse(request.ExpectedEpoch) is { } refused) return LocalSearchActivityResponse.Refused(refused);
         try
         {
-            var summary = await _search!.Store.GetActivityAsync(DateTimeOffset.UtcNow - SearchIndexStore.ActivityRetention, cancellationToken).ConfigureAwait(false);
+            var summary = await _search.Store.GetActivityAsync(DateTimeOffset.UtcNow - SearchIndexStore.ActivityRetention, cancellationToken).ConfigureAwait(false);
             static int? Milliseconds(double? value) => value is { } milliseconds ? (int)Math.Ceiling(milliseconds) : null;
             return new("ok", [.. summary.Days.Select(static day => new LocalSearchActivityDay(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     day.Window, day.Agent, day.ToolSearch, day.Other, day.Empty))],
@@ -272,7 +267,7 @@ internal sealed class LocalSearchService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false, "off", 0);
         if (!SearchNames.TryParseKind(request.Kind ?? string.Empty, out var kind)) return new("invalid_request", [], false, "off", 0);
-        if (!_search!.Host.GetSettings().Enabled) return new("disabled", [], false, "off", 0);
+        if (!_search.Host.GetSettings().Enabled) return new("disabled", [], false, "off", 0);
         try
         {
             var scope = await ScopeAsync(request.SpaceId, new HashSet<SearchKind> { kind }, cancellationToken).ConfigureAwait(false);
@@ -295,7 +290,7 @@ internal sealed class LocalSearchService
         if (request.Settings is not { } wanted) return new("invalid_request", null);
         try
         {
-            var saved = _search!.Host.UpdateSettings(current => current with
+            var saved = _search.Host.UpdateSettings(current => current with
             {
                 Enabled = wanted.Enabled, Sessions = wanted.Sessions, Semantic = wanted.Semantic,
                 ExcludedProjects = SearchSettings.Normalize(wanted.ExcludedProjects), ExcludedSpaces = SearchSettings.Normalize(wanted.ExcludedSpaces),
@@ -323,7 +318,7 @@ internal sealed class LocalSearchService
             IReadOnlyList<string> Toggle(IReadOnlyList<string> ids) => request.Excluded
                 ? SearchSettings.Normalize([.. ids, id])
                 : [.. ids.Where(other => !string.Equals(other, id, StringComparison.OrdinalIgnoreCase))];
-            var saved = _search!.Host.UpdateSettings(current => request.Kind == "project"
+            var saved = _search.Host.UpdateSettings(current => request.Kind == "project"
                 ? current with { ExcludedProjects = Toggle(current.ExcludedProjects) }
                 : current with { ExcludedSpaces = Toggle(current.ExcludedSpaces) });
 
@@ -341,7 +336,7 @@ internal sealed class LocalSearchService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
-        _search!.Indexer.SignalPass();
+        _search.Indexer.SignalPass();
         return new("ok");
     }
 
@@ -363,7 +358,7 @@ internal sealed class LocalSearchService
             });
         }
 
-        _search!.Sources.WindowCommands = documents;
+        _search.Sources.WindowCommands = documents;
         _search.Indexer.Signal("commands");
         return new("ok");
     }
@@ -382,7 +377,7 @@ internal sealed class LocalSearchService
         var notices = Channel.CreateBounded<int>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
         void Notify() => notices.Writer.TryWrite(0);
         void SettingsChanged(SearchSettings before, SearchSettings after) => Notify();
-        var search = _search!;
+        var search = _search;
         search.Indexer.Changed += Notify;
         search.Indexer.StatusChanged += Notify;
         search.Host.SettingsChanged += SettingsChanged;
@@ -424,8 +419,8 @@ internal sealed class LocalSearchService
         var space = string.IsNullOrWhiteSpace(spaceId) ? SpaceDescriptor.DefaultId : spaceId;
         scope = scope with { SpaceId = space };
         if (!string.Equals(space, SpaceDescriptor.DefaultId, StringComparison.Ordinal))
-            scope = scope with { Projects = await _spaceProjects!(space, cancellationToken).ConfigureAwait(false) };
-        if (await _spaceFilter!(space, cancellationToken).ConfigureAwait(false) is { } filter)
+            scope = scope with { Projects = await _spaceProjects(space, cancellationToken).ConfigureAwait(false) };
+        if (await _spaceFilter(space, cancellationToken).ConfigureAwait(false) is { } filter)
         {
             scope = scope with
             {
@@ -475,7 +470,7 @@ internal sealed class LocalSearchService
     // What the page shows of search by meaning: its state, its models, the download, and whether it is offered now.
     private LocalSearchMeaning MeaningOf(SearchSettings settings, SearchIndexCounts counts)
     {
-        var meaning = _search!.Meaning;
+        var meaning = _search.Meaning;
         var installer = meaning?.Installer;
         var status = meaning?.Status;
         var download = installer?.Current ?? EmbeddingInstallSnapshotIdle;
@@ -513,7 +508,7 @@ internal sealed class LocalSearchService
     private static string Bounded(string text, int length) => text.Length <= length ? text : text[..length];
 
     private string? Refuse(string? expectedEpoch)
-        => _search is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
+        => string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
     private static bool Failure(Exception exception, CancellationToken cancellationToken)
         => exception is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException or JsonException

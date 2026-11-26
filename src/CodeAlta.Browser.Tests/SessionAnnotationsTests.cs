@@ -102,7 +102,7 @@ public sealed class SessionAnnotationsTests
         await next.ReadyAsync();
         StringAssert.Contains(next.Calls.First(static call => call.StartsWith("enable(", StringComparison.Ordinal)), "Rounder", "its toolbar shows the mark of the annotation taken over");
         await next.ReportAsync(Annotation.Replace("\"a1\"", "\"a2\"", StringComparison.Ordinal));
-        for (var wait = DateTime.UtcNow.AddSeconds(10); annotations.Pending.Count < 2 && DateTime.UtcNow < wait;) await Task.Delay(20);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); annotations.Pending.Count < 2 && DateTime.UtcNow < wait;) await Task.Delay(20);
         Assert.AreEqual(2, annotations.Pending[^1].Number);
     }
 
@@ -168,7 +168,7 @@ public sealed class SessionAnnotationsTests
 
     private static async Task<SessionAnnotation> PendingAsync(BrowserAnnotations annotations)
     {
-        for (var wait = DateTime.UtcNow.AddSeconds(10); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(20);
+        for (var wait = DateTime.UtcNow + TestTime.Seconds(10); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(20);
         return annotations.Pending.Single();
     }
 

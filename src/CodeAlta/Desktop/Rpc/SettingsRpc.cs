@@ -17,13 +17,8 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("settings", Version = 1)]
 internal sealed class SettingsService
 {
-    private readonly DesktopSettings? _settings;
-    private readonly string? _epoch;
-
-    /// <summary>Creates an unavailable service for launches without an owned host.</summary>
-    internal SettingsService()
-    {
-    }
+    private readonly DesktopSettings _settings;
+    private readonly string _epoch;
 
     /// <summary>Creates the service for an owned host.</summary>
     /// <param name="settings">The registry of the settings.</param>
@@ -43,7 +38,7 @@ internal sealed class SettingsService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
-        return new("ok", [.. _settings!.List().Select(Describe)]);
+        return new("ok", [.. _settings.List().Select(Describe)]);
     }
 
     /// <summary>Reads the value of a setting.</summary>
@@ -53,7 +48,7 @@ internal sealed class SettingsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null, null);
         if (request.Id is not { Length: > 0 and <= 256 } id) return new("invalid_request", null, null, null, null);
-        var read = await _settings!.GetAsync(id, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var read = await _settings.GetAsync(id, request.ProjectId, cancellationToken).ConfigureAwait(false);
         return new(read.Status, read.Value is { } value ? value.GetRawText() : null, read.Source, read.Message, read.Choices?.Select(Choice).ToArray());
     }
 
@@ -67,7 +62,7 @@ internal sealed class SettingsService
         JsonElement? value;
         try { value = request.Value is null ? null : SettingValues.Parse(request.Value); }
         catch (JsonException) { return new("invalid_request", null, null, "The value is not JSON."); }
-        var write = await _settings!.SetAsync(id, value, request.ProjectId, AltaSettingOrigin.Window, cancellationToken).ConfigureAwait(false);
+        var write = await _settings.SetAsync(id, value, request.ProjectId, AltaSettingOrigin.Window, cancellationToken).ConfigureAwait(false);
         return new(write.Status, write.Value?.GetRawText(), write.Previous?.GetRawText(), write.Message);
     }
 
@@ -93,7 +88,7 @@ internal sealed class SettingsService
             }
         }
 
-        _settings!.ReportWindow(taken, request.RequestId, request.Error);
+        _settings.ReportWindow(taken, request.RequestId, request.Error);
         return new("ok");
     }
 
@@ -107,7 +102,7 @@ internal sealed class SettingsService
 
     internal async IAsyncEnumerable<SettingsEvent> WatchAsync(SettingsRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (_settings is null || !string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
         // A page that does not read keeps the newest events.
         var events = Channel.CreateBounded<SettingsEvent>(new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
         using var registration = _settings.Watch(label, value => events.Writer.TryWrite(value));
@@ -115,7 +110,7 @@ internal sealed class SettingsService
     }
 
     private string? Refuse(string? expectedEpoch)
-        => _settings is null || _epoch is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
+        => string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
     private static SettingsChoice Choice(AltaSettingChoice choice) => new(choice.Value, choice.Label);
 
