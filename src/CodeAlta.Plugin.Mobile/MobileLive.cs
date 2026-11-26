@@ -58,9 +58,30 @@ internal sealed class MobileLive
         // alta steers a session whose turn runs, as `isRunning` says it.
         ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.TryGetValue(sessionId, out var ask) ? MobileAsks.Mark(ask) : null,
         ["approving"] = _approving.TryGetValue(sessionId, out var approval) ? MobilePermissions.Mark(approval) : null,
-        // A suggestion is only an event: one made before the plugin saw the session is not known.
+        // A suggestion is only an event: one made before the plugin saw the session comes with its status (see Adopt).
         ["suggestion"] = null,
     };
+
+    /// <summary>
+    /// Takes the suggestion that <c>alta session status</c> says a session keeps, for a session whose suggestion the plugin
+    /// did not see told: one made before the plugin started, or restored when the host attached the session again. A session the
+    /// plugin sees run, or that already has one, keeps what its events said.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="projectId">Its project.</param>
+    /// <param name="suggestion">What its status says.</param>
+    internal void Adopt(string sessionId, string? projectId, string? suggestion)
+    {
+        if (AgentPromptSuggestionEvent.Normalize(suggestion) is not { } text) return;
+        var session = _sessions.GetOrAdd(sessionId, static _ => new Session());
+        lock (session)
+        {
+            if (session.State != Idle || session.Suggestion is not null) return;
+            session.ProjectId ??= projectId;
+            session.Suggestion = text;
+            session.Dirty = true;
+        }
+    }
 
     /// <summary>Follows one event of a session.</summary>
     /// <param name="agentEvent">The event.</param>
@@ -140,13 +161,9 @@ internal sealed class MobileLive
                     session.Suggestion = null;
                     session.Set(session.State, "error", "Error");
                     break;
-                case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Shutdown }:
-                    if (session.Suggestion is null) return;
-                    session.Suggestion = null;
-                    session.Dirty = true;
-                    break;
                 // The session tells a suggestion once its run said it is idle, as the runtime keeps it: one that comes
-                // while a turn is seen running answers nothing any more.
+                // while a turn is seen running answers nothing any more. A session that shuts down keeps it, as its journal
+                // does (the host detaches an idle session): only another turn, a prompt or an error of the session ends it.
                 case AgentPromptSuggestionEvent suggested:
                     var suggestion = session.State == Idle ? AgentPromptSuggestionEvent.Normalize(suggested.Suggestion) : null;
                     if (suggestion is null || suggestion == session.Suggestion) return;

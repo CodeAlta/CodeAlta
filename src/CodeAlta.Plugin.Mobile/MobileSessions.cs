@@ -365,6 +365,8 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         var id = MobileAlta.Text(item, "sessionId")!;
         var projectId = MobileAlta.Text(item, "projectId");
         var at = LastActivity(item);
+        // Only a status says what the model of an idle session suggested: the plugin keeps it, to push it as it does the others.
+        live.Adopt(id, projectId, MobileAlta.Text(item, "promptSuggestion"));
         var selection = item["modelSelection"] as JsonObject;
         var provider = MobileAlta.Text(selection, "providerKey") ?? MobileAlta.Text(item, "providerKey");
         var model = MobileAlta.Text(selection, "modelId");

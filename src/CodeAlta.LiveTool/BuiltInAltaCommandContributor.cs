@@ -964,7 +964,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         command.Add(async (_, _) => await HandleSessionShowAsync(context, sessionId, "alta.session.status").ConfigureAwait(false));
         AddHelpText(command, "Example: `alta session status <session-id>` after choosing a session from `alta session list`.",
-            "`transitionInProgress`, `queueDrainInProgress` and `heldElsewhere` say what holds the session besides a run: it cannot be deleted, archived or moved meanwhile.");
+            "`transitionInProgress`, `queueDrainInProgress` and `heldElsewhere` say what holds the session besides a run: it cannot be deleted, archived or moved meanwhile.",
+            "`promptSuggestion` is what its model suggested as the next prompt, once its last turn ended; absent once another turn started, and when the host shows no suggestion.");
         return command;
     }
 
@@ -2504,20 +2505,26 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ? await BuildCompactMetricsAsync(context, info).ConfigureAwait(false)
             : null;
         WriteSession(context, recordType, info, includeChildren: true, infoResult.Infos, metrics, await SessionSandboxRecordAsync(context, info.Session.SessionId).ConfigureAwait(false),
-            recordType is "alta.session.status" ? await SessionHoldsAsync(context, info.Session.SessionId).ConfigureAwait(false) : null);
+            recordType is "alta.session.status" ? await SessionStatusFactsAsync(context, info.Session.SessionId).ConfigureAwait(false) : null);
         return AltaExitCodes.Success;
     }
 
-    // What holds a session besides a run, and refuses its deletion, its archiving or its move meanwhile.
-    private sealed record SessionHolds(bool TransitionInProgress, bool QueueDrainInProgress, object? HeldElsewhere);
+    // What only `session status` says: what holds a session besides a run (it refuses its deletion, its archiving or its
+    // move meanwhile), and the prompt its model suggested, as a frontend shows it.
+    private sealed record SessionStatusFacts(bool TransitionInProgress, bool QueueDrainInProgress, object? HeldElsewhere, string? PromptSuggestion);
 
-    private static async Task<SessionHolds?> SessionHoldsAsync(AltaCommandContext context, string sessionId)
+    private static async Task<SessionStatusFacts?> SessionStatusFactsAsync(AltaCommandContext context, string sessionId)
     {
         if (context.Services.Get<SessionRuntimeService>() is not { } runtime) return null;
-        var state = await runtime.GetCurrentStateAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
+        var state = await runtime.GetShownStateAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
         var holder = runtime.GetSessionLeaseHolderElsewhere(sessionId);
+        // The suggestion of the attachment between its runs, else the one the journal keeps of a session detached once idle.
+        var suggestion = state.Entry is { } entry
+            ? entry.IsTerminated || entry.IsRetiring || entry.ActiveRunId is not null ? null : entry.PromptSuggestion
+            : state.PromptSuggestion;
         return new(state.CoordinatorTransitionInProgress, state.Entry?.QueueDrainInProgress ?? false,
-            holder is null ? null : new { ownerKind = holder.OwnerKind, processId = holder.ProcessId });
+            holder is null ? null : new { ownerKind = holder.OwnerKind, processId = holder.ProcessId },
+            AgentPromptSuggestionEvent.Normalize(suggestion));
     }
 
     private static async ValueTask<int> HandleSessionMetricsAsync(AltaCommandContext context, string? sessionId, string? scope)
@@ -7196,7 +7203,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         });
 
     private static void WriteSession(AltaCommandContext context, string type, AltaSessionInfo info, bool includeChildren, IReadOnlyList<AltaSessionInfo> infos, SessionMetrics? metrics = null,
-        object? sandbox = null, SessionHolds? holds = null)
+        object? sandbox = null, SessionStatusFacts? facts = null)
     {
         var children = includeChildren ? GetChildren(infos, info, recursive: false).ToArray() : [];
         AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -7230,9 +7237,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             isRunning = info.IsRunning,
             queuedPromptCount = info.QueuedPromptCount,
             // Written by session status only.
-            transitionInProgress = holds?.TransitionInProgress,
-            queueDrainInProgress = holds?.QueueDrainInProgress,
-            heldElsewhere = holds?.HeldElsewhere,
+            promptSuggestion = facts?.PromptSuggestion,
+            transitionInProgress = facts?.TransitionInProgress,
+            queueDrainInProgress = facts?.QueueDrainInProgress,
+            heldElsewhere = facts?.HeldElsewhere,
             agentPromptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             promptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             modelSelection = ToModelSelectionPayload(CreateModelSelection(info.Session, info.Preference), info.Session.AgentPromptId),
