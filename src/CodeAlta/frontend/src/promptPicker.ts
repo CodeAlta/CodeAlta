@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { PromptInput } from "./PromptEditor";
+import { promptTypeEvent } from "./promptTyping";
 
 /** The token at the caret that opened a picker, with the prompt text it was found in. */
 export type PromptTrigger = Readonly<{ text: string; start: number; end: number; query: string }>;
@@ -126,6 +127,11 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
       else if (typesPromptTrigger(event, latest.current.typedOnly)) typedAt = Math.min(element.selectionStart, element.selectionEnd);
       else if (event.key.length > 1 && !typingModifiers.has(event.key)) typedAt = null;
     };
+    // A key pressed outside the prompt and given to it (the timeline had the focus) types as one pressed in it: the prompt
+    // sees no key then, only this request, before the editor types the character at the caret.
+    const redirected = (event: Event) => {
+      if ((event as CustomEvent<unknown>).detail === latest.current.typedOnly) typedAt = Math.min(element.selectionStart, element.selectionEnd);
+    };
     // Captured before the editor, which would otherwise show its own suggestions for Ctrl+Space.
     const reopen = (event: Event) => {
       if (event instanceof KeyboardEvent && isPromptPickerReopenKey(event) && show(true)) { event.preventDefault(); event.stopPropagation(); }
@@ -138,6 +144,7 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
     element.addEventListener("paste", paste, true); element.addEventListener("drop", paste, true);
     element.addEventListener("input", inspect); element.addEventListener("keyup", inspect); element.addEventListener("click", inspect);
     element.addEventListener("keydown", pressed, true); element.addEventListener("pointerdown", pressed, true); element.addEventListener("keydown", reopen, true);
+    element.addEventListener(promptTypeEvent, redirected, true);
     element.addEventListener("compositionstart", begin); element.addEventListener("compositionend", end);
     return () => {
       gone = true;
@@ -145,6 +152,7 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus, t
       element.removeEventListener("paste", paste, true); element.removeEventListener("drop", paste, true);
       element.removeEventListener("input", inspect); element.removeEventListener("keyup", inspect); element.removeEventListener("click", inspect);
       element.removeEventListener("keydown", pressed, true); element.removeEventListener("pointerdown", pressed, true); element.removeEventListener("keydown", reopen, true);
+      element.removeEventListener(promptTypeEvent, redirected, true);
       element.removeEventListener("compositionstart", begin); element.removeEventListener("compositionend", end);
     };
   }, [input]);

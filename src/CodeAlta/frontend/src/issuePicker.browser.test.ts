@@ -214,6 +214,13 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     assert.equal(await evaluate(prompt), "Review PR #123");
     await typed(" #");
     assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a typed # opens the picker again");
+    await key("Escape", "Escape", 27);
+    assert.equal(await until(`!${dialog}`), true);
+    // A # pressed while the timeline has the focus is given to the prompt, which sees no key: the request to type it counts as one.
+    await command("Input.insertText", { text: " " });
+    await evaluate("document.querySelector('#prompt').dispatchEvent(new CustomEvent('codealta:prompt-type', { detail: '#', cancelable: true }))");
+    await command("Input.insertText", { text: "#" });
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length > 0`), true, "a # typed from outside the prompt opens the picker");
 
     // Closed issues are left out until asked for: the host is told so, and Ctrl+I asks for them.
     const issueRows = "document.querySelectorAll('.reference-item[data-kind=\"issue\"]').length";
