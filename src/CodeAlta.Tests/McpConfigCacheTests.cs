@@ -181,6 +181,64 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task OAuthTokenCache_KeepsTheClientTheTokensWereIssuedTo()
+    {
+        var path = Path.Combine(_home.Path, "tokens", "docs.json");
+        var cache = new McpOAuthTokenCache(path);
+        var stored = new TokenContainer
+        {
+            TokenType = "Bearer",
+            AccessToken = "access-token-value",
+            RefreshToken = "refresh-token-value",
+            ExpiresIn = 3600,
+            Scope = "read",
+            ObtainedAt = new DateTimeOffset(2026, 10, 18, 12, 0, 0, TimeSpan.Zero),
+            ClientId = "registered-client",
+            ClientSecret = "registered-secret",
+            TokenEndpointAuthMethod = "client_secret_post",
+            AuthorizationServer = "https://auth.example.test",
+        };
+
+        // The SDK refreshes in a new process only with the client the tokens were issued to.
+        await cache.StoreTokensAsync(stored, CancellationToken.None);
+        var read = await cache.GetTokensAsync(CancellationToken.None);
+        Assert.IsNotNull(read);
+        Assert.AreEqual(
+            (stored.TokenType, stored.AccessToken, stored.RefreshToken, stored.ExpiresIn, stored.Scope, stored.ObtainedAt, stored.ClientId, stored.ClientSecret, stored.TokenEndpointAuthMethod, stored.AuthorizationServer),
+            (read.TokenType, read.AccessToken, read.RefreshToken, read.ExpiresIn, read.Scope, read.ObtainedAt, read.ClientId, read.ClientSecret, read.TokenEndpointAuthMethod, read.AuthorizationServer));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.AreEqual(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
+
+        // A public client has no secret: none is written, and none is read back.
+        await cache.StoreTokensAsync(new TokenContainer
+        {
+            TokenType = "Bearer",
+            AccessToken = "access-token-value",
+            ObtainedAt = stored.ObtainedAt,
+            ClientId = "public-client",
+            TokenEndpointAuthMethod = "none",
+            AuthorizationServer = "https://auth.example.test",
+        }, CancellationToken.None);
+        using (var document = JsonDocument.Parse(File.ReadAllBytes(path)))
+        {
+            Assert.IsFalse(document.RootElement.TryGetProperty("client_secret", out _));
+            Assert.AreEqual("public-client", document.RootElement.GetProperty("client_id").GetString());
+        }
+
+        Assert.IsNull((await cache.GetTokensAsync(CancellationToken.None))!.ClientSecret);
+
+        // A file written before the client was kept still loads, without a client: the next sign-in adds it.
+        File.WriteAllText(path, """{"token_type":"Bearer","access_token":"old-token","refresh_token":"old-refresh","expires_in":3600,"obtained_at":"2026-10-18T12:00:00+00:00"}""");
+        var old = await cache.GetTokensAsync(CancellationToken.None);
+        Assert.IsNotNull(old);
+        Assert.AreEqual("old-refresh", old.RefreshToken);
+        Assert.IsNull(old.ClientId);
+        Assert.IsNull(old.AuthorizationServer);
+    }
+
+    [TestMethod]
     public async Task TheToolCallsOfASession_DoNotReadTheConfigurationAgain_UntilAFileOfItChanges()
     {
         using var project = TempDirectory.Create();
