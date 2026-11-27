@@ -1100,6 +1100,67 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task HttpServer_RefreshesAnExpiredOAuthTokenWithTheClientItWasIssuedTo()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        await using var server = InvalidOAuthHttpMcpServer.StartAuthorizing();
+        Directory.CreateDirectory(Path.Combine(project.Path, ".alta"));
+        File.WriteAllText(
+            McpConfigDiscovery.GetProjectConfigPath(project.Path),
+            JsonSerializer.Serialize(new
+            {
+                mcpServers = new Dictionary<string, object>
+                {
+                    ["remote"] = new { url = server.Endpoint, auth = new { type = "oauth" } },
+                },
+            }));
+        // A sign-in of an earlier process, with a client registered dynamically, whose access token has expired.
+        var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(home.Path, "remote", server.Endpoint));
+        await cache.StoreTokensAsync(new TokenContainer
+        {
+            TokenType = "Bearer",
+            AccessToken = "expired-token",
+            RefreshToken = "refresh-token-value",
+            ExpiresIn = 3600,
+            ObtainedAt = DateTimeOffset.UtcNow.AddHours(-2),
+            ClientId = "registered-client",
+            TokenEndpointAuthMethod = "none",
+            AuthorizationServer = server.Issuer,
+        }, CancellationToken.None);
+
+        McpRuntimeToolSearchResult search;
+        await using (var service = new McpRuntimeService(_home.Path))
+        {
+            search = await service.SearchToolsAsync(
+                new McpRuntimeRequest
+                {
+                    ProjectDirectory = project.Path,
+                    UserHomeDirectory = home.Path,
+                    OAuthStatus = _ => Assert.Fail("A refresh needs no browser sign-in."),
+                },
+                "remote",
+                null,
+                CancellationToken.None);
+        }
+
+        Assert.AreEqual(0, search.Diagnostics.Count, string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)) + Environment.NewLine + server.ErrorSummary);
+        Assert.IsTrue(search.Tools.Any(static tool => tool.Name == "echo"));
+        Assert.AreEqual(0, server.RegistrationRequestCount, "The client of the cached tokens is used again, not registered anew.");
+        Assert.AreEqual(0, server.AuthorizationRequestCount);
+        var refresh = server.TokenRequests.Single();
+        Assert.AreEqual("refresh_token", refresh["grant_type"]);
+        Assert.AreEqual("refresh-token-value", refresh["refresh_token"]);
+        Assert.AreEqual("registered-client", refresh["client_id"]);
+        var refreshed = await cache.GetTokensAsync(CancellationToken.None);
+        Assert.IsNotNull(refreshed);
+        Assert.AreEqual(server.IssuedToken, refreshed.AccessToken);
+        Assert.AreEqual("refresh-token-value", refreshed.RefreshToken, "A refresh answer without a new refresh token keeps the previous one.");
+        Assert.AreEqual("registered-client", refreshed.ClientId, "The next process can refresh again.");
+        Assert.AreEqual(server.Issuer, refreshed.AuthorizationServer);
+    }
+
+    [TestMethod]
     public async Task HttpServer_OAuthLoginInvalidTokenDoesNotPublishUnobservedTaskException()
     {
         using var home = TempDirectory.Create();
@@ -1474,7 +1535,8 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     // An OAuth-protected MCP server whose token is refused, or, when it accepts the tokens it issues, one that
-    // answers 401 to the first anonymous request as a real authorization server does (Polaris for example).
+    // answers 401 to the first anonymous request as a real authorization server does (Polaris for example). It
+    // registers a new public client at each dynamic registration request.
     private sealed class InvalidOAuthHttpMcpServer : IAsyncDisposable
     {
         private const string InvalidToken = "invalid-token";
@@ -1485,7 +1547,9 @@ public sealed partial class McpRuntimeServiceTests
         private readonly Task _acceptLoop;
         private readonly object _syncRoot = new();
         private readonly List<string> _errors = [];
+        private readonly List<IReadOnlyDictionary<string, string>> _tokenRequests = [];
         private int _authorizationRequestCount;
+        private int _registrationRequestCount;
 
         private InvalidOAuthHttpMcpServer(bool acceptIssuedToken)
         {
@@ -1501,6 +1565,26 @@ public sealed partial class McpRuntimeServiceTests
         public string Endpoint { get; }
 
         public int AuthorizationRequestCount => Volatile.Read(ref _authorizationRequestCount);
+
+        public int RegistrationRequestCount => Volatile.Read(ref _registrationRequestCount);
+
+        /// <summary>The access token the token endpoint issues, which the MCP endpoint of an authorizing server accepts.</summary>
+        public string IssuedToken => _acceptIssuedToken ? ValidToken : InvalidToken;
+
+        /// <summary>The authorization server the protected-resource metadata names.</summary>
+        public string Issuer => BaseUri.GetLeftPart(UriPartial.Authority);
+
+        /// <summary>The form fields of each request to the token endpoint, in order.</summary>
+        public IReadOnlyList<IReadOnlyDictionary<string, string>> TokenRequests
+        {
+            get
+            {
+                lock (_syncRoot)
+                {
+                    return [.. _tokenRequests];
+                }
+            }
+        }
 
         private Uri BaseUri { get; }
 
@@ -1586,7 +1670,7 @@ public sealed partial class McpRuntimeServiceTests
                         JsonSerializer.Serialize(new
                         {
                             resource = Endpoint,
-                            authorization_servers = new[] { BaseUri.GetLeftPart(UriPartial.Authority) },
+                            authorization_servers = new[] { Issuer },
                         }),
                         cancellationToken).ConfigureAwait(false);
                 }
@@ -1600,6 +1684,7 @@ public sealed partial class McpRuntimeServiceTests
                             issuer = BaseUri.GetLeftPart(UriPartial.Authority),
                             authorization_endpoint = new Uri(BaseUri, "authorize").ToString(),
                             token_endpoint = new Uri(BaseUri, "token").ToString(),
+                            registration_endpoint = new Uri(BaseUri, "register").ToString(),
                             response_types_supported = new[] { "code" },
                             grant_types_supported = new[] { "authorization_code", "refresh_token" },
                             token_endpoint_auth_methods_supported = new[] { "none" },
@@ -1612,14 +1697,36 @@ public sealed partial class McpRuntimeServiceTests
                     Interlocked.Increment(ref _authorizationRequestCount);
                     WriteAuthorizationRedirect(context);
                 }
+                else if (string.Equals(path, "/register", StringComparison.Ordinal))
+                {
+                    var registration = Interlocked.Increment(ref _registrationRequestCount);
+                    await WriteJsonAsync(
+                        context,
+                        201,
+                        JsonSerializer.Serialize(new
+                        {
+                            client_id = "registered-client-" + registration.ToString(CultureInfo.InvariantCulture),
+                            token_endpoint_auth_method = "none",
+                        }),
+                        cancellationToken).ConfigureAwait(false);
+                }
                 else if (string.Equals(path, "/token", StringComparison.Ordinal))
                 {
+                    using (var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8))
+                    {
+                        var form = ParseForm(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false));
+                        lock (_syncRoot)
+                        {
+                            _tokenRequests.Add(form);
+                        }
+                    }
+
                     await WriteJsonAsync(
                         context,
                         200,
                         JsonSerializer.Serialize(new
                         {
-                            access_token = _acceptIssuedToken ? ValidToken : InvalidToken,
+                            access_token = IssuedToken,
                             token_type = "Bearer",
                             expires_in = 3600,
                         }),
@@ -1718,6 +1825,20 @@ public sealed partial class McpRuntimeServiceTests
             context.Response.ContentLength64 = bodyBytes.Length;
             await context.Response.OutputStream.WriteAsync(bodyBytes, cancellationToken).ConfigureAwait(false);
             context.Response.Close();
+        }
+
+        private static Dictionary<string, string> ParseForm(string body)
+        {
+            var form = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var separator = pair.IndexOf('=', StringComparison.Ordinal);
+                var key = separator < 0 ? pair : pair[..separator];
+                var value = separator < 0 ? string.Empty : pair[(separator + 1)..];
+                form[WebUtility.UrlDecode(key)] = WebUtility.UrlDecode(value);
+            }
+
+            return form;
         }
 
         private static void TryClose(HttpListenerContext context)

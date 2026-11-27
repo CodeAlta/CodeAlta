@@ -77,6 +77,10 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
             ExpiresIn = token.ExpiresIn,
             Scope = token.Scope,
             ObtainedAt = token.ObtainedAt,
+            ClientId = token.ClientId,
+            ClientSecret = token.ClientSecret,
+            TokenEndpointAuthMethod = token.TokenEndpointAuthMethod,
+            AuthorizationServer = token.AuthorizationServer,
         };
         await SafeFile.WriteAllBytesAsync(_path, JsonSerializer.SerializeToUtf8Bytes(state, McpOAuthJsonContext.Default.McpOAuthTokenState), cancellationToken)
             .ConfigureAwait(false);
@@ -139,6 +143,10 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
             ExpiresIn = state.ExpiresIn,
             Scope = state.Scope,
             ObtainedAt = state.ObtainedAt,
+            ClientId = state.ClientId,
+            ClientSecret = state.ClientSecret,
+            TokenEndpointAuthMethod = state.TokenEndpointAuthMethod,
+            AuthorizationServer = state.AuthorizationServer,
         };
     }
 
@@ -226,6 +234,25 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
 
         [JsonPropertyName("obtained_at")]
         public DateTimeOffset ObtainedAt { get; init; }
+
+        // The client the tokens were issued to: a new process refreshes them only with that same client, which the
+        // SDK restores from these fields instead of registering a new one. A file without them still loads, and the
+        // next sign-in writes them. Each field is written only when it has a value, so a public client has no secret.
+        [JsonPropertyName("client_id")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ClientId { get; init; }
+
+        [JsonPropertyName("client_secret")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ClientSecret { get; init; }
+
+        [JsonPropertyName("token_endpoint_auth_method")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TokenEndpointAuthMethod { get; init; }
+
+        [JsonPropertyName("authorization_server")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? AuthorizationServer { get; init; }
     }
 
     [JsonSerializable(typeof(McpOAuthTokenState))]
