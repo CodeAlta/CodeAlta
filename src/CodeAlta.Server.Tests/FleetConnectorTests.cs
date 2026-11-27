@@ -465,6 +465,9 @@ public sealed partial class FleetConnectorTests
             connector.Published += (_, result) => results.Enqueue(result);
             connector.Start();
             await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s1"));
+            // The server lists the facts before its answer reaches the connector, which moves its cursor, then tells the answer.
+            await WaitForAsync(() => Task.FromResult(!results.IsEmpty && connector.Cursors.Facts == results.Last().Ack));
+            var beforeDrop = results.Last().Ack;
 
             // The connection drops under the node; the session changes meanwhile.
             transports.Last().Abort();
@@ -473,8 +476,8 @@ public sealed partial class FleetConnectorTests
             await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()) is var listed
                 && listed.Any(session => session.Id == "s1" && session.Version == 2) && listed.Any(session => session.Id == "s2"));
             Assert.IsTrue(transports.Count >= 2, "it reconnected");
-            // The server lists the facts before its answer reaches the connector, which moves its cursor, then tells the answer.
-            await WaitForAsync(() => Task.FromResult(!results.IsEmpty && connector.Cursors.Facts == results.Last().Ack));
+            // The cursor and the answer from before the drop already match: wait for the answer to the batch sent after it.
+            await WaitForAsync(() => Task.FromResult(results.Last().Ack > beforeDrop && connector.Cursors.Facts == results.Last().Ack));
             // Each batch went on from the cursor the server gave back, never repeating a sequence.
             var acks = results.Select(static result => result.Ack).ToArray();
             CollectionAssert.AreEqual(acks.Order().Distinct().ToArray(), acks);
