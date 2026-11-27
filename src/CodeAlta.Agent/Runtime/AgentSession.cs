@@ -3662,7 +3662,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             catch (Exception compactionEx) when (compactionEx is not OperationCanceledException)
             {
                 throw new InvalidOperationException(
-                    "The provider reported a context-overflow error, but automatic compaction recovery could not complete.",
+                    $"The provider reported a context-overflow error, but automatic compaction recovery could not complete: {compactionEx.Message}",
                     compactionEx);
             }
 

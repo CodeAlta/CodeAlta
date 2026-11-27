@@ -4662,7 +4662,9 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
-    public async Task AgentSession_SendAsync_OverflowWithoutKnownLimits_ChunksSummaryInputWithinLastReportedInput()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AgentSession_SendAsync_OverflowWithoutKnownLimits_ChunksSummaryInputWithinLastReportedInput(bool rejectFirstChunk)
     {
         const long lastReportedInputTokens = 2_000;
         using var temp = TestTempDirectory.Create();
@@ -4692,6 +4694,7 @@ public sealed partial class AgentSessionTests
             StringAssert.Contains(
                 Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value,
                 "codealta-compaction-checkpoint");
+            Assert.AreEqual("Final prompt", Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[^1].Parts.Single()).Value);
             return Task.FromResult(CreateTextResponse("Recovered after overflow."));
         });
 
@@ -4708,6 +4711,11 @@ public sealed partial class AgentSessionTests
                 {
                     var payload = Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value;
                     summaryRequests.Add((request.MaxOutputTokens, TokenEstimator.Estimate(payload)));
+                    if (rejectFirstChunk && summaryRequests.Count == 1)
+                    {
+                        throw new AgentTurnExecutionException(new AgentTurnFailure("prompt is too long", IsContextOverflow: true));
+                    }
+
                     return Task.FromResult(CreateStructuredSummaryResponse());
                 },
                 [.. steps]),
@@ -4721,6 +4729,11 @@ public sealed partial class AgentSessionTests
         _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Final prompt") }).ConfigureAwait(false);
 
         Assert.AreEqual(1, overflowAttempts);
+        if (rejectFirstChunk)
+        {
+            Assert.IsTrue(summaryRequests[1].PayloadTokens < summaryRequests[0].PayloadTokens, "The rejected chunk must be reduced before retry.");
+        }
+
         var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
         Assert.IsNotNull(persistedState);
         Assert.AreEqual("overflow", persistedState.LastCompactionTrigger);
@@ -5414,12 +5427,15 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
-    public async Task AgentSession_CompactAsync_SummarizerFailureLeavesStateUntouched()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task AgentSession_CompactAsync_SummarizerFailureLeavesStateUntouched(bool contextOverflow)
     {
         using var temp = TestTempDirectory.Create();
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
         var provider = CreateProvider();
         var summary = CreateSummary("session-summary-failure");
+        var summaryAttempts = 0;
         var state = CreateState("session-summary-failure");
         await store.UpsertSessionAsync(summary).ConfigureAwait(false);
         await store.UpsertStateAsync(state).ConfigureAwait(false);
@@ -5433,7 +5449,16 @@ public sealed partial class AgentSessionTests
             store,
             new ScriptedTurnExecutor(
                 [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
-                (_, _, _) => throw new InvalidOperationException("summary failed"),
+                (_, _, _) =>
+                {
+                    summaryAttempts++;
+                    if (contextOverflow)
+                    {
+                        throw new AgentTurnExecutionException(new AgentTurnFailure("prompt is too long", IsContextOverflow: true));
+                    }
+
+                    throw new InvalidOperationException("summary failed");
+                },
                 (_, _, _) => Task.FromResult(
                     new AgentTurnResponse
                     {
@@ -5468,7 +5493,8 @@ public sealed partial class AgentSessionTests
         var updates = persistedHistory.OfType<AgentSessionUpdateEvent>().ToList();
         var failure = updates.Last();
         Assert.AreEqual(AgentSessionUpdateKind.Warning, failure.Kind);
-        StringAssert.Contains(failure.Message ?? "", "summary failed");
+        StringAssert.Contains(failure.Message ?? "", contextOverflow ? "larger input window" : "summary failed");
+        Assert.IsTrue(contextOverflow ? summaryAttempts is >= 1 and <= 4 : summaryAttempts == 1);
         Assert.IsTrue(updates.FindIndex(static evt => evt.Kind == AgentSessionUpdateKind.CompactionStarted) < updates.IndexOf(failure));
     }
 
