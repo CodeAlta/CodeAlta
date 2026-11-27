@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ShellLanguageContext } from "../shellLanguage";
-import { SessionOptionsFields } from "./SessionOptionsFields";
+import { ContextSizeSelect, SessionOptionsFields } from "./SessionOptionsFields";
 import { changedSessionOptions, defaultSessionOptions, sessionContextSize, sessionFastMode, sessionFastModeFellBack, sessionOptionsOf, storedSessionOptions } from "./sessionOptions";
 
 const render = (node: React.ReactNode, locale = "en") => renderToStaticMarkup(<ShellLanguageContext.Provider value={{ locale: locale as "en", choice: locale as "en", setLanguage: () => {} }}>
@@ -45,6 +45,18 @@ test("the size of context is offered where the model has several: Default with i
   assert.match(html, /Context size/);
   assert.match(html, /<option value="">272k · Default<\/option><option value="272000">272k<\/option><option value="1000000" selected="">1M<\/option>/);
   assert.match(html, /The conversation is compacted before it exceeds this size\./);
+});
+
+test("switching provider models shows only the new model's context sizes before and after choosing one", () => {
+  const context = { contextSizes: [272_000, 1_100_000], contextSize: 272_000 };
+  const select = (value: number) => render(<ContextSizeSelect id="provider-context-size" context={context} value={value} onChange={() => {}} />);
+  const inherited = select(1_000_000);
+  const explicit = select(272_000);
+  for (const html of [inherited, explicit]) {
+    assert.deepEqual([...html.matchAll(/<option value="([^"]*)"/g)].map(match => match[1]), ["", "272000", "1100000"]);
+  }
+  assert.match(inherited, /<option value="" selected="">Default \(272k\)/);
+  assert.match(explicit, /<option value="272000" selected="">272k/);
 });
 
 test("a session runs in the fast mode it chose, else in the one its provider reported, else in the one of its model", () => {

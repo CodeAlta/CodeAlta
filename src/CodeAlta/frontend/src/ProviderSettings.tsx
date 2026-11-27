@@ -62,7 +62,7 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange, icon }
 }
 
 // The size of context of the new sessions of a provider, when their model offers it: one of the sizes of its default model, read from the provider once
-// it is saved and ready (a read would start one that is not). Shown where that model has several sizes, or a size is saved.
+// it is saved and ready (a read would start one that is not). Without a model inventory, a saved size can still be cleared.
 function ProviderContextSize({ epoch, providerId, model, value, disabled, readModels, onChange }: {
   epoch: string; providerId: string | null; model: string | null; value: number | null; disabled: boolean;
   readModels: typeof modelCatalog.models; onChange: (value: number | null) => void;
@@ -78,8 +78,8 @@ function ProviderContextSize({ epoch, providerId, model, value, disabled, readMo
   }, [epoch, providerId, readModels]);
   const defaultModel = models ? defaultModelId(models, model) : null;
   const found = models?.find(item => item.id === defaultModel);
-  const sizes = found?.contextSizes ?? [];
-  if (!sizes.length && !value) return null;
+  const sizes = found ? found.contextSizes : value ? [value] : null;
+  if (!sizes?.length) return null;
   return <FormGroup label={t("Context size")} labelFor="provider-context-size">
     <ContextSizeSelect id="provider-context-size" value={value} context={{ contextSizes: sizes, contextSize: found?.inputTokens }} disabled={disabled} onChange={onChange} />
   </FormGroup>;

@@ -3,7 +3,7 @@ import type { SessionOptionsChoice } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { compactTokens } from "../contextUsage";
 import { useShellLanguage } from "../shellLanguage";
-import { sessionFastMode, sessionOptionsOf, storedSessionOptions, type ModelContextSizes, type SessionOptionsModel } from "./sessionOptions";
+import { offersContextSize, sessionFastMode, sessionOptionsOf, storedSessionOptions, type ModelContextSizes, type SessionOptionsModel } from "./sessionOptions";
 
 /**
  * The options of a session in the form of its Agent chip, under More options: a switch per option with what it does in
@@ -61,9 +61,9 @@ export function ContextSizeSelect({ id, value, context, session = false, disable
   id: string; value: number | null; context: ModelContextSizes; session?: boolean; disabled?: boolean; onChange: (value: number | null) => void;
 }) {
   const { t } = useShellLanguage();
-  // A size chosen for another model stays shown, as the provider form shows a model it does not list.
-  const sizes = [...new Set([...context.contextSizes ?? [], ...(value ? [value] : [])])].sort((left, right) => left - right);
-  return <HTMLSelect fill id={id} value={value ?? ""} disabled={disabled} onChange={event => onChange(event.target.value ? Number(event.target.value) : null)}>
+  const sizes = context.contextSizes ?? [];
+  const selected = offersContextSize(context, value) ? value : "";
+  return <HTMLSelect fill id={id} value={selected} disabled={disabled} onChange={event => onChange(event.target.value ? Number(event.target.value) : null)}>
     <option value="">{!context.contextSize ? t("Default") : session ? `${compactTokens(String(context.contextSize))} · ${t("Default")}`
       : t("Default ({value})", { value: compactTokens(String(context.contextSize)) })}</option>
     {sizes.map(size => <option key={size} value={size}>{compactTokens(String(size))}</option>)}

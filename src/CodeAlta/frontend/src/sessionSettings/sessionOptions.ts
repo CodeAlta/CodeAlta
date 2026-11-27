@@ -15,10 +15,15 @@ export type ModelContextSizes = Readonly<{ contextSizes?: readonly number[] | nu
  */
 export type SessionOptionsModel = ModelContextSizes & Readonly<{ fastMode?: boolean | null }>;
 
+/** Whether the selected model offers this explicit context size. */
+export function offersContextSize(model: ModelContextSizes | null | undefined, size: number | null | undefined): size is number {
+  return size != null && model?.contextSizes?.includes(size) === true;
+}
+
 /** The size of context a session uses where its model has several: the one it chose, else the one of a session that chose none. */
 export function sessionContextSize(model: ModelContextSizes | null | undefined, options: SessionOptionsChoice | null | undefined): number | null {
   const chosen = options?.contextSize;
-  return !model?.contextSizes?.length ? null : chosen && model.contextSizes.includes(chosen) ? chosen : model.contextSize ?? null;
+  return !model?.contextSizes?.length ? null : offersContextSize(model, chosen) ? chosen : model.contextSize ?? null;
 }
 
 /**
@@ -51,7 +56,7 @@ export function sessionOptionsOf(options: SessionOptionsChoice | null | undefine
  */
 export function changedSessionOptions(options: SessionOptionsChoice | null | undefined, model?: SessionOptionsModel | null): number {
   const value = sessionOptionsOf(options);
-  return (value.subSessions ? 0 : 1) + (value.contextSize && model?.contextSizes?.includes(value.contextSize) ? 1 : 0) + (value.private ? 1 : 0)
+  return (value.subSessions ? 0 : 1) + (offersContextSize(model, value.contextSize) ? 1 : 0) + (value.private ? 1 : 0)
     + (value.fastMode != null && model?.fastMode != null && value.fastMode !== model.fastMode ? 1 : 0);
 }
 
