@@ -258,57 +258,45 @@ internal sealed class AgentCompactionSummarizer(
             oversizedAnchorSynopsis,
             preparation.OversizedAnchorMessage is not null);
 
-        var chunks = GetChunksIfNeeded(
-            preparation,
-            latestUserRequest,
-            modelVisibleFileActivity,
-            settings,
-            budget,
-            oversizedAnchorSynopsis,
-            maxOutputTokens);
-
         var summaryInputLimit = GetSummaryInputLimit(budget, maxOutputTokens);
-        if (summaryInputLimit is > 0 &&
-            serialization.EstimatedInputTokens > summaryInputLimit.Value &&
-            currentPass < RecursiveChunkPassLimit &&
-            chunks.Count > 1)
+        if (summaryInputLimit is > 0 && serialization.EstimatedInputTokens > summaryInputLimit &&
+            TrySummarizeInChunks(summaryInputLimit.Value) is { } planned)
         {
-            return await SummarizeChunkedAsync(
+            return await planned.ConfigureAwait(false);
+        }
+
+        AgentCompactionSummaryResponse response;
+        try
+        {
+            response = await ExecuteSummaryRequestAsync(
                     ProviderId,
                     provider,
                     sessionId,
                     modelId,
                     modelInfo,
-                    budget,
                     workingDirectory,
                     state,
-                    preparation,
-                    latestUserRequest,
+                    CreateSystemPrompt(maxOutputTokens, instructions),
+                    serialization.UserMessage,
                     maxOutputTokens,
-                    settings,
-                    fileActivity,
-                    modelVisibleFileActivity,
-                    oversizedAnchorSynopsis,
-                    additionalSummaryCallCount,
-                    currentPass,
-                    instructions,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (AgentTurnExecutionException ex) when (ex.Failure.IsContextOverflow)
+        {
+            // The provider counted more tokens than we estimated. Split this rejected chunk, not the whole
+            // history: the rolling summaries of earlier chunks still stand.
+            cancellationToken.ThrowIfCancellationRequested();
+            var rejectedSize = Math.Min(summaryInputLimit ?? long.MaxValue, serialization.EstimatedInputTokens);
+            if (TrySummarizeInChunks(Math.Max(1, rejectedSize / 2)) is { } retry)
+            {
+                return await retry.ConfigureAwait(false);
+            }
 
-        var response = await ExecuteSummaryRequestAsync(
-                ProviderId,
-                provider,
-                sessionId,
-                modelId,
-                modelInfo,
-                workingDirectory,
-                state,
-                CreateSystemPrompt(maxOutputTokens, instructions),
-                serialization.UserMessage,
-                maxOutputTokens,
-                cancellationToken)
-            .ConfigureAwait(false);
+            throw new InvalidOperationException(
+                "The provider rejected the compaction summary request as too large. CodeAlta could not reduce it further within the retry limit. Try a model with a larger input window or continue in a new session.", ex);
+        }
+
         var normalizedSummary = NormalizeSummary(
             response.Summary,
             latestUserRequest,
@@ -337,6 +325,16 @@ internal sealed class AgentCompactionSummarizer(
             ModifiedFiles: fileActivity.ModifiedFiles,
             ModelVisibleReadFileCount: modelVisibleFileActivity.ReadFiles.Count,
             ModelVisibleModifiedFileCount: modelVisibleFileActivity.ModifiedFiles.Count);
+
+        Task<AgentCompactionResult>? TrySummarizeInChunks(long inputLimit)
+        {
+            if (currentPass >= RecursiveChunkPassLimit) return null;
+            var chunks = GetChunks(preparation, latestUserRequest, modelVisibleFileActivity, settings, inputLimit, oversizedAnchorSynopsis);
+            if (chunks.Count <= 1) return null;
+            return SummarizeChunkedAsync(ProviderId, provider, sessionId, modelId, modelInfo, budget, workingDirectory, state,
+                preparation, chunks, latestUserRequest, maxOutputTokens, settings, fileActivity, modelVisibleFileActivity,
+                oversizedAnchorSynopsis, additionalSummaryCallCount, currentPass, instructions, cancellationToken);
+        }
     }
 
     private async Task<AgentCompactionResult> SummarizeChunkedAsync(
@@ -349,6 +347,7 @@ internal sealed class AgentCompactionSummarizer(
         string? workingDirectory,
         AgentSessionState state,
         AgentCompactionPreparation preparation,
+        IReadOnlyList<IReadOnlyList<AgentConversationMessage>> chunks,
         string? latestUserRequest,
         int maxOutputTokens,
         AgentCompactionSettings settings,
@@ -360,12 +359,6 @@ internal sealed class AgentCompactionSummarizer(
         string? instructions,
         CancellationToken cancellationToken)
     {
-        var chunks = GetChunksIfNeeded(preparation, latestUserRequest, modelVisibleFileActivity, settings, budget, oversizedAnchorSynopsis, maxOutputTokens);
-        if (chunks.Count <= 1)
-        {
-            chunks = [preparation.MessagesToSummarize];
-        }
-
         var rollingSummary = preparation.PreviousSummary;
         var aggregatedStatistics = new AgentCompactionSerializerStatistics(
             OmittedToolResultCount: 0,
@@ -480,17 +473,16 @@ internal sealed class AgentCompactionSummarizer(
             };
     }
 
-    private IReadOnlyList<IReadOnlyList<AgentConversationMessage>> GetChunksIfNeeded(
+    private static IReadOnlyList<IReadOnlyList<AgentConversationMessage>> GetChunks(
         AgentCompactionPreparation preparation,
         string? latestUserRequest,
         FileActivity modelVisibleFileActivity,
         AgentCompactionSettings settings,
-        AgentTokenBudget budget,
-        string? oversizedAnchorSynopsis,
-        int maxOutputTokens)
+        long inputLimit,
+        string? oversizedAnchorSynopsis)
         => AgentCompactionChunker.CreateChunks(
             preparation.MessagesToSummarize,
-            (int)Math.Clamp(GetSummaryInputLimit(budget, maxOutputTokens) ?? long.MaxValue, 1L, int.MaxValue),
+            (int)Math.Clamp(inputLimit, 1L, int.MaxValue),
             chunkMessages => AgentCompactionSerializer.BuildSummaryRequestBody(
                     preparation with
                     {

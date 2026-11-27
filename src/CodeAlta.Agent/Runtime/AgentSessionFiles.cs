@@ -146,6 +146,18 @@ public sealed record AgentSessionSummary
     /// Gets or initializes additional summary metadata.
     /// </summary>
     public JsonElement? Metadata { get; init; }
+
+    internal AgentSessionSummary TransferToProvider(ModelProviderId providerId, AgentSessionState state, string? modelId, AgentReasoningEffort? reasoningEffort)
+        => this with
+        {
+            ProviderId = providerId,
+            ProviderKey = state.ProviderKey,
+            ProtocolFamily = state.ProtocolFamily,
+            ModelId = modelId,
+            ReasoningEffort = reasoningEffort,
+            Usage = state.Usage,
+            UpdatedAt = state.UpdatedAt,
+        };
 }
 
 /// <summary>
@@ -245,6 +257,20 @@ public sealed record AgentSessionState
     /// the order they were loaded: the plugins register those tools again at each run.
     /// </summary>
     public IReadOnlyList<string> LoadedTools { get; init; } = [];
+
+    // Only the journal checkpoint and its tail are portable. A native window, cache or continuation describes
+    // the old provider. Date the reset so a resume does not repair it with earlier usage from the journal.
+    internal AgentSessionState TransferToProvider(string providerKey, string protocolFamily, DateTimeOffset now)
+        => this with
+        {
+            ProviderKey = providerKey,
+            ProtocolFamily = protocolFamily,
+            ProviderSessionId = null,
+            ProviderState = null,
+            ProviderBranch = null,
+            Usage = new AgentSessionUsage(Source: AgentUsageSource.LocalEstimate, UpdatedAt: now),
+            UpdatedAt = now,
+        };
 }
 
 /// <summary>The payload of a <c>local.toolLoad</c> event: tools a tool call loaded into the session.</summary>

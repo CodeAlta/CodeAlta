@@ -256,10 +256,10 @@ Reasoning effort is chosen per provider and model:
 
 The context ring below the prompt measures the session against the model's input limit. When only the total context window is known, CodeAlta uses it as the input limit; when the output limit is known too, the input limit is the context window minus the output limit.
 
-When the context reaches 95% of that limit, CodeAlta compacts the conversation: a summary takes the place of the earlier turns. Claude Code and the agents of the ACP registry compact their own context.
+When the context reaches 95% of that limit, CodeAlta compacts the conversation: a summary takes the place of the earlier turns. Claude Code and the agents of the ACP registry compact their own context. When you switch providers, CodeAlta estimates the history the new provider will receive: the last CodeAlta checkpoint and the messages after it, or the recorded conversation if there is no checkpoint. This estimate can exceed the new model's input limit before compaction.
 
 Some models offer several context sizes: on Codex and Codex CLI, the model's maximum; on Claude Code, 200K or 1M for a model of 1M tokens; on Copilot, the size of a model's standard price, by default, or the larger size of its long-context price; on the Anthropic API, 200K for a model of more tokens; on the OpenAI API, a GPT-6 model's standard price (272K), by default, or its whole input. On a provider of the OpenAI or Anthropic protocols, a model whose price rises past a prompt size can also keep to that size. Choose one under **Context size** in the provider's settings, or for one session in **More options** of the Agent chip. The chosen size becomes the input limit.
 
 - When a model's input limit is unknown, compaction assumes 128,000 tokens.
-- After a context-overflow error, it uses the size of the last request the provider accepted, and summarizes the conversation in parts that fit in it.
+- After a context-overflow error, CodeAlta uses the size of the last request the provider accepted to split the conversation for summarization. If the provider rejects a part as too large, CodeAlta retries with smaller parts. If it cannot reduce the request further, switch to a model with a larger input window or continue in a new session.
 - Set the real limits in [model metadata overrides](configuration.md#model-metadata-overrides), and tune compaction in [compaction settings](configuration.md#compaction-settings). Most users keep the defaults.

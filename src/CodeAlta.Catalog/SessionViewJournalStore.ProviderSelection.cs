@@ -73,10 +73,8 @@ public sealed partial class SessionViewJournalStore
             ?? new SessionViewLocalState();
         ThrowIfWorkPending(original.History, local, "switching providers");
         var now = DateTimeOffset.UtcNow;
-        var summary = original.Summary with { ProviderId = target.ProviderId, ProviderKey = target.ProviderId.Value,
-            ProtocolFamily = target.ProviderType, ModelId = carryOver?.ModelId, ReasoningEffort = carryOver?.ReasoningEffort, UpdatedAt = now };
-        var state = original.State with { ProviderKey = target.ProviderId.Value, ProtocolFamily = target.ProviderType,
-            ProviderSessionId = null, ProviderState = null, UpdatedAt = now };
+        var state = original.State.TransferToProvider(target.ProviderId.Value, target.ProviderType, now);
+        var summary = original.Summary.TransferToProvider(target.ProviderId, state, carryOver?.ModelId, carryOver?.ReasoningEffort);
         local.ProviderKey = target.ProviderId.Value;
         local.ModelId = carryOver?.ModelId;
         local.ReasoningEffort = carryOver?.ReasoningEffort;

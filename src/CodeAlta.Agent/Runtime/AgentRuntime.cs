@@ -239,8 +239,8 @@ public sealed class AgentRuntime : IAsyncDisposable
         if (MatchesProvider(snapshot.Summary, provider.Provider))
             throw new InvalidOperationException("Provider transfer requires a different target provider.");
         var now = DateTimeOffset.UtcNow;
-        var summary = TransferSummaryToProvider(snapshot.Summary, provider.Provider, options, now);
-        var state = TransferStateToProvider(snapshot.State, provider.Provider, now);
+        var state = snapshot.State.TransferToProvider(provider.Provider.ProviderKey, provider.Provider.ProtocolFamily, now);
+        var summary = TransferSummaryToProvider(snapshot.Summary, options, state);
         cancellationToken.ThrowIfCancellationRequested();
         var candidate = new AgentSession(ProviderId, provider.Provider, summary, state, snapshot.History,
             Store, provider.TurnExecutor, options, allowProviderContinuation: false, cachedModels: GetCachedModels(provider)) { ModelCatalog = ResolveModelCatalog(provider), SecretMasker = _options.SecretMasker, RequestGate = provider.RequestGate };
@@ -282,8 +282,8 @@ public sealed class AgentRuntime : IAsyncDisposable
         if (!MatchesProvider(summary, provider.Provider) || !MatchesProvider(state, provider.Provider))
         {
             var now = DateTimeOffset.UtcNow;
-            summary = TransferSummaryToProvider(summary, provider.Provider, options, now);
-            state = TransferStateToProvider(state, provider.Provider, now);
+            state = state.TransferToProvider(provider.Provider.ProviderKey, provider.Provider.ProtocolFamily, now);
+            summary = TransferSummaryToProvider(summary, options, state);
             await Store.UpsertSessionAsync(summary, cancellationToken).ConfigureAwait(false);
             await Store.UpsertStateAsync(state, cancellationToken).ConfigureAwait(false);
         }
@@ -409,35 +409,15 @@ public sealed class AgentRuntime : IAsyncDisposable
 
     private AgentSessionSummary TransferSummaryToProvider(
         AgentSessionSummary summary,
-        ModelProviderRuntimeDescriptor provider,
         AgentSessionResumeOptions options,
-        DateTimeOffset updatedAt)
-        => summary with
+        AgentSessionState state)
+        => summary.TransferToProvider(ProviderId, state, NormalizeOptionalText(options.Model), options.ReasoningEffort) with
         {
-            ProviderId = ProviderId,
-            ProtocolFamily = provider.ProtocolFamily,
-            ProviderKey = provider.ProviderKey,
-            ModelId = NormalizeOptionalText(options.Model),
-            ReasoningEffort = options.ReasoningEffort,
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId) ?? summary.AgentPromptId,
             WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory) ? summary.WorkingDirectory : options.WorkingDirectory,
             WorktreeDirectory = ResumedWorktree(summary, options),
             Title = string.IsNullOrWhiteSpace(options.Title) ? summary.Title : options.Title.Trim(),
             TitleSource = summary.TitleSource ?? options.TitleSource,
-            UpdatedAt = updatedAt,
-        };
-
-    private static AgentSessionState TransferStateToProvider(
-        AgentSessionState state,
-        ModelProviderRuntimeDescriptor provider,
-        DateTimeOffset updatedAt)
-        => state with
-        {
-            ProtocolFamily = provider.ProtocolFamily,
-            ProviderKey = provider.ProviderKey,
-            ProviderSessionId = null,
-            ProviderState = null,
-            UpdatedAt = updatedAt,
         };
 
     private static AgentSessionSummary OverrideSummary(

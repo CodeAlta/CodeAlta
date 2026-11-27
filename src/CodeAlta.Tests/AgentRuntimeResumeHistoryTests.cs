@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Tests;
 
@@ -74,7 +75,7 @@ public sealed class AgentRuntimeResumeHistoryTests
     }
 
     [TestMethod]
-    public async Task SessionMovedToAProviderThatDoesNotKeepIt_IsGivenItsWholeConversation()
+    public async Task NativelyCompactedSessionWithoutPortableCheckpoint_ReplaysAndRecountsItsWholeConversation()
     {
         using var temp = TestTempDirectory.Create();
         string sessionId;
@@ -82,22 +83,50 @@ public sealed class AgentRuntimeResumeHistoryTests
         {
             await using var session = await runtime.CreateSessionAsync(CreateOptions(KeptProviderKey));
             sessionId = session.SessionId;
-            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("one") });
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("one " + new string('x', 600)) });
+            await session.CompactAsync();
         }
 
         var api = new ApiExecutor();
         await using var resumedRuntime = CreateRuntime(temp.Path, new KeptConversationExecutor(), api);
-        await using var resumed = await resumedRuntime.ResumeSessionAsync(sessionId, new AgentSessionResumeOptions
-        {
-            ProviderKey = ApiProviderKey,
-            WorkingDirectory = "C:\\repo\\sample",
-            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-        });
+        await using var resumed = await resumedRuntime.ResumeSessionAsync(sessionId, ResumeOptions(ApiProviderKey));
         await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("two") });
 
         var request = api.Requests.Single();
         Assert.IsNull(request.EarlierConversation);
-        CollectionAssert.AreEqual(new[] { "one", "kept #1", "two" }, Texts(request.Conversation));
+        CollectionAssert.AreEqual(new[] { "one " + new string('x', 600), "kept #1", "two" }, Texts(request.Conversation));
+        Assert.AreEqual(AgentUsageSource.LocalEstimate, request.State.Usage?.Source);
+        Assert.IsGreaterThan(100L, request.State.Usage!.CurrentTokens!.Value, "The old provider counted its compacted context, not the history sent to the new one.");
+    }
+
+    [TestMethod]
+    public async Task NativeCompactionDoesNotReplaceThePortableCheckpointOrLoseItsTailOnTransfer()
+    {
+        using var temp = TestTempDirectory.Create();
+        var api = new ApiExecutor();
+        await using var runtime = CreateRuntime(temp.Path, new KeptConversationExecutor(), api);
+        string sessionId;
+        await using (var session = await runtime.CreateSessionAsync(CreateOptions(ApiProviderKey)))
+        {
+            sessionId = session.SessionId;
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Superseded prefix") });
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Retained task") });
+            await session.CompactAsync();
+        }
+
+        await using (var native = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(KeptProviderKey)))
+        {
+            await native.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Native tail") });
+            await native.CompactAsync();
+        }
+
+        await using var resumed = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(ApiProviderKey));
+        await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Pending prompt") });
+        var replay = api.Requests[^1].Conversation;
+        Assert.IsNotNull(AgentCompactionCheckpoint.TryExtractSummary(replay[0]));
+        var texts = Texts(replay);
+        CollectionAssert.DoesNotContain(texts, "Superseded prefix");
+        CollectionAssert.AreEqual(new[] { "Native tail", "kept #1", "Pending prompt" }, texts[^3..]);
     }
 
     [TestMethod]
@@ -147,9 +176,10 @@ public sealed class AgentRuntimeResumeHistoryTests
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         };
 
-    private static AgentSessionResumeOptions ResumeOptions()
+    private static AgentSessionResumeOptions ResumeOptions(string? providerKey = null)
         => new()
         {
+            ProviderKey = providerKey,
             WorkingDirectory = "C:\\repo\\sample",
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         };
@@ -217,7 +247,7 @@ public sealed class AgentRuntimeResumeHistoryTests
         public bool LoadsEarlierConversation { get; init; }
 
         public Task<AgentCompactionOutcome> CompactAsync(AgentTurnRequest request, CancellationToken cancellationToken)
-            => Task.FromResult(new AgentCompactionOutcome(true, "Compacted by the provider."));
+            => Task.FromResult(new AgentCompactionOutcome(true, "Compacted by the provider.", PostCompactionTokens: 12));
 
         public async Task<AgentTurnResponse> ExecuteTurnAsync(
             AgentTurnRequest request,
