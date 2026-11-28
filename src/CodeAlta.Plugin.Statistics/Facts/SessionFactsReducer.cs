@@ -1733,7 +1733,15 @@ internal static class CostUnits
     /// <param name="unit">The unit the provider gave; null for none.</param>
     /// <returns>The unit to count under.</returns>
     public static string Of(string? unit)
-        => string.IsNullOrWhiteSpace(unit) ? Usd : unit.Equals(Credits, StringComparison.OrdinalIgnoreCase) ? Credits : unit.Trim();
+    {
+        if (string.IsNullOrWhiteSpace(unit))
+        {
+            return Usd;
+        }
+
+        var trimmed = unit.Trim();
+        return trimmed.Equals(Credits, StringComparison.OrdinalIgnoreCase) ? Credits : trimmed;
+    }
 }
 
 /// <summary>Counters of what the reducer met that is not a fact: they tell how the definitions fit real journals.</summary>
