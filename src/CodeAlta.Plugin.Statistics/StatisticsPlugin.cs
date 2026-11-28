@@ -144,6 +144,7 @@ public sealed partial class StatisticsPlugin : PluginBase
                 statistics.Duration,
                 ToolCalls = statistics.Tools.Count,
                 statistics.ReportedOperationCount,
+                statistics.ReportedCosts,
                 statistics.ReportedInputTokens,
                 statistics.ReportedFreshInputTokens,
                 statistics.ReportedOutputTokens,
@@ -566,7 +567,7 @@ public sealed partial class StatisticsPlugin : PluginBase
                     MessageCounts.SystemPrompt++;
                     break;
                 case AgentSessionUpdateEvent update:
-                    _providerUsage.Add(update.Usage?.LastOperation);
+                    _providerUsage.Add(update.Usage?.LastOperation, update.Kind == AgentSessionUpdateKind.UsageUpdated);
 
                     _compactions.Add(update);
 
@@ -690,6 +691,7 @@ public sealed partial class StatisticsPlugin : PluginBase
                 tools,
                 BuildBuckets(tools),
                 providerUsage.OperationCount,
+                providerUsage.Costs,
                 providerUsage.InputTokens,
                 providerUsage.FreshInputTokens,
                 providerUsage.OutputTokens,
@@ -1350,6 +1352,7 @@ public sealed partial class StatisticsPlugin : PluginBase
 
     private sealed record ProviderUsageSnapshot(
         int OperationCount,
+        IReadOnlyList<ProviderCost> Costs,
         long? InputTokens,
         long? FreshInputTokens,
         long? OutputTokens,
@@ -1358,6 +1361,8 @@ public sealed partial class StatisticsPlugin : PluginBase
         long? CacheWriteTokens,
         long? ReasoningTokens,
         double? DurationMs);
+
+    private sealed record ProviderCost(string Unit, double Amount);
 
     private sealed class ProviderUsageAccumulator
     {
@@ -1370,19 +1375,19 @@ public sealed partial class StatisticsPlugin : PluginBase
         private long? _cacheWriteTokens;
         private long? _reasoningTokens;
         private double? _durationMs;
+        private readonly Dictionary<string, double> _costs = new(StringComparer.Ordinal);
         private AgentOperationUsageSnapshot? _last;
 
-        public void Add(AgentOperationUsageSnapshot? usage)
+        public void Add(AgentOperationUsageSnapshot? usage, bool isRequestReport)
         {
             if (usage is null || !HasUsageData(usage))
             {
                 return;
             }
 
-            // A session update carries the usage of the session, which holds its last request until the next one
-            // answers: the idle update of a turn and a compaction repeat the request an earlier update reported.
-            // An operation equal in every value to the one counted last is that request, not another one.
-            if (usage == _last)
+            // A UsageUpdated event reports a request, so equal cost-only operations are distinct requests. Other
+            // session updates carry the state of the last request: an equal idle or compaction snapshot is repeated usage.
+            if (!isRequestReport && usage == _last)
             {
                 return;
             }
@@ -1399,11 +1404,17 @@ public sealed partial class StatisticsPlugin : PluginBase
             Add(ref _cacheWriteTokens, usage.CacheWriteTokens);
             Add(ref _reasoningTokens, usage.ReasoningTokens);
             Add(ref _durationMs, usage.DurationMs);
+            if (usage.Cost is { } cost && double.IsFinite(cost) && cost >= 0)
+            {
+                var unit = Facts.CostUnits.Of(usage.CostUnit);
+                _costs[unit] = _costs.GetValueOrDefault(unit) + cost;
+            }
         }
 
         public ProviderUsageSnapshot Build()
             => new(
                 _operationCount,
+                [.. _costs.OrderBy(static item => item.Key, StringComparer.Ordinal).Select(static item => new ProviderCost(item.Key, item.Value))],
                 _inputTokens,
                 _freshInputTokens,
                 _outputTokens,
@@ -1420,7 +1431,11 @@ public sealed partial class StatisticsPlugin : PluginBase
                usage.CacheReadTokens is not null ||
                usage.CacheWriteTokens is not null ||
                usage.ReasoningTokens is not null ||
+               HasCost(usage) ||
                usage.DurationMs is not null;
+
+        private static bool HasCost(AgentOperationUsageSnapshot usage)
+            => usage.Cost is { } cost && double.IsFinite(cost) && cost >= 0;
 
         private static void Add(ref long? target, long? value)
         {
@@ -1477,6 +1492,7 @@ public sealed partial class StatisticsPlugin : PluginBase
         IReadOnlyList<ToolCallStatistics> Tools,
         IReadOnlyList<ToolBucketStatistics> Buckets,
         int ReportedOperationCount,
+        IReadOnlyList<ProviderCost> ReportedCosts,
         long? ReportedInputTokens,
         long? ReportedFreshInputTokens,
         long? ReportedOutputTokens,
@@ -1518,7 +1534,7 @@ public sealed partial class StatisticsPlugin : PluginBase
                 ? reasoningTokens - ObservedReasoningOutputTokens
                 : null;
 
-        public bool HasReportedUsage => ReportedInputTokens is not null || ReportedOutputTokens is not null || ReportedReasoningTokens is not null;
+        public bool HasReportedUsage => ReportedInputTokens is not null || ReportedOutputTokens is not null || ReportedReasoningTokens is not null || ReportedCosts.Count > 0;
 
         public double? AssistantTokensPerSecond => Rate(Assistant.EstimatedTokens, AssistantOutputDuration);
 
@@ -1608,6 +1624,14 @@ public sealed partial class StatisticsPlugin : PluginBase
                     .Append(FormatDuration(turn.CompactionDuration));
             }
 
+            foreach (var cost in turn.ReportedCosts)
+            {
+                builder.Append(" · cost ")
+                    .Append(FormatCost(cost.Amount))
+                    .Append(' ')
+                    .Append(EscapeMarkdown(cost.Unit));
+            }
+
             return builder.ToString();
         }
 
@@ -1664,8 +1688,12 @@ public sealed partial class StatisticsPlugin : PluginBase
             }
 
             var builder = new StringBuilder();
-            builder.AppendLine("| Usage | Tokens |").AppendLine("| --- | ---: |");
+            builder.AppendLine("| Usage | Value |").AppendLine("| --- | ---: |");
             AppendTokenLine(builder, "Provider operations", turn.ReportedOperationCount > 0 ? turn.ReportedOperationCount : null);
+            foreach (var cost in turn.ReportedCosts)
+            {
+                AppendCostLine(builder, cost);
+            }
             AppendTokenLine(builder, "Input total (provider aggregate)", turn.ReportedInputTokens);
             AppendTokenLine(builder, "Fresh input (provider aggregate)", turn.ReportedFreshInputTokens);
             AppendTokenLine(builder, "Cached input (provider aggregate)", turn.ReportedCachedInputTokens);
@@ -1717,6 +1745,13 @@ public sealed partial class StatisticsPlugin : PluginBase
             }
         }
 
+        private static void AppendCostLine(StringBuilder builder, ProviderCost cost)
+            => builder.Append("| Cost (provider aggregate, ")
+                .Append(EscapeMarkdown(cost.Unit))
+                .Append(") | ")
+                .Append(FormatCost(cost.Amount))
+                .AppendLine(" |");
+
         private static void AppendSignedTokenLine(StringBuilder builder, string label, long? value)
         {
             if (value is null || value.Value == 0)
@@ -1744,6 +1779,9 @@ public sealed partial class StatisticsPlugin : PluginBase
 
         private static string FormatNumber(long value)
             => value.ToString("N0", CultureInfo.InvariantCulture);
+
+        private static string FormatCost(double value)
+            => Math.Round(value, 10).ToString("R", CultureInfo.InvariantCulture);
 
         private static string EscapeMarkdown(string text)
             => text.Replace("|", "\\|", StringComparison.Ordinal);

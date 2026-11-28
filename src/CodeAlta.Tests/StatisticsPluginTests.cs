@@ -248,7 +248,9 @@ public sealed class StatisticsPluginTests
                         InputTokens: 100,
                         OutputTokens: 50,
                         CachedInputTokens: 20,
-                        ReasoningTokens: 15))),
+                        ReasoningTokens: 15,
+                        Cost: 2.5,
+                        CostUnit: "AI credits"))),
             new AgentSessionUpdateEvent(
                 ProviderId,
                 "session-1",
@@ -260,7 +262,9 @@ public sealed class StatisticsPluginTests
                     LastOperation: new AgentOperationUsageSnapshot(
                         InputTokens: 10,
                         OutputTokens: 30,
-                        ReasoningTokens: 5))),
+                        ReasoningTokens: 5,
+                        Cost: 0.5,
+                        CostUnit: " ai credits "))),
             new AgentActivityEvent(ProviderId, "session-1", startedAt.AddSeconds(1), runId, AgentActivityKind.Turn, AgentActivityPhase.Completed, "turn-1", null, "turn", null),
         };
 
@@ -268,8 +272,10 @@ public sealed class StatisticsPluginTests
 
         var completed = await WaitForDynamicProjectionAsync(result.Single());
         StringAssert.Contains(completed.Markdown, "110 in (provider aggregate) / 80 out (provider aggregate");
+        StringAssert.Contains(completed.Markdown, "cost 3 AI credits");
         var detailsMarkdown = completed.DetailSections.Single().Markdown;
         StringAssert.Contains(detailsMarkdown, "Provider operations | 2");
+        StringAssert.Contains(detailsMarkdown, "Cost (provider aggregate, AI credits) | 3");
         StringAssert.Contains(detailsMarkdown, "Input total (provider aggregate) | 110");
         StringAssert.Contains(detailsMarkdown, "Fresh input (provider aggregate) | 90");
         StringAssert.Contains(detailsMarkdown, "Cached input (provider aggregate) | 20");
@@ -280,6 +286,33 @@ public sealed class StatisticsPluginTests
         StringAssert.Contains(detailsMarkdown, "Observed non-reasoning estimate | 2");
         StringAssert.Contains(detailsMarkdown, "Provider minus observed output | +78");
         StringAssert.Contains(detailsMarkdown, "Provider minus observed reasoning | +20");
+    }
+
+    [TestMethod]
+    public async Task Projection_CountsIdenticalCostOnlyRequestsAndDeduplicatesTheIdleSnapshot()
+    {
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var providerId = new ModelProviderId("copilot");
+        var runId = new AgentRunId("run-cost-only");
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        var operation = new AgentOperationUsageSnapshot(Cost: 1, CostUnit: "AI credits");
+        var usage = new AgentSessionUsage(LastOperation: operation);
+        var events = new AgentEvent[]
+        {
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt, runId, AgentContentKind.User, "user-1", null, "prompt"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(1), runId, AgentSessionUpdateKind.UsageUpdated, null, Usage: usage),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(2), runId, AgentSessionUpdateKind.UsageUpdated, null, Usage: usage),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(3), runId, AgentSessionUpdateKind.Idle, null, Usage: usage),
+        };
+
+        var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+        var completed = await WaitForDynamicProjectionAsync(result.Single());
+
+        StringAssert.Contains(completed.Markdown, "cost 2 AI credits");
+        var detailsMarkdown = completed.DetailSections.Single().Markdown;
+        StringAssert.Contains(detailsMarkdown, "Provider operations | 2");
+        StringAssert.Contains(detailsMarkdown, "Cost (provider aggregate, AI credits) | 2");
     }
 
     [TestMethod]
