@@ -5294,14 +5294,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionActor? existingActor = null)
     {
         var actor = existingActor ?? GetActorForWork(sessionId);
+        var attached = false;
         while (!_disposed)
         {
         Task? transition = null;
+        var detached = false;
         var work = await actor.QueryAsync(
                 async actorCancellationToken =>
                 {
                     if (_transitions.TryGetValue(sessionId, out transition)) return null;
-                    if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated || entry.HasActiveRun || entry.QueueDrainInProgress)
+                    if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
+                    {
+                        // Not attached (a session nobody shows is detached once idle): attached below, unless its queue is held.
+                        detached = !_abortHolds.ContainsKey(sessionId) && !HeldForWorkFolderSwitch(sessionId);
+                        return null;
+                    }
+
+                    if (entry.HasActiveRun || entry.QueueDrainInProgress)
                     {
                         return null;
                     }
@@ -5369,7 +5378,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 },
                 CancellationToken.None)
             .ConfigureAwait(false);
-        if (transition is null) return work;
+        if (transition is null)
+        {
+            // What waits for an idle session that is not attached is sent now, not with its next prompt: it is attached once.
+            if (!detached || attached || !await AttachForQueueAsync(sessionId).ConfigureAwait(false)) return work;
+            attached = true;
+            continue;
+        }
+
         try { await transition.ConfigureAwait(false); }
         catch (ObjectDisposedException failure) when (_forwarding.IsClosed
             && failure.ObjectName == typeof(SessionRuntimeService).FullName)
@@ -5381,6 +5397,32 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // Re-read durable queue state after transition; never reuse the earlier state/item.
         }
         return null;
+    }
+
+    // Attaches a session that is not attached when prompts wait in its queue (AttachForQueue). False when nothing was
+    // attached: no owner attaches, nothing waits, or the session cannot be attached now.
+    private async Task<bool> AttachForQueueAsync(string sessionId)
+    {
+        if (AttachForQueue is not { } attach) return false;
+        try
+        {
+            if (await ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is not { } session) return false;
+            var pending = await GetActorForWork(sessionId).QueryAsync(async token =>
+                (await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false))?.HasPendingQueuedPrompts() == true,
+                CancellationToken.None).ConfigureAwait(false);
+            if (!pending) return false;
+            // The owner reads the session again once nothing else can change where it works.
+            await attach(sessionId).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (!OwnedProviderEventForwarding.HasRetention(exception)
+            && exception is ObjectDisposedException or OperationCanceledException or InvalidOperationException
+                or IOException or ArgumentException or KeyNotFoundException or NotSupportedException)
+        {
+            // Another process holds the session, its provider is gone, or the runtime closes: the queue drains when the
+            // session is given a prompt, which attaches it again.
+            return false;
+        }
     }
 
     private async Task MarkQueuedPromptSubmittedAsync(

@@ -40,7 +40,7 @@ public static class FleetNodeMethods
     /// <summary>Sends a prompt that starts a turn (the idempotency key is the retry key of the owned command).</summary>
     public const string SessionsSend = "sessions.send";
 
-    /// <summary>Queues a prompt for after the running turn.</summary>
+    /// <summary>Queues a prompt: it is sent once the session has no turn at work, at once for a session that is idle.</summary>
     public const string SessionsQueue = "sessions.queue";
 
     /// <summary>Steers the running turn of a session, bound to its exact run.</summary>
@@ -794,7 +794,7 @@ public sealed record FleetSendParams(string SessionId, string Text, FleetModelSe
 
 /// <summary>The parameters of <c>sessions.queue</c>.</summary>
 /// <param name="SessionId">The session.</param>
-/// <param name="Text">The prompt to send after the running turn.</param>
+/// <param name="Text">The prompt to send once the session has no turn at work.</param>
 public sealed record FleetQueueParams(string SessionId, string Text)
 {
     /// <summary>Gets the next prompt's model, effort and agent prompt; null keeps the session's selection.</summary>

@@ -59,7 +59,7 @@ public sealed class SessionFallbackTests
 
         // The run that continues answers: the parent hears the answer, never the error that was replaced.
         var told = await f.WaitForParentAsync(static prompts => prompts.Count > 0);
-        Assert.IsFalse(told.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)), string.Join("\n", told.Select(static p => p.Prompt)));
+        Assert.IsFalse(told.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)), string.Join("\n", told));
         Assert.AreEqual(1, f.Host.Commands.LastFallbacks.Count);
     }
 
@@ -143,7 +143,7 @@ public sealed class SessionFallbackTests
         f.Send("do the work");
         await f.NextSendAsync(f.A);
 
-        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
         Assert.AreEqual(0, f.B.SendCount);
         Assert.AreEqual(0, f.Host.Commands.LastFallbacks.Count);
     }
@@ -243,7 +243,7 @@ public sealed class SessionFallbackTests
         f.Send("do the work");
         await f.NextSendAsync(f.A);
 
-        var told = await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        var told = await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
         Assert.AreEqual(1, told.Count);
         Assert.AreEqual(0, f.B.SendCount);
         Assert.AreEqual("prov-a", (await f.ChildStateAsync()).ProviderKey);
@@ -259,7 +259,7 @@ public sealed class SessionFallbackTests
         f.Send("do the work");
         await f.NextSendAsync(f.A);
 
-        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
         Assert.AreEqual(0, f.B.SendCount);
     }
 
@@ -276,8 +276,8 @@ public sealed class SessionFallbackTests
 
         var card = await f.WaitForCardAsync(AgentSessionUpdateKind.Warning);
         StringAssert.Contains(card.Message, "no other model of the standard tier can take over");
-        var told = await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
-        Assert.AreEqual(1, told.Count(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)),
+        var told = await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        Assert.AreEqual(1, told.Count(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)),
             "Only the last failure is told: the first one was replaced.");
         Assert.IsFalse((card.Message ?? string.Empty).Contains("Resumes", StringComparison.Ordinal), "The resume is off unless the settings turn it on.");
         Assert.AreEqual(0, f.Host.Commands.PendingResumes.Count);
@@ -334,7 +334,7 @@ public sealed class SessionFallbackTests
 
         // The parent waited as for a fallback: it hears the answer of the resumed run, never the failure.
         var told = await f.WaitForParentAsync(static prompts => prompts.Count > 0);
-        Assert.IsFalse(told.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)), string.Join("\n", told.Select(static p => p.Prompt)));
+        Assert.IsFalse(told.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)), string.Join("\n", told));
     }
 
     [TestMethod]
@@ -367,7 +367,7 @@ public sealed class SessionFallbackTests
         Assert.AreEqual("model-a", continuation.Options.Model);
         Assert.AreEqual("prov-a", (await f.ChildStateAsync()).ProviderKey);
         var told = await f.WaitForParentAsync(static prompts => prompts.Count > 0);
-        Assert.IsFalse(told.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        Assert.IsFalse(told.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
     }
 
     [TestMethod]
@@ -392,7 +392,7 @@ public sealed class SessionFallbackTests
         Assert.AreEqual("unknown", f.Host.Commands.ResumeNow(f.Child.SessionId, resume.ResumeId));
         var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "cancelled");
         Assert.AreEqual("Automatic resume cancelled.", card.Message);
-        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
 
         clock.Advance(TimeSpan.FromHours(1));
         Assert.AreEqual(0, clock.PendingTimerCount);
@@ -445,7 +445,7 @@ public sealed class SessionFallbackTests
         var card = await f.WaitForCardAsync(static card => (card.Message ?? string.Empty).Contains("in a row", StringComparison.Ordinal), "maximum");
         StringAssert.Contains(card.Message, "It resumed by itself once in a row: choose another model, or send again after the reset.");
         Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
-        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
     }
 
     [TestMethod]
@@ -691,6 +691,10 @@ public sealed class SessionFallbackTests
 
         internal ScriptedProvider A { get; } = new("prov-a", "model-a", [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass]);
         internal ScriptedProvider B { get; private set; } = null!;
+
+        // The parent runs on its own provider: what it is told runs a turn of it (a session that is not attached is attached
+        // for its queue), and takes nothing of the sends of the child.
+        internal ScriptedProvider ParentProvider { get; } = new("prov-parent", "model-parent", [SessionPermissionModes.Ask]);
         internal CodeAltaHost Host { get; private set; } = null!;
         internal SessionViewJournalStore Journal { get; private set; } = null!;
         internal SessionViewDescriptor Parent { get; private set; } = null!;
@@ -738,10 +742,10 @@ public sealed class SessionFallbackTests
             var catalog = new CatalogOptions { GlobalRoot = global };
             var projectId = (await new ProjectCatalog(catalog).UpsertFromPathAsync(project, CancellationToken.None)).Id;
             Journal = new SessionViewJournalStore(catalog);
-            Parent = await PersistAsync(projectId, project, "Parent", parentSessionId: null, permissionMode: null);
+            Parent = await PersistAsync(ParentProvider, projectId, project, "Parent", parentSessionId: null, permissionMode: null);
             // The space of the child, set up before the host reads it.
             var spaceId = childSpace is null ? null : await childSpace(new SpaceCatalog(new ProjectCatalog(catalog)));
-            Child = await PersistAsync(projectId, project, "Child", Parent.SessionId, childPermissionMode, spaceId, childQueue);
+            Child = await PersistAsync(A, projectId, project, "Child", Parent.SessionId, childPermissionMode, spaceId, childQueue);
             _createHost = () => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 TimeProvider = Clock,
@@ -757,14 +761,15 @@ public sealed class SessionFallbackTests
                 {
                     registry.RegisterOrReplace(A.Descriptor, A.CreateRuntime);
                     registry.RegisterOrReplace(B.Descriptor, B.CreateRuntime);
+                    registry.RegisterOrReplace(ParentProvider.Descriptor, ParentProvider.CreateRuntime);
                 },
             }, CancellationToken.None);
             Host = await _createHost();
             _collector = CollectAsync();
         }
 
-        private async Task<SessionViewDescriptor> PersistAsync(string projectId, string project, string title, string? parentSessionId, string? permissionMode,
-            string? spaceId = null, IReadOnlyList<SessionViewQueuedPrompt>? queue = null)
+        private async Task<SessionViewDescriptor> PersistAsync(ScriptedProvider provider, string projectId, string project, string title, string? parentSessionId,
+            string? permissionMode, string? spaceId = null, IReadOnlyList<SessionViewQueuedPrompt>? queue = null)
         {
             var session = new SessionViewDescriptor
             {
@@ -772,11 +777,11 @@ public sealed class SessionFallbackTests
                 Kind = SessionViewKind.ProjectSession,
                 ProjectRef = projectId,
                 ParentSessionId = parentSessionId,
-                ProviderId = A.Descriptor.ProviderId.Value,
-                ProviderKey = A.Descriptor.ProviderId.Value,
+                ProviderId = provider.Descriptor.ProviderId.Value,
+                ProviderKey = provider.Descriptor.ProviderId.Value,
                 WorkingDirectory = project,
                 Title = title,
-                ModelId = "model-a",
+                ModelId = provider.Model,
                 ReasoningEffort = AgentReasoningEffort.High,
                 AgentPromptId = "default",
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -786,8 +791,8 @@ public sealed class SessionFallbackTests
             await Journal.CreateSessionStore().UpsertSessionAsync(new AgentSessionSummary
             {
                 SessionId = session.SessionId,
-                ProviderId = A.Descriptor.ProviderId,
-                ProviderKey = A.Descriptor.ProviderId.Value,
+                ProviderId = provider.Descriptor.ProviderId,
+                ProviderKey = provider.Descriptor.ProviderId.Value,
                 WorkingDirectory = session.WorkingDirectory,
                 Title = session.Title,
                 CreatedAt = session.CreatedAt,
@@ -800,7 +805,7 @@ public sealed class SessionFallbackTests
             await Journal.CreateSessionStore().UpsertStateAsync(new AgentSessionState
             {
                 SessionId = session.SessionId,
-                ProviderKey = A.Descriptor.ProviderId.Value,
+                ProviderKey = provider.Descriptor.ProviderId.Value,
                 UpdatedAt = session.CreatedAt,
             }, CancellationToken.None);
             await Journal.AppendStateAsync(session, new SessionViewLocalState
@@ -882,15 +887,18 @@ public sealed class SessionFallbackTests
         internal async Task<SessionViewLocalState> ChildStateAsync()
             => (await Journal.ReadLatestStateAsync(Child.SessionId, Child.CreatedAt, CancellationToken.None))!;
 
-        internal async Task<IReadOnlyList<SessionViewQueuedPrompt>> WaitForParentAsync(Func<IReadOnlyList<SessionViewQueuedPrompt>, bool> condition)
+        // What the parent was told: the notifications that wait in its queue, and the turns it ran with them. A notification
+        // leaves the state queued before its turn starts, so none is counted twice.
+        internal async Task<IReadOnlyList<string>> WaitForParentAsync(Func<IReadOnlyList<string>, bool> condition)
         {
             var deadline = DateTimeOffset.UtcNow + Timeout;
             while (true)
             {
-                var prompts = (await Journal.ReadLatestStateAsync(Parent.SessionId, Parent.CreatedAt, CancellationToken.None))?.QueuedPrompts
-                    .Where(static prompt => prompt.Kind == "parent-notify").ToArray() ?? [];
+                var waiting = (await Journal.ReadLatestStateAsync(Parent.SessionId, Parent.CreatedAt, CancellationToken.None))?.QueuedPrompts
+                    .Where(static prompt => prompt.Kind == "parent-notify" && prompt.State == "queued").Select(static prompt => prompt.Prompt) ?? [];
+                string[] prompts = [.. ParentProvider.Texts, .. waiting];
                 if (condition(prompts)) return prompts;
-                if (DateTimeOffset.UtcNow >= deadline) Assert.Fail("The parent was not told: " + string.Join("\n", prompts.Select(static p => p.Prompt)));
+                if (DateTimeOffset.UtcNow >= deadline) Assert.Fail("The parent was not told: " + string.Join("\n", prompts));
                 await Task.Delay(20);
             }
         }
@@ -1000,6 +1008,9 @@ public sealed class SessionFallbackTests
         internal ConcurrentQueue<Outcome> Outcomes { get; } = new();
         internal int SendCount => Volatile.Read(ref _sendCount);
 
+        /// <summary>Gets the text of each send, in order.</summary>
+        internal ConcurrentQueue<string> Texts { get; } = new();
+
         internal async Task<SendRecord> NextSendAsync() => await _sends.Reader.ReadAsync().AsTask().WithinAsync(Timeout);
 
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);
@@ -1053,6 +1064,7 @@ public sealed class SessionFallbackTests
                 var number = Interlocked.Increment(ref owner._sendCount);
                 var run = new AgentRunId($"{owner.Descriptor.ProviderId.Value}-run-{number}");
                 var text = string.Concat(send.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
+                owner.Texts.Enqueue(text);
                 await owner._sends.Writer.WriteAsync(new SendRecord(text, options, send.Provenance), cancellationToken);
                 if (owner.Outcomes.TryDequeue(out var outcome) && outcome.Failure is { } failure)
                 {

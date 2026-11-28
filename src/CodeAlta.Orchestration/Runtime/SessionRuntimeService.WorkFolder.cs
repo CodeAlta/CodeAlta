@@ -241,25 +241,14 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
-    /// Runs what waits in the queue of a session whose folder changed: a change retires its attachment, and only an
-    /// attached session drains its queue. <paramref name="attach"/> attaches it, in its new folder, when prompts wait.
+    /// Runs what waits in the queue of a session whose folder changed: a change retires its attachment, and the drain
+    /// attaches it again (<see cref="AttachForQueue"/>), in its new folder, when prompts wait.
     /// </summary>
-    internal async Task ResumeQueueAfterWorkFolderSwitchAsync(string sessionId, Func<string, Task> attach)
+    internal async Task ResumeQueueAfterWorkFolderSwitchAsync(string sessionId)
     {
         try
         {
             if (_disposed || HeldForWorkFolderSwitch(sessionId)) return;
-            if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
-            {
-                if (await ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is not { } session) return;
-                var pending = await GetActorForWork(sessionId).QueryAsync(async token =>
-                    (await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false))?.HasPendingQueuedPrompts() == true,
-                    CancellationToken.None).ConfigureAwait(false);
-                if (!pending) return;
-                // The owner reads the session again once nothing else can change where it works.
-                await attach(sessionId).ConfigureAwait(false);
-            }
-
             await TryDrainNextQueuedPromptAsync(sessionId).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is ObjectDisposedException or OperationCanceledException or InvalidOperationException

@@ -400,7 +400,10 @@ public sealed partial class FleetNodeClient : IAsyncDisposable, IFleetSessionAcc
         => CallAsync(FleetNodeMethods.SessionsSend, parameters, FleetNodeJsonContext.Default.FleetSendParams,
             FleetNodeJsonContext.Default.FleetCommandResult, retryKey ?? NewRetryKey(), cancellationToken);
 
-    /// <summary>Queues a prompt for after the running turn of a session, the prompt of an agent included (<see cref="FleetQueueParams.Agent"/>).</summary>
+    /// <summary>
+    /// Queues a prompt of a session, the prompt of an agent included (<see cref="FleetQueueParams.Agent"/>): it is sent once the session
+    /// has no turn at work, at once for a session that is idle.
+    /// </summary>
     /// <param name="parameters">The session and the prompt.</param>
     /// <param name="retryKey">The key of the call; null for a new key.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -594,7 +597,7 @@ public sealed partial class FleetNodeClient : IAsyncDisposable, IFleetSessionAcc
         => CallAsync(FleetNodeMethods.SeatsCancel, new FleetSeatRef(id), FleetNodeJsonContext.Default.FleetSeatRef, FleetNodeJsonContext.Default.FleetSeatResult,
             null, cancellationToken);
 
-    /// <summary>Queues a prompt for after the running turn of a session.</summary>
+    /// <summary>Queues a prompt of a session: it is sent once the session has no turn at work, at once for a session that is idle.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="text">The prompt.</param>
     /// <param name="retryKey">The key of the call; null for a new key.</param>

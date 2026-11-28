@@ -133,6 +133,14 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public bool FollowExternalSessions { get; init; }
 
+    /// <summary>
+    /// Gets whether a prompt queued for an idle session the host has not attached (a session nobody shows is detached once
+    /// idle) is sent at once: the host attaches the session again, with what it runs with. Default true; a host that ends
+    /// with its command (<c>altacli</c>) turns it off, so that it never starts a turn it would cut when it exits: the prompt
+    /// then waits for the next prompt of the session.
+    /// </summary>
+    public bool RunsQueuesOfDetachedSessions { get; init; } = true;
+
     /// <summary>Gets the instance-owned startup pass; null authorizes no deletion.</summary>
     public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; init; }
 

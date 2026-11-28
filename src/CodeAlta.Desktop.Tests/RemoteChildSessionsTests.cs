@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -9,6 +10,7 @@ using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
@@ -109,6 +111,86 @@ public sealed class RemoteChildSessionsTests
         StringAssert.Contains(await second.Task.WithinAsync(Patience, token), "The Android tests pass too.");
         var report = await two.Children.ReportAsync(childId, token);
         Assert.AreEqual(("test-node", parent.SessionId), (report!.MachineName, report.ParentSessionId));
+    }
+
+    // `--queue-if-busy` queues only while a turn of the session runs, as for a session of this computer: a prompt to an idle
+    // session of another machine starts its turn, and the agent is told it was accepted.
+    [TestMethod]
+    public async Task APromptWithQueueIfBusy_ToAnIdleSessionOfAnotherMachine_IsSent_AndQueuedOnlyWhileATurnRuns()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        _ = RecordPrompts(two.ParentProvider, 2);
+        var created = await two.Children.CreateAsync(Request(parent.SessionId, "") with { Prompt = null }, token);
+        Assert.AreEqual("created", created.Status, created.Message);
+        var childId = created.SessionId!;
+        await WaitForAsync(() => two.Machine.Listing.Sessions.Any(session => session.Id == childId), "the machine to list the child", token);
+        var commands = DesktopAltaTools.Attach(two.Desktop, new AltaReminderService(new AltaServiceCollection()));
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = parent.SessionId };
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        two.Node.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(release.Task, "The iOS tests pass.", started));
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("The Android tests pass.")));
+
+        async Task<JsonElement> SendAsync(string text)
+        {
+            var result = await commands.InvokeAsync(["session", "send", childId, "--stdin", "--queue-if-busy"], stdin: text, caller: agent, cancellationToken: token);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+            using var record = JsonDocument.Parse(result.Transcript.Split('\n').First(static line => line.Contains("\"alta.session.sent\"", StringComparison.Ordinal)));
+            return record.RootElement.Clone();
+        }
+
+        var idle = await SendAsync("Run the iOS tests.");
+        Assert.AreEqual("accepted", idle.GetProperty("status").GetString(), "the session is idle: the prompt starts its turn");
+        await started.Task.WithinAsync(Patience, token);
+
+        var busy = await SendAsync("Then the Android tests.");
+        Assert.AreEqual("queued", busy.GetProperty("status").GetString(), "a turn runs: the prompt waits for it, never steered into it");
+        release.SetResult();
+        await WaitForAsync(() => two.Node.Provider.Prompts.Any(static prompt => prompt.Contains("Then the Android tests.", StringComparison.Ordinal)),
+            "the queued prompt to run after the turn", token);
+        Assert.IsFalse(two.Node.Provider.Prompts.First(static prompt => prompt.Contains("Run the iOS tests.", StringComparison.Ordinal))
+            .Contains("Then the Android tests.", StringComparison.Ordinal), "the queued prompt was not steered into the first turn");
+    }
+
+    // A machine that runs as many sessions as its owner lets it keeps the prompt of an idle session until a seat is free:
+    // the agent is told it is queued, not that it was refused.
+    [TestMethod]
+    public async Task APromptToAnIdleSessionOfAMachineAtItsLimit_IsQueuedForASeat_AndRunsOnceOneIsFree()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        _ = RecordPrompts(two.ParentProvider, 1);
+        var created = await two.Children.CreateAsync(Request(parent.SessionId, "") with { Prompt = null }, token);
+        Assert.AreEqual("created", created.Status, created.Message);
+        var childId = created.SessionId!;
+        var client = await two.Machine.WaitOnlineAsync(token);
+        await client.SetLimitsAsync(1, token);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        two.Node.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(release.Task, "Done.", entered));
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("The iOS tests pass.")));
+        try
+        {
+            await client.CreateSessionAsync(new FleetCreateSessionParams(Prompt: "Take the only seat."), cancellationToken: token);
+            await entered.Task.WithinAsync(Patience, token);
+
+            var sent = await two.Children.SendAsync(new RemoteMessageRequest(parent.SessionId, childId, "Run the iOS tests.", "send")
+                { SpaceId = "default", Floor = await two.Desktop.RuntimeService.GetFleetFloorAsync(parent.SessionId, token), QueueIfBusy = true }, token);
+
+            Assert.AreEqual("queued", sent.Status, sent.Message);
+        }
+        finally
+        {
+            release.SetResult();
+        }
+
+        await WaitForAsync(() => two.Node.Provider.Prompts.Any(static prompt => prompt.Contains("Run the iOS tests.", StringComparison.Ordinal)),
+            "the prompt to run once the seat is free", token);
     }
 
     // A session whose tool calls a guard checks (the run of an automation with autonomy) starts nothing on another machine,
