@@ -400,7 +400,9 @@ its own database. Two rules keep one writer per session across processes:
   since the journal alone would still be writable. The lease goes when the attachment goes
   for good (after its retirement) and no hold is left. A frontend says what it shows (`SetShownSessions`); from then
   on a session it does not show is detached once it has had nothing to do for a while (no run, queue, job, background
-  task, pending agent prompt or remote control), so a closed tab lets another process continue the session.
+  task, pending agent prompt or remote control), so a closed tab lets another process continue the session. A prompt
+  queued for an idle session that is not attached runs at once: the drain has the owner attach it again, with what it
+  runs with (`AttachForQueue`); `altacli`, which ends with its command, leaves it for the next prompt of the session.
 - **Moves.** A session given to another machine (`SessionMoveService`) is frozen while it moves and relinquished once
   the move is committed, by a file beside its lease (`<id>.moved`). The checks of the lease (`HoldForWrite`, the claim of
   an attachment) read it once the lease is held, so every writer of the sessions folder, the command line included,

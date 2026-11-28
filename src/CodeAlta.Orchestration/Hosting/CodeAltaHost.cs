@@ -51,7 +51,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         bool enableOwnedUserInput,
         IStartupScratchpadCleanup? startupScratchpadCleanup,
         SessionRetentionProtection retentionProtection,
-        bool followExternalSessions)
+        bool followExternalSessions,
+        bool runsQueuesOfDetachedSessions)
     {
         CatalogOptions = catalogOptions;
         StartupScratchpadCleanup = startupScratchpadCleanup;
@@ -72,7 +73,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         pluginRuntime.Adapter.SpaceAssignments ??= new CachedSpaceAssignments(new CodeAltaConfigStore(catalogOptions)).Current;
         ApplicationDatabase = applicationDatabase;
         CurrentProject = currentProject;
-        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
+        Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput,
+            runsQueuesOfDetachedSessions)
         {
             SelectionModels = async (provider, token) =>
             {
@@ -774,7 +776,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 options.EnableOwnedUserInput,
                 startupScratchpadCleanup,
                 retentionProtection,
-                options.FollowExternalSessions);
+                options.FollowExternalSessions,
+                options.RunsQueuesOfDetachedSessions);
             // The markers written while no instance ran are read at once, beside the start of the frontend.
             host.ExternalSessions?.Start();
             // The policies of the organization kept from the last start apply before the first session attaches.

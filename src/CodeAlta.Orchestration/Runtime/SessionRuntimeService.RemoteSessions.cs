@@ -169,6 +169,12 @@ public sealed record RemoteMessageRequest(string SenderSessionId, string Session
     public string? Machine { get; init; }
 
     /// <summary>
+    /// Gets whether a <c>send</c> to a session whose turn runs is queued for after that turn rather than steered into it, as
+    /// <c>--queue-if-busy</c> does on one machine; a session that is idle starts its turn with it.
+    /// </summary>
+    public bool QueueIfBusy { get; init; }
+
+    /// <summary>
     /// Gets the floor of the sender: the machine refuses the prompt for a session that runs in a wider permission mode,
     /// or less confined, than the sender (<c>doc/fleet/security-and-privacy.md</c>, "Remote execution", rule 8).
     /// </summary>

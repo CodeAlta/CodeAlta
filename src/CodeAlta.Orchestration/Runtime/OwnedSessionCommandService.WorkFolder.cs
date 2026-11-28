@@ -12,8 +12,9 @@ public sealed partial class OwnedSessionCommandService
     // The changes of folder that wait for their session to end what it does, by session; under _gate.
     private readonly Dictionary<string, ScheduledWorkFolderSwitch> _scheduledSwitches = new(StringComparer.OrdinalIgnoreCase);
 
-    // The sessions being attached again after a change of their folder, for their queue; under _gate. A change of folder
-    // waits for it (IsOwnerBusy): the attachment is made with what the session records once it is marked here.
+    // The sessions being attached for what waits in their queue (after a change of their folder, or once detached); under
+    // _gate. A change of folder waits for it (IsOwnerBusy): the attachment is made with what the session records once it
+    // is marked here.
     private readonly HashSet<string> _attachingForQueue = new(StringComparer.OrdinalIgnoreCase);
 
     // The sessions whose queue is being run again after a change of their folder, with how many times; under _gate. The
@@ -171,7 +172,7 @@ public sealed partial class OwnedSessionCommandService
             lock (_gate) { if (_closed || _retained) return; }
             if (reconnect && _runtime.RemoteControlWanted(sessionId)) await ReconnectRemoteControlAsync(sessionId).ConfigureAwait(false);
             lock (_gate) { if (_closed || _retained) return; }
-            await _runtime.ResumeQueueAfterWorkFolderSwitchAsync(sessionId, AttachAsync).ConfigureAwait(false);
+            await _runtime.ResumeQueueAfterWorkFolderSwitchAsync(sessionId).ConfigureAwait(false);
         }
         finally
         {
@@ -185,8 +186,9 @@ public sealed partial class OwnedSessionCommandService
         }
     }
 
-    // Attaches a session with what it runs with, as a send does, without sending anything. Marked for the time it takes,
-    // so that no change of its folder runs meanwhile; the session is read once marked.
+    // Attaches a session with what it runs with, as a send does, without sending anything, for what waits in its queue
+    // (SessionRuntimeService.AttachForQueue). Marked for the time it takes, so that no change of its folder runs
+    // meanwhile; the session is read once marked.
     private async Task AttachAsync(string sessionId)
     {
         lock (_gate)

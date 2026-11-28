@@ -196,11 +196,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             PromptDispatchKind.Steer => "steer",
             PromptDispatchKind.Queue => "queue",
-            _ when options.QueueIfBusy => "queue",
             _ => "send",
         };
+        // As on one machine, --queue-if-busy queues only while a turn of the session runs: the machine says whether one does.
         var result = await remote.SendAsync(new RemoteMessageRequest(sender, sessionId, prompt, remoteKind)
-            { SpaceId = space.SpaceId ?? parent?.SpaceId ?? "default", Floor = floor }, context.CancellationToken).ConfigureAwait(false);
+            { SpaceId = space.SpaceId ?? parent?.SpaceId ?? "default", Floor = floor, QueueIfBusy = options.QueueIfBusy }, context.CancellationToken).ConfigureAwait(false);
         if (result.Status == "refused") return MachineRefusal(context, result.Code, result.Message, result.MachineName);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {

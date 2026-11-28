@@ -266,28 +266,39 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
             FleetSessionState? state = null;
             if (kind is FleetAgentRequestKinds.Send or FleetAgentRequestKinds.Steer)
             {
-                // As on one machine: a prompt to a session at work steers its turn; to an idle one, starts a turn.
+                // As on one machine: a prompt to a session at work steers its turn, or waits for it with --queue-if-busy; to an
+                // idle one, starts a turn.
                 state = await client.GetSessionStateAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
-                if (kind == FleetAgentRequestKinds.Send && state.ActiveRunId is not null) kind = FleetAgentRequestKinds.Steer;
+                if (kind == FleetAgentRequestKinds.Send && state.ActiveRunId is not null)
+                    kind = request.QueueIfBusy ? FleetAgentRequestKinds.Queue : FleetAgentRequestKinds.Steer;
                 if (kind == FleetAgentRequestKinds.Steer && (state.ActiveRunId is null || state.AttachmentGeneration is null))
                     return new("refused", "not_running", $"The session '{request.SessionId}' on {name} has no turn at work to steer.", name);
             }
 
-            var signed = _fleet.SignAgentRequest(new FleetAgentRequest(FleetAgentRequest.CurrentVersion, kind, host.MachineId!, "", "", _time.GetUtcNow(), "",
-                request.SenderSessionId, _machineName, request.SpaceId, request.SessionId, null, FleetAgentRequestDocuments.HashText(request.Text), null,
+            // The kind is signed: a send the machine finds busy is queued with a request of its own.
+            FleetSignedAgentRequest Signed(string signedKind) => _fleet.SignAgentRequest(new FleetAgentRequest(FleetAgentRequest.CurrentVersion, signedKind, host.MachineId!, "", "",
+                _time.GetUtcNow(), "", request.SenderSessionId, _machineName, request.SpaceId, request.SessionId, null, FleetAgentRequestDocuments.HashText(request.Text), null,
                 FleetSandboxFloors.ToWire(request.Floor)));
-            var key = Guid.NewGuid().ToString("N");
+            async Task<RemoteMessageResult> QueueAsync()
+            {
+                await client.QueueAsync(new FleetQueueParams(request.SessionId, request.Text) { Agent = Signed(FleetAgentRequestKinds.Queue) }, Guid.NewGuid().ToString("N"),
+                    cancellationToken).ConfigureAwait(false);
+                return new("queued", null, null, name);
+            }
+
             switch (kind)
             {
                 case FleetAgentRequestKinds.Queue:
-                    await client.QueueAsync(new FleetQueueParams(request.SessionId, request.Text) { Agent = signed }, key, cancellationToken).ConfigureAwait(false);
-                    return new("queued", null, null, name);
+                    return await QueueAsync().ConfigureAwait(false);
                 case FleetAgentRequestKinds.Steer:
                     var steered = await client.SteerAsync(new FleetSteerParams(request.SessionId, request.Text, state!.RuntimeInstanceId, state.AttachmentGeneration!.Value,
-                        state.ActiveRunId!) { Agent = signed }, key, cancellationToken).ConfigureAwait(false);
+                        state.ActiveRunId!) { Agent = Signed(kind) }, Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
                     return Admission(steered, name, "steered");
                 default:
-                    var sent = await client.SendAsync(new FleetSendParams(request.SessionId, request.Text) { Agent = signed }, key, cancellationToken).ConfigureAwait(false);
+                    var sent = await client.SendAsync(new FleetSendParams(request.SessionId, request.Text) { Agent = Signed(kind) }, Guid.NewGuid().ToString("N"),
+                        cancellationToken).ConfigureAwait(false);
+                    // A turn that started after the state was read: the prompt waits for it, as the sender asked.
+                    if (sent.Status == "busy" && request.QueueIfBusy) return await QueueAsync().ConfigureAwait(false);
                     return Admission(sent, name, "accepted");
             }
         }
@@ -562,6 +573,8 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
 
     private static RemoteMessageResult Admission(FleetCommandResult result, string machine, string accepted)
         => result.Status is "accepted" or "replay" ? new(accepted, null, null, machine) { RunId = result.RunId }
+            // The machine runs as many sessions as its owner lets it: the prompt waits for a seat, and is sent then.
+            : result.Status == FleetSeatStatuses.Queued ? new("queued", null, null, machine)
             : new("refused", result.Status, $"The session did not take the prompt ({result.Status}).", machine);
 
     private static string Code(string code) => code switch

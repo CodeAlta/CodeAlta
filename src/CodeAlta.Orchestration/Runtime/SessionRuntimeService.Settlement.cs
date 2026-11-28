@@ -39,6 +39,11 @@ public sealed partial class SessionRuntimeService
     // Set by the owner.
     internal Func<string, Task?>? CancelOwnedSend { get; set; }
 
+    // Attaches a session that is not attached with what it runs with, as a send would, without sending anything, so that
+    // what waits in its queue runs. Set by the owner, unless its host ends with its command; without it, the queue of a
+    // session that is not attached waits for its next prompt.
+    internal Func<string, Task>? AttachForQueue { get; set; }
+
     // Tells what waits for sessions to settle that something changed: it looks at them again.
     internal void PulseSettlement() => _settlement.Pulse();
 

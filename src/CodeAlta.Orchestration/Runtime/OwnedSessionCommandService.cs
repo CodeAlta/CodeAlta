@@ -182,7 +182,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     internal OwnedSessionCommandService(
-        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, Func<bool> reviewPermissions, bool enableAsks = false, bool enableUserInput = false)
+        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, Func<bool> reviewPermissions, bool enableAsks = false, bool enableUserInput = false,
+        bool runsQueuesOfDetachedSessions = true)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(projects);
@@ -203,6 +204,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         runtime.RunEventObserver = Adaptive.Observe;
         runtime.OwnedWork = HasWork;
         runtime.CancelOwnedSend = CancelSend;
+        if (runsQueuesOfDetachedSessions) runtime.AttachForQueue = AttachAsync;
     }
 
     // Cancels the send of a session for an abort of its tree (SessionRuntimeService.AbortTreeAsync), as an abort of the

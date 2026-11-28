@@ -123,7 +123,7 @@ public static class FleetAgentRequestKinds
     /// <summary>Sends a prompt that starts a turn of a session.</summary>
     public const string Send = "send";
 
-    /// <summary>Queues a prompt for after the running turn of a session.</summary>
+    /// <summary>Queues a prompt of a session: it is sent once the session has no turn at work, at once for a session that is idle.</summary>
     public const string Queue = "queue";
 
     /// <summary>Gives a prompt to the running turn of a session.</summary>

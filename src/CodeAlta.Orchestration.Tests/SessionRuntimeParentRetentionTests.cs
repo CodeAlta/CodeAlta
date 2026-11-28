@@ -55,6 +55,8 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         }
         finally
         {
+            // The parent is attached for what it is told, and its turn ends at once.
+            f.Provider.ReleaseSend.TrySetResult();
             plugin.Release.TrySetResult();
             await f.Wait(original);
             observerProperty.SetValue(f.Runtime, prior);
